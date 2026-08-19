@@ -7,6 +7,7 @@ pub mod lsp;
 pub mod net;
 pub mod proc;
 pub mod pty;
+pub mod scrcpy;
 pub mod secrets;
 pub mod shell;
 pub mod vibrancy;

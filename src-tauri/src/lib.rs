@@ -1,7 +1,7 @@
 pub mod modules;
 
 use modules::{
-    agent, control, fs, git, history, lsp, net, pty, secrets, shell, vibrancy, workspace,
+    agent, control, fs, git, history, lsp, net, pty, scrcpy, secrets, shell, vibrancy, workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -227,6 +227,7 @@ pub fn run() {
             Ok(())
         })
         .manage(pty::PtyState::default())
+        .manage(scrcpy::ScrcpyState::default())
         .manage(control_state)
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
@@ -254,6 +255,11 @@ pub fn run() {
             pty::pty_has_foreground_job,
             pty::pty_shell_name,
             pty::pty_list_shells,
+            scrcpy::scrcpy_start,
+            scrcpy::scrcpy_list_displays,
+            scrcpy::scrcpy_touch,
+            scrcpy::scrcpy_key,
+            scrcpy::scrcpy_stop,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,
             fs::file::fs_read_file,

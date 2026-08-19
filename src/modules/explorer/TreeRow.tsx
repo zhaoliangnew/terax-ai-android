@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import { AndroidIcon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
 import { InlineInput } from "./InlineInput";
@@ -29,6 +29,11 @@ export type EntryRowProps = {
   onSelectPath: (path: string) => void;
   gitStatusCode?: GitStatusCode | null;
   gitignored?: boolean;
+  /** 安卓工程目录:显示机器人图标、不可展开、点击直接开/定位终端。 */
+  isProjectDir?: boolean;
+  onOpenProject?: (path: string) => void;
+  /** 当前打开的产品:用醒目底色高亮。 */
+  isActiveProject?: boolean;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -47,8 +52,12 @@ function EntryRowImpl(props: EntryRowProps) {
     onSelectPath,
     gitStatusCode,
     gitignored = false,
+    isProjectDir = false,
+    onOpenProject,
+    isActiveProject = false,
   } = props;
 
+  const asProject = isProjectDir && !!onOpenProject;
   const iconUrl = isDir ? folderIconUrl(name, isExpanded) : fileIconUrl(name);
   const paddingLeft = 6 + depth * 12;
 
@@ -76,7 +85,8 @@ function EntryRowImpl(props: EntryRowProps) {
   const handleClick = () => {
     if (renameInProgress) return;
     onSelectPath(path);
-    if (isDir) actions.toggle(path);
+    if (asProject) onOpenProject?.(path);
+    else if (isDir) actions.toggle(path);
     else onOpenFile(path);
   };
 
@@ -88,17 +98,19 @@ function EntryRowImpl(props: EntryRowProps) {
       onDoubleClick={() => !isDir && actions.beginRename(path)}
       className={cn(
         "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
-        isSelected
-          ? "bg-accent text-foreground"
-          : gitignored
-            ? "text-muted-foreground/70"
-            : "text-foreground/85",
+        isActiveProject
+          ? "bg-emerald-500/20 font-medium text-foreground ring-1 ring-inset ring-emerald-500/50"
+          : isSelected
+            ? "bg-accent text-foreground"
+            : gitignored
+              ? "text-muted-foreground/70"
+              : "text-foreground/85",
         isDropTarget && "bg-primary/10 ring-1 ring-inset ring-primary/60",
       )}
       style={{ paddingLeft }}
     >
       <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
-        {isDir ? (
+        {isDir && !asProject ? (
           <HugeiconsIcon
             icon={ArrowRight01Icon}
             size={12}
@@ -107,7 +119,14 @@ function EntryRowImpl(props: EntryRowProps) {
           />
         ) : null}
       </span>
-      {iconUrl ? (
+      {asProject ? (
+        <HugeiconsIcon
+          icon={AndroidIcon}
+          size={16}
+          strokeWidth={1.75}
+          className="size-4 shrink-0 text-emerald-500"
+        />
+      ) : iconUrl ? (
         <img src={iconUrl} alt="" className="size-4 shrink-0" />
       ) : (
         <span className="size-4 shrink-0" />

@@ -53,6 +53,7 @@ type Props = {
   onActivateLocalAgent: () => void;
   onOpenSettings: () => void;
   spaceSwitcher: ReactNode;
+  androidToolbar?: ReactNode;
   searchTarget: SearchTarget;
   searchRef: RefObject<SearchInlineHandle | null>;
 };
@@ -83,6 +84,7 @@ export function Header({
   onActivateLocalAgent,
   onOpenSettings,
   spaceSwitcher,
+  androidToolbar,
   searchTarget,
   searchRef,
 }: Props) {
@@ -184,6 +186,8 @@ export function Header({
         />
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
       </div>
+
+      {androidToolbar}
 
       <SearchInline ref={searchRef} target={searchTarget} compact={compact} />
 

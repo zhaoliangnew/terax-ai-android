@@ -1,0 +1,278 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  KEY_APP_SWITCH,
+  KEY_BACK,
+  KEY_HOME,
+  scrcpyKey,
+  scrcpyStart,
+  scrcpyStop,
+  scrcpyTouch,
+  TOUCH_DOWN,
+  TOUCH_MOVE,
+  TOUCH_UP,
+  type VideoEvent,
+} from "./lib/scrcpy";
+
+type Props = { serial: string; displayId?: number; label?: string };
+
+type Status = "connecting" | "streaming" | "error" | "ended";
+
+/**
+ * Feeds Annex-B H.264 from the scrcpy session into a WebCodecs VideoDecoder and
+ * paints frames to a canvas. Draws on the decoder output callback and closes
+ * each VideoFrame immediately to avoid decode-queue backpressure.
+ */
+export function ScreenMirror({ serial, displayId = 0, label }: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [status, setStatus] = useState<Status>("connecting");
+  const [error, setError] = useState<string | null>(null);
+  const sessionIdRef = useRef<number | null>(null);
+  const sizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+  const decoderRef = useRef<VideoDecoder | null>(null);
+  const configuredRef = useRef(false);
+  const configBytesRef = useRef<Uint8Array | null>(null);
+
+  const draw = useCallback((frame: VideoFrame) => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      frame.close();
+      return;
+    }
+    const w = frame.displayWidth;
+    const h = frame.displayHeight;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    const ctx = canvas.getContext("2d");
+    if (ctx) ctx.drawImage(frame, 0, 0);
+    frame.close();
+  }, []);
+
+  const ensureDecoder = useCallback(() => {
+    if (decoderRef.current) return decoderRef.current;
+    if (typeof VideoDecoder === "undefined") {
+      setStatus("error");
+      setError("此 WebView 不支持 WebCodecs 视频解码");
+      return null;
+    }
+    const decoder = new VideoDecoder({
+      output: (frame) => draw(frame),
+      error: (e) => {
+        setStatus("error");
+        setError(`解码错误: ${e.message}`);
+      },
+    });
+    decoderRef.current = decoder;
+    return decoder;
+  }, [draw]);
+
+  const onEvent = useCallback(
+    (e: VideoEvent) => {
+      if (e.kind === "size") {
+        sizeRef.current = { w: e.width, h: e.height };
+        // Reconfigure decoder for the new resolution on the next config packet.
+        configuredRef.current = false;
+        return;
+      }
+      if (e.kind === "error") {
+        setStatus("error");
+        setError(e.message);
+        return;
+      }
+      if (e.kind === "ended") {
+        setStatus("ended");
+        return;
+      }
+      // meta + payload
+      const decoder = ensureDecoder();
+      if (!decoder) return;
+
+      if (e.config) {
+        // SPS/PPS — configure decoder, remember bytes to prepend to next frame.
+        configBytesRef.current = e.payload;
+        const { w, h } = sizeRef.current;
+        try {
+          decoder.configure({
+            codec: "avc1.42e01f", // baseline; description-less Annex-B
+            codedWidth: w || undefined,
+            codedHeight: h || undefined,
+            optimizeForLatency: true,
+          });
+          configuredRef.current = true;
+          setStatus("streaming");
+        } catch (err) {
+          setStatus("error");
+          setError(`配置解码器失败: ${String(err)}`);
+        }
+        return;
+      }
+
+      if (!configuredRef.current) return; // wait for first config
+      // Prepend stored config to the first frame after (re)configure — an
+      // Annex-B decoder accepts config+frame concatenated.
+      let data = e.payload;
+      if (configBytesRef.current) {
+        const merged = new Uint8Array(
+          configBytesRef.current.length + e.payload.length,
+        );
+        merged.set(configBytesRef.current, 0);
+        merged.set(e.payload, configBytesRef.current.length);
+        data = merged;
+        configBytesRef.current = null;
+      }
+      // Drop non-key frames while the queue is backing up to stay real-time.
+      if (decoder.decodeQueueSize > 4 && !e.keyFrame) return;
+      try {
+        decoder.decode(
+          new EncodedVideoChunk({
+            type: e.keyFrame ? "key" : "delta",
+            timestamp: e.pts,
+            data,
+          }),
+        );
+      } catch {
+        // decoder in a bad state; will surface via error callback
+      }
+    },
+    [ensureDecoder],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setStatus("connecting");
+    setError(null);
+    configuredRef.current = false;
+    configBytesRef.current = null;
+    scrcpyStart(serial, 1600, displayId, onEvent)
+      .then((id) => {
+        if (cancelled) {
+          void scrcpyStop(id);
+          return;
+        }
+        sessionIdRef.current = id;
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setStatus("error");
+          setError(String(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+      const id = sessionIdRef.current;
+      sessionIdRef.current = null;
+      if (id != null) void scrcpyStop(id);
+      if (decoderRef.current) {
+        try {
+          decoderRef.current.close();
+        } catch {
+          // already closed
+        }
+        decoderRef.current = null;
+      }
+    };
+  }, [serial, displayId, onEvent]);
+
+  // Map a canvas pointer event to video-frame coordinates.
+  const toFrameXY = useCallback((e: React.PointerEvent) => {
+    const canvas = canvasRef.current;
+    const { w, h } = sizeRef.current;
+    if (!canvas || w === 0 || h === 0) return null;
+    const rect = canvas.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * w;
+    const y = ((e.clientY - rect.top) / rect.height) * h;
+    return {
+      x: Math.max(0, Math.min(w - 1, x)),
+      y: Math.max(0, Math.min(h - 1, y)),
+    };
+  }, []);
+
+  const downRef = useRef(false);
+  const onPointerDown = (e: React.PointerEvent) => {
+    const id = sessionIdRef.current;
+    const p = toFrameXY(e);
+    if (id == null || !p) return;
+    downRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    void scrcpyTouch(id, TOUCH_DOWN, p.x, p.y, 1.0);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (!downRef.current) return;
+    const id = sessionIdRef.current;
+    const p = toFrameXY(e);
+    if (id == null || !p) return;
+    void scrcpyTouch(id, TOUCH_MOVE, p.x, p.y, 1.0);
+  };
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!downRef.current) return;
+    downRef.current = false;
+    const id = sessionIdRef.current;
+    const p = toFrameXY(e);
+    if (id == null || !p) return;
+    void scrcpyTouch(id, TOUCH_UP, p.x, p.y, 0.0);
+  };
+
+  const navKey = (keycode: number) => {
+    const id = sessionIdRef.current;
+    if (id != null) void scrcpyKey(id, keycode);
+  };
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {label && (
+        <div className="shrink-0 border-b border-border px-2 py-0.5 text-center text-[10px] text-muted-foreground">
+          {label}
+        </div>
+      )}
+      <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
+        <canvas
+          ref={canvasRef}
+          className="max-h-full max-w-full touch-none object-contain"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        />
+        {status !== "streaming" && (
+          <div className="absolute inset-0 flex items-center justify-center text-[12px] text-muted-foreground">
+            {status === "connecting" && "连接投屏中…"}
+            {status === "error" && (
+              <span className="max-w-[80%] text-center text-red-400">
+                {error ?? "投屏失败"}
+              </span>
+            )}
+            {status === "ended" && "投屏已结束"}
+          </div>
+        )}
+      </div>
+      {/* nav bar */}
+      <div className="flex shrink-0 items-center justify-center gap-6 border-t border-border py-1.5">
+        <button
+          type="button"
+          onClick={() => navKey(KEY_BACK)}
+          className="text-muted-foreground hover:text-foreground"
+          title="返回"
+        >
+          ◁
+        </button>
+        <button
+          type="button"
+          onClick={() => navKey(KEY_HOME)}
+          className="text-muted-foreground hover:text-foreground"
+          title="主屏"
+        >
+          ○
+        </button>
+        <button
+          type="button"
+          onClick={() => navKey(KEY_APP_SWITCH)}
+          className="text-muted-foreground hover:text-foreground"
+          title="最近任务"
+        >
+          ▢
+        </button>
+      </div>
+    </div>
+  );
+}

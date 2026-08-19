@@ -6,6 +6,11 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { cn } from "@/lib/utils";
+import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import { usePreferencesStore } from "@/modules/settings/preferences";
+import { useGlobalShortcuts } from "@/modules/shortcuts";
+import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
   FileAddIcon,
   Folder01Icon,
@@ -25,26 +30,21 @@ import {
   useRef,
   useState,
 } from "react";
-import { cn } from "@/lib/utils";
 import { ExplorerSearch, type ExplorerSearchHandle } from "./ExplorerSearch";
-import { EntryRow, PendingRow, StatusRow, type RowActions } from "./TreeRow";
 import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
   relativePath,
   revealInFinder,
 } from "./lib/contextActions";
+import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { useFileTree } from "./lib/useFileTree";
 import { useGitStatus } from "./lib/useGitStatus";
-import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { useGlobalShortcuts } from "@/modules/shortcuts";
-import { usePreferencesStore } from "@/modules/settings/preferences";
-import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
-import type { TerminalPathDropTarget } from "@/modules/terminal";
+import { EntryRow, PendingRow, type RowActions, StatusRow } from "./TreeRow";
 
 export type FileExplorerHandle = {
   focus: () => void;
@@ -59,6 +59,14 @@ type Props = {
   onPathRenamed?: (from: string, to: string) => void;
   onPathDeleted?: (path: string) => void;
   onRevealInTerminal?: (path: string) => void;
+  /** Force-open a brand-new terminal (no dedup), even if one already exists. */
+  onOpenNewTerminal?: (path: string) => void;
+  /** Async check: is this dir a gradle project root? Enables the 安卓工程 treatment. */
+  classifyProjectDir?: (path: string) => Promise<boolean>;
+  /** Click handler for a detected 安卓工程 dir (opens/locates its terminal). */
+  onOpenProject?: (path: string) => void;
+  /** 当前打开的产品路径,在树中用醒目底色高亮。 */
+  activeProjectPath?: string | null;
   onOpenInSourceControl?: (path: string) => void;
   onOpenGitHistory?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
@@ -89,7 +97,13 @@ type Row =
       gitStatusCode: GitStatusCode | null;
     }
   | { kind: "pending"; key: string; depth: number; pendingKind: "file" | "dir" }
-  | { kind: "status"; key: string; depth: number; tone: "muted" | "error"; message: string };
+  | {
+      kind: "status";
+      key: string;
+      depth: number;
+      tone: "muted" | "error";
+      message: string;
+    };
 
 const ROW_HEIGHT = 24;
 const OVERSCAN = 8;
@@ -193,6 +207,10 @@ export const FileExplorer = memo(
       onPathRenamed,
       onPathDeleted,
       onRevealInTerminal,
+      onOpenNewTerminal,
+      classifyProjectDir,
+      onOpenProject,
+      activeProjectPath,
       onOpenInSourceControl,
       onOpenGitHistory,
       onAttachToAgent,
@@ -216,7 +234,11 @@ export const FileExplorer = memo(
     const scrollRef = useRef<HTMLDivElement>(null);
 
     const { rows, entryIndexByPath } = useMemo(() => {
-      if (!rootPath) return { rows: [] as Row[], entryIndexByPath: new Map<string, number>() };
+      if (!rootPath)
+        return {
+          rows: [] as Row[],
+          entryIndexByPath: new Map<string, number>(),
+        };
       return buildRows(rootPath, tree, lookupGitStatus);
       // `tree` is intentionally omitted: its identity changes every render, but
       // the listed fields are the only inputs buildRows actually reads.
@@ -229,6 +251,43 @@ export const FileExplorer = memo(
       tree.pendingCreate,
       lookupGitStatus,
     ]);
+
+    // Classify visible directories as gradle projects (async, cached). Project
+    // dirs get the 安卓工程 treatment: robot icon, no expand, click opens terminal.
+    const projectCacheRef = useRef<Map<string, boolean>>(new Map());
+    const [projectDirs, setProjectDirs] = useState<Set<string>>(new Set());
+    useEffect(() => {
+      if (!classifyProjectDir) return;
+      const dirPaths = rows.flatMap((r) =>
+        r.kind === "entry" && r.isDir ? [r.path] : [],
+      );
+      let cancelled = false;
+      void (async () => {
+        let changed = false;
+        for (const p of dirPaths) {
+          if (projectCacheRef.current.has(p)) continue;
+          const ok = await classifyProjectDir(p);
+          projectCacheRef.current.set(p, ok);
+          if (ok) {
+            changed = true;
+            // 工程目录不该展开:若在归类前已被展开,自动收起。
+            if (tree.expanded.has(p)) tree.toggle(p);
+          }
+        }
+        if (!cancelled && changed) {
+          setProjectDirs(
+            new Set(
+              [...projectCacheRef.current.entries()]
+                .filter(([, v]) => v)
+                .map(([k]) => k),
+            ),
+          );
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [rows, classifyProjectDir, tree.expanded, tree.toggle]);
 
     const rowActions = useMemo<RowActions>(
       () => ({
@@ -281,7 +340,8 @@ export const FileExplorer = memo(
     });
 
     const dropTargetDir = dnd.dropTargetDir ?? fileDrop.externalTargetDir;
-    const rootIsDropTarget = dropTargetDir != null && dropTargetDir === rootPath;
+    const rootIsDropTarget =
+      dropTargetDir != null && dropTargetDir === rootPath;
     useEffect(() => {
       if (!dropTargetDir || dropTargetDir === rootPath) return;
       if (tree.expanded.has(dropTargetDir)) return;
@@ -314,7 +374,10 @@ export const FileExplorer = memo(
 
     const lastSyncedActivePathRef = useRef<string | null>(null);
     useEffect(() => {
-      if (!activeFilePath || activeFilePath === lastSyncedActivePathRef.current) {
+      if (
+        !activeFilePath ||
+        activeFilePath === lastSyncedActivePathRef.current
+      ) {
         return;
       }
       if (!entryIndexByPath.has(activeFilePath)) return;
@@ -472,6 +535,11 @@ export const FileExplorer = memo(
               onSelectPath={setSelectedPath}
               gitStatusCode={row.gitStatusCode}
               gitignored={gitDecorations && row.gitignored}
+              isProjectDir={row.isDir && projectDirs.has(row.path)}
+              onOpenProject={onOpenProject}
+              isActiveProject={
+                !!activeProjectPath && row.path === activeProjectPath
+              }
             />
           );
         }
@@ -486,7 +554,11 @@ export const FileExplorer = memo(
           );
         case "status":
           return (
-            <StatusRow depth={row.depth} message={row.message} tone={row.tone} />
+            <StatusRow
+              depth={row.depth}
+              message={row.message}
+              tone={row.tone}
+            />
           );
       }
     };
@@ -692,6 +764,14 @@ export const FileExplorer = memo(
                       Open in Terminal
                     </ContextMenuItem>
                   )}
+                  {menuTarget.isDir && onOpenNewTerminal && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => onOpenNewTerminal(menuTarget.path)}
+                    >
+                      Open New Terminal
+                    </ContextMenuItem>
+                  )}
                   {menuTarget.isDir && onOpenInSourceControl && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
@@ -751,7 +831,9 @@ export const FileExplorer = memo(
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() =>
-                      void copyToClipboard(relativePath(rootPath, menuTarget.path))
+                      void copyToClipboard(
+                        relativePath(rootPath, menuTarget.path),
+                      )
                     }
                   >
                     Copy Relative Path
