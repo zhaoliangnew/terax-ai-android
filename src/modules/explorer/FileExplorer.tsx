@@ -69,6 +69,8 @@ type Props = {
   activeProjectPath?: string | null;
   /** 已有终端 tab 打开的工程路径集合,在树中用绿色字体标出。 */
   openedProjectPaths?: Set<string>;
+  /** 工程根 -> 该工程下所有终端 tab 的 pty id,驱动 Claude Code 状态灯。 */
+  projectPtyIds?: Record<string, number[]>;
   onOpenInSourceControl?: (path: string) => void;
   onOpenGitHistory?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
@@ -214,6 +216,7 @@ export const FileExplorer = memo(
       onOpenProject,
       activeProjectPath,
       openedProjectPaths,
+      projectPtyIds,
       onOpenInSourceControl,
       onOpenGitHistory,
       onAttachToAgent,
@@ -544,6 +547,7 @@ export const FileExplorer = memo(
                 !!activeProjectPath && row.path === activeProjectPath
               }
               isOpenedProject={!!openedProjectPaths?.has(row.path)}
+              projectPtyIds={projectPtyIds}
             />
           );
         }

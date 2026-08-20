@@ -1,4 +1,8 @@
 import { cn } from "@/lib/utils";
+import {
+  type AgentPhaseState,
+  useProjectAgentState,
+} from "@/modules/agent-status/AgentStatusDot";
 import { AndroidIcon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
@@ -6,6 +10,17 @@ import { InlineInput } from "./InlineInput";
 import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
+
+const AGENT_STATE_EMOJI: Record<AgentPhaseState, string> = {
+  working: "🟡",
+  attention: "🔴",
+  finished: "🟢",
+};
+const AGENT_STATE_LABEL: Record<AgentPhaseState, string> = {
+  working: "Claude Code 运行中",
+  attention: "Claude Code 需要确认",
+  finished: "Claude Code 已完成",
+};
 
 export type RowActions = {
   toggle: (path: string) => void;
@@ -36,6 +51,8 @@ export type EntryRowProps = {
   isActiveProject?: boolean;
   /** 已有终端 tab 打开的工程:用绿字标出。 */
   isOpenedProject?: boolean;
+  /** 工程根 -> 该工程下所有终端 tab 的 pty id,驱动 Claude Code 状态灯。 */
+  projectPtyIds?: Record<string, number[]>;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -58,11 +75,16 @@ function EntryRowImpl(props: EntryRowProps) {
     onOpenProject,
     isActiveProject = false,
     isOpenedProject = false,
+    projectPtyIds,
   } = props;
 
   const asProject = isProjectDir && !!onOpenProject;
   const iconUrl = isDir ? folderIconUrl(name, isExpanded) : fileIconUrl(name);
   const paddingLeft = 6 + depth * 12;
+  const agentState = useProjectAgentState(
+    asProject ? path : null,
+    projectPtyIds ?? {},
+  );
 
   if (isRenaming) {
     return (
@@ -123,12 +145,24 @@ function EntryRowImpl(props: EntryRowProps) {
         ) : null}
       </span>
       {asProject ? (
-        <HugeiconsIcon
-          icon={AndroidIcon}
-          size={16}
-          strokeWidth={1.75}
-          className="size-4 shrink-0 text-emerald-500"
-        />
+        agentState ? (
+          <span
+            title={AGENT_STATE_LABEL[agentState]}
+            className={cn(
+              "inline-block size-4 shrink-0 text-center text-[13px] leading-4",
+              agentState === "attention" && "animate-pulse",
+            )}
+          >
+            {AGENT_STATE_EMOJI[agentState]}
+          </span>
+        ) : (
+          <HugeiconsIcon
+            icon={AndroidIcon}
+            size={16}
+            strokeWidth={1.75}
+            className="size-4 shrink-0 text-emerald-500"
+          />
+        )
       ) : iconUrl ? (
         <img src={iconUrl} alt="" className="size-4 shrink-0" />
       ) : (

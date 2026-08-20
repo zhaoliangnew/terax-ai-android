@@ -358,7 +358,7 @@ export default function LogcatDock() {
               {l.tag && (
                 <span
                   className={cn(
-                    "w-40 shrink-0 truncate",
+                    "w-24 shrink-0 truncate",
                     l.level === "E" ? "text-red-500" : "text-foreground/80",
                   )}
                 >

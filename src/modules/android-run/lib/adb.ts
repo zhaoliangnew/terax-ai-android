@@ -91,6 +91,20 @@ async function getprop(serial: string, prop: string): Promise<string> {
   }
 }
 
+/** `adb connect <host[:port]>` — port defaults to 5555 (adb's TCP/IP default). */
+export async function connectDevice(hostPort: string): Promise<void> {
+  const target = hostPort.includes(":") ? hostPort : `${hostPort}:5555`;
+  const out = await adb(`connect ${target}`);
+  if (/unable to connect|failed to connect|cannot connect/i.test(out)) {
+    throw new Error(out.trim());
+  }
+}
+
+/** `adb disconnect <serial>` — only meaningful for TCP/IP devices (serial has a port). */
+export async function disconnectDevice(serial: string): Promise<void> {
+  await adb(`disconnect ${serial}`);
+}
+
 export async function listDevices(): Promise<AdbDevice[]> {
   const out = await adb("devices");
   const rows = out

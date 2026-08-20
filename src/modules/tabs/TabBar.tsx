@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { AgentIcon } from "@/modules/agents/lib/agentIcon";
 import type { AgentLaunchRequest } from "@/modules/agents/lib/launcher";
 import {
   ALL_LANGUAGES,
@@ -32,13 +31,11 @@ import {
   ArrowRight01Icon,
   Cancel01Icon,
   CancelCircleIcon,
-  CheckmarkCircle01Icon,
   Clock01Icon,
   ComputerTerminal02Icon,
   GitCompareIcon,
   Globe02Icon,
   IncognitoIcon,
-  Message02Icon,
   PencilEdit02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -694,29 +691,22 @@ export function TabIcon({ tab }: { tab: Tab }) {
       />
     );
   }
-  if (agentStatus.state === "attention") {
+  if (agentStatus.state) {
+    const emoji =
+      agentStatus.state === "finished"
+        ? "🟢"
+        : agentStatus.state === "attention"
+          ? "🔴"
+          : "🟡";
     return (
-      <HugeiconsIcon
-        icon={Message02Icon}
-        size={14}
-        strokeWidth={2}
-        className="shrink-0"
-      />
-    );
-  }
-  if (agentStatus.state === "finished") {
-    return (
-      <HugeiconsIcon
-        icon={CheckmarkCircle01Icon}
-        size={14}
-        strokeWidth={2}
-        className="shrink-0"
-      />
-    );
-  }
-  if (agentStatus.state === "working" && agentStatus.agent) {
-    return (
-      <AgentIcon agent={agentStatus.agent} size={14} className="shrink-0" />
+      <span
+        className={cn(
+          "inline-block shrink-0 text-[13px] leading-none",
+          agentStatus.state === "attention" && "animate-pulse",
+        )}
+      >
+        {emoji}
+      </span>
     );
   }
   return (

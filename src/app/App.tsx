@@ -34,6 +34,7 @@ import {
   isAndroidProjectDir,
   useAndroidRunStore,
 } from "@/modules/android-run";
+import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
 import {
@@ -665,31 +666,42 @@ export default function App() {
 
   // 左侧项目树里,已有终端 tab 打开的安卓工程目录用绿字标出来,方便一眼看出
   // 哪些是打开过的。按当前所有终端 tab 的 cwd 反查工程根,tab 关了就退出集合。
+  // 同时按工程根汇总各 tab 的 pty id,驱动项目树/面包屑上的 Claude Code 状态灯
+  // (working/attention/finished,复用 agentActivity 现成的 OSC 777 检测信号)。
   const projectRootCacheRef = useRef<Map<string, string | null>>(new Map());
   const [openedProjectPaths, setOpenedProjectPaths] = useState<Set<string>>(
     () => new Set(),
   );
+  const [projectPtyIds, setProjectPtyIds] = useState<Record<string, number[]>>(
+    {},
+  );
   useEffect(() => {
-    const cwds = Array.from(
-      new Set(
-        tabs
-          .filter((t) => t.kind === "terminal")
-          .map((t) => findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd ?? null)
-          .filter((c): c is string => !!c),
-      ),
-    );
+    const terminalTabs = tabs.filter((t) => t.kind === "terminal");
     let cancelled = false;
     void (async () => {
       const roots = new Set<string>();
-      for (const cwd of cwds) {
+      const ptyIdsByRoot: Record<string, number[]> = {};
+      for (const t of terminalTabs) {
+        const cwd = findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd ?? null;
+        if (!cwd) continue;
         let root = projectRootCacheRef.current.get(cwd);
         if (root === undefined) {
           root = await findProjectRoot(cwd);
           projectRootCacheRef.current.set(cwd, root);
         }
-        if (root) roots.add(root);
+        if (!root) continue;
+        roots.add(root);
+        const ptyIds: number[] = [];
+        for (const leaf of leafIds(t.paneTree)) {
+          const id = ptyIdForLeaf(leaf);
+          if (id !== null) ptyIds.push(id);
+        }
+        (ptyIdsByRoot[root] ??= []).push(...ptyIds);
       }
-      if (!cancelled) setOpenedProjectPaths(roots);
+      if (!cancelled) {
+        setOpenedProjectPaths(roots);
+        setProjectPtyIds(ptyIdsByRoot);
+      }
     })();
     return () => {
       cancelled = true;
@@ -1523,6 +1535,7 @@ export default function App() {
                                 onOpenProject={cdInNewTab}
                                 activeProjectPath={androidProjectRoot}
                                 openedProjectPaths={openedProjectPaths}
+                                projectPtyIds={projectPtyIds}
                                 onOpenInSourceControl={
                                   handleOpenRepositoryInSourceControl
                                 }
@@ -1598,6 +1611,10 @@ export default function App() {
                         <span className="font-semibold text-emerald-500">
                           {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                         </span>
+                        <AgentStatusDot
+                          projectRoot={androidProjectRoot}
+                          projectPtyIds={projectPtyIds}
+                        />
                       </div>
                     )}
                     <div className="relative min-h-0 flex-1">
@@ -1645,6 +1662,10 @@ export default function App() {
                         <span className="font-medium text-emerald-500">
                           {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                         </span>
+                        <AgentStatusDot
+                          projectRoot={androidProjectRoot}
+                          projectPtyIds={projectPtyIds}
+                        />
                       </div>
                     )}
                   </div>
