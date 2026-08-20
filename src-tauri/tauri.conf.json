@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Terax",
-  "version": "0.8.6",
-  "identifier": "app.crynta.terax",
+  "productName": "Android Dev",
+  "version": "0.0.1",
+  "identifier": "com.leniu.androiddev",
   "build": {
     "beforeDevCommand": "pnpm build:cli:dev && pnpm dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +14,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Terax",
+        "title": "Android Dev",
         "width": 800,
         "height": 600,
         "minWidth": 420,
@@ -42,7 +42,7 @@
       "binaries/terax-cli"
     ],
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "copyright": "Copyright 2026 Crynta",
     "license": "Apache-2.0",
     "publisher": "Crynta",
