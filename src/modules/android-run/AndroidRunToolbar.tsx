@@ -17,7 +17,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
-import { installCommand } from "./lib/adb";
+import { adbCmd, installCommand } from "./lib/adb";
 import { useLogcatStore } from "./logcatStore";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
 
@@ -38,6 +38,8 @@ export function AndroidRunToolbar({ compact }: Props) {
   const refreshDevices = useAndroidRunStore((s) => s.refreshDevices);
   const selectDevice = useAndroidRunStore((s) => s.selectDevice);
   const selectModule = useAndroidRunStore((s) => s.selectModule);
+  const adbPath = useAndroidRunStore((s) => s.adbPath);
+  const setAdbPath = useAndroidRunStore((s) => s.setAdbPath);
   const {
     root: projectRoot,
     serial: selectedSerial,
@@ -72,7 +74,7 @@ export function AndroidRunToolbar({ compact }: Props) {
       (x) => x.product === projectRoot && x.label.startsWith(RUN_LABEL_PREFIX),
     );
     if (prev) store.closeSession(prev.id);
-    const launch = `adb -s ${selectedSerial} shell monkey -p ${metadataPkgExpr(selectedModule)} -c android.intent.category.LAUNCHER 1`;
+    const launch = `${adbCmd()} -s ${selectedSerial} shell monkey -p ${metadataPkgExpr(selectedModule)} -c android.intent.category.LAUNCHER 1`;
     void store.startCommandSession(
       projectRoot,
       `${RUN_LABEL_PREFIX}${selectedModule}`,
@@ -171,6 +173,25 @@ export function AndroidRunToolbar({ compact }: Props) {
             <HugeiconsIcon icon={Refresh01Icon} size={13} strokeWidth={1.75} />
             刷新设备
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <div className="px-2 py-1.5">
+            <div className="mb-1 text-[10px] text-muted-foreground">
+              adb 路径(留空=自动查找)
+            </div>
+            <input
+              defaultValue={adbPath}
+              placeholder="/Users/…/platform-tools/adb"
+              spellCheck={false}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  setAdbPath((e.target as HTMLInputElement).value);
+                }
+              }}
+              onBlur={(e) => setAdbPath(e.target.value)}
+              className="h-6 w-full rounded border border-input bg-transparent px-1.5 font-mono text-[10px] outline-none focus:border-ring"
+            />
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
 

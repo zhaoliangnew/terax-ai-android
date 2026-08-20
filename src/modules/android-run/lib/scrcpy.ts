@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { adbBin, ensureAdbResolved } from "./adb";
 
 export type VideoEvent =
   | { kind: "size"; width: number; height: number }
@@ -54,8 +55,10 @@ export async function scrcpyStart(
     const ev = parseVideoMessage(bytes);
     if (ev) onEvent(ev);
   };
+  await ensureAdbResolved();
   return invoke<number>("scrcpy_start", {
     serial,
+    adbPath: adbBin(),
     maxSize,
     displayId,
     onVideo: channel,
@@ -63,8 +66,12 @@ export async function scrcpyStart(
 }
 
 /** Display ids on the device (0 = main; dual-screen adds e.g. 1 = 客显). */
-export function scrcpyListDisplays(serial: string): Promise<number[]> {
-  return invoke<number[]>("scrcpy_list_displays", { serial });
+export async function scrcpyListDisplays(serial: string): Promise<number[]> {
+  await ensureAdbResolved();
+  return invoke<number[]>("scrcpy_list_displays", {
+    serial,
+    adbPath: adbBin(),
+  });
 }
 
 // AMOTION_EVENT_ACTION_*

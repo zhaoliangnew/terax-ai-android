@@ -1,6 +1,6 @@
 import { native } from "@/modules/ai/lib/native";
 import { create } from "zustand";
-import { pidOf } from "./lib/adb";
+import { adbCmd, ensureAdbResolved, pidOf } from "./lib/adb";
 
 export type LogcatSession = {
   id: number;
@@ -78,7 +78,8 @@ export const useLogcatStore = create<LogcatState>((set, get) => ({
       activeSessionId: id,
     }));
     try {
-      let cmd = `adb -s ${serial} logcat -v threadtime`;
+      await ensureAdbResolved();
+      let cmd = `${adbCmd()} -s ${serial} logcat -v threadtime`;
       let attachedPid: string | null = null;
       if (pkg) {
         attachedPid = await pidOf(serial, pkg);
@@ -251,7 +252,7 @@ async function ensureAttached(
       await native.shellBgKill(session.handle).catch(() => {});
     }
     const handle = await native.shellBgSpawn(
-      `adb -s ${session.serial} logcat -v threadtime --pid=${pid}`,
+      `${adbCmd()} -s ${session.serial} logcat -v threadtime --pid=${pid}`,
       null,
     );
     set((s) => ({

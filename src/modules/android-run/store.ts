@@ -5,7 +5,16 @@ import {
   discoverModules,
   findProjectRoot,
   listDevices,
+  setAdbOverride,
 } from "./lib/adb";
+
+const ADB_PATH_KEY = "terax.android.adbPath";
+// Apply any saved override before the first adb call.
+const savedAdbPath =
+  typeof localStorage !== "undefined"
+    ? localStorage.getItem(ADB_PATH_KEY)
+    : null;
+setAdbOverride(savedAdbPath);
 
 /** Per-product device-panel config (device target, module, mirror state). */
 type ProductConfig = {
@@ -31,7 +40,10 @@ type AndroidRunState = {
   projectRoot: string | null;
   /** Per-product panel config, keyed by project root. */
   byProduct: Record<string, ProductConfig>;
+  /** 用户手动配置的 adb 绝对路径(空=自动解析)。 */
+  adbPath: string;
 
+  setAdbPath: (path: string) => void;
   refreshDevices: () => Promise<void>;
   /** Called when the active terminal cwd changes. */
   setProjectRoot: (cwd: string | null) => Promise<void>;
@@ -45,6 +57,16 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
   devicesLoading: false,
   projectRoot: null,
   byProduct: {},
+  adbPath: savedAdbPath ?? "",
+
+  setAdbPath: (path) => {
+    const v = path.trim();
+    if (v) localStorage.setItem(ADB_PATH_KEY, v);
+    else localStorage.removeItem(ADB_PATH_KEY);
+    setAdbOverride(v || null);
+    set({ adbPath: v });
+    void get().refreshDevices();
+  },
 
   refreshDevices: async () => {
     if (get().devicesLoading) return;

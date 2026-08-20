@@ -34,6 +34,7 @@ impl Default for ScrcpyState {
 
 struct Session {
     serial: String,
+    adb_path: String,
     display_id: u32,
     local_port: u16,
     shell: Arc<Mutex<Child>>,
@@ -62,8 +63,8 @@ enum VideoEvent {
     Ended,
 }
 
-fn adb(serial: &str) -> Command {
-    let mut c = Command::new("adb");
+fn adb(bin: &str, serial: &str) -> Command {
+    let mut c = Command::new(bin);
     c.arg("-s").arg(serial);
     c
 }
@@ -77,6 +78,7 @@ pub async fn scrcpy_start(
     app: tauri::AppHandle,
     state: tauri::State<'_, ScrcpyState>,
     serial: String,
+    adb_path: String,
     max_size: Option<u16>,
     display_id: Option<u32>,
     on_video: Channel<Response>,
@@ -110,7 +112,7 @@ pub async fn scrcpy_start(
         .map_err(|e| format!("resolve server jar: {e}"))?;
 
     // Push server.
-    let push = adb(&serial)
+    let push = adb(&adb_path, &serial)
         .arg("push")
         .arg(&server_path)
         .arg(DEVICE_SERVER_PATH)
@@ -135,7 +137,7 @@ pub async fn scrcpy_start(
 
     // Pick a free local port and set up the forward.
     let local_port = pick_local_port().ok_or("no free local port")?;
-    let fwd = adb(&serial)
+    let fwd = adb(&adb_path, &serial)
         .arg("forward")
         .arg(format!("tcp:{local_port}"))
         .arg(format!("localabstract:{socket_name}"))
@@ -167,7 +169,7 @@ pub async fn scrcpy_start(
     if display != 0 {
         server_args.push(format!("display_id={display}"));
     }
-    let shell = adb(&serial)
+    let shell = adb(&adb_path, &serial)
         .arg("shell")
         .args(&server_args)
         .stdout(std::process::Stdio::piped())
@@ -179,7 +181,7 @@ pub async fn scrcpy_start(
     // The forward-tunnel dummy byte is sent only on the FIRST (video) socket,
     // so peek-confirm the server on video, then plain-connect control.
     let video = connect_retry(local_port).map_err(|e| {
-        let _ = adb(&serial)
+        let _ = adb(&adb_path, &serial)
             .args(["forward", "--remove", &format!("tcp:{local_port}")])
             .output();
         format!("connect video socket: {e}")
@@ -189,7 +191,7 @@ pub async fn scrcpy_start(
     control.set_nodelay(true).ok();
 
     // Tunnel no longer needed once both sockets are up.
-    let _ = adb(&serial)
+    let _ = adb(&adb_path, &serial)
         .args(["forward", "--remove", &format!("tcp:{local_port}")])
         .output();
 
@@ -199,6 +201,7 @@ pub async fn scrcpy_start(
 
     let session = Session {
         serial: serial.clone(),
+        adb_path: adb_path.clone(),
         display_id: display,
         local_port,
         shell: Arc::new(Mutex::new(shell)),
@@ -434,8 +437,8 @@ pub fn scrcpy_key(state: tauri::State<'_, ScrcpyState>, id: u32, keycode: i32) -
 /// Enumerate the device's display ids (0 = main). Dual-screen devices report
 /// an extra id (e.g. 1 = 客显副屏).
 #[tauri::command]
-pub fn scrcpy_list_displays(serial: String) -> Result<Vec<u32>, String> {
-    let out = adb(&serial)
+pub fn scrcpy_list_displays(serial: String, adb_path: String) -> Result<Vec<u32>, String> {
+    let out = adb(&adb_path, &serial)
         .args(["shell", "dumpsys", "display"])
         .output()
         .map_err(|e| format!("dumpsys display: {e}"))?;
@@ -468,7 +471,7 @@ fn teardown(session: &Session) {
         let _ = child.kill();
         let _ = child.wait();
     }
-    let _ = adb(&session.serial)
+    let _ = adb(&session.adb_path, &session.serial)
         .args([
             "forward",
             "--remove",

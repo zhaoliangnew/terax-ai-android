@@ -12,10 +12,65 @@ export type AdbDevice = {
 
 const ADB_TIMEOUT_SECS = 15;
 
+// Finder/Dock-launched apps get a minimal PATH (no ~/.zshrc additions), so a
+// bare `adb` isn't found. Resolve its absolute path once from common install
+// locations and use that everywhere.
+let adbBinCache = "adb";
+let adbResolved = false;
+let adbOverride: string | null = null;
+
+export function adbBin(): string {
+  return adbBinCache;
+}
+
+/** User-configured adb path (highest priority). Empty/undefined clears it. */
+export function setAdbOverride(path: string | null | undefined): void {
+  adbOverride = path?.trim() || null;
+  adbResolved = false; // re-resolve on next use
+}
+
+/** Shell-quote a path for use inside a `/bin/sh -c` command string. */
+function q(p: string): string {
+  return `'${p.replace(/'/g, "'\\''")}'`;
+}
+
+export async function ensureAdbResolved(): Promise<string> {
+  if (adbResolved) return adbBinCache;
+  adbResolved = true;
+  // 用户手动设置优先。
+  if (adbOverride) {
+    adbBinCache = adbOverride;
+    return adbBinCache;
+  }
+  adbBinCache = "adb";
+  try {
+    // Expand env + list candidates in one /bin/sh call; print the first that's
+    // executable. `test`/`command` are shell builtins so a minimal PATH is fine.
+    const script = [
+      "for c in",
+      '"$ANDROID_HOME/platform-tools/adb"',
+      '"$ANDROID_SDK_ROOT/platform-tools/adb"',
+      '"$HOME/Library/Android/sdk/platform-tools/adb"',
+      "/opt/homebrew/bin/adb",
+      "/usr/local/bin/adb",
+      "/usr/bin/adb",
+      '; do [ -x "$c" ] && { printf %s "$c"; exit 0; }; done',
+      "; command -v adb 2>/dev/null || true",
+    ].join(" ");
+    const out = await native.runCommand(script, null, 5);
+    const found = out.stdout.trim().split("\n")[0]?.trim();
+    if (found) adbBinCache = found;
+  } catch {
+    // keep default "adb"
+  }
+  return adbBinCache;
+}
+
 async function adb(args: string, serial?: string): Promise<string> {
+  await ensureAdbResolved();
   const sel = serial ? `-s ${serial} ` : "";
   const out = await native.runCommand(
-    `adb ${sel}${args}`,
+    `${q(adbBinCache)} ${sel}${args}`,
     null,
     ADB_TIMEOUT_SECS,
   );
@@ -195,6 +250,11 @@ export function installCommand(module: string): string {
 }
 
 export function logcatCommand(serial: string, pid?: string | null): string {
-  const base = `adb -s ${serial} logcat -v threadtime`;
+  const base = `${q(adbBin())} -s ${serial} logcat -v threadtime`;
   return pid ? `${base} --pid=${pid}` : base;
+}
+
+/** Absolute-path adb prefix for hand-built command strings, e.g. `${adbCmd()} -s ...`. */
+export function adbCmd(): string {
+  return q(adbBin());
 }
