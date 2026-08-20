@@ -339,7 +339,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   vimMode: false,
   editorWordWrap: false,
   editorWordWrapColumn: EDITOR_WORD_WRAP_COLUMN_DEFAULT,
-  showHidden: false,
+  showHidden: true,
   explorerGitDecorations: true,
   terminalWebglEnabled: true,
   terminalCursorBlink: false,
