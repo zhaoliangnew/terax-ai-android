@@ -28,7 +28,7 @@ export default function DevicePanel() {
 
   return (
     <ResizablePanelGroup orientation="vertical" className="h-full min-h-0">
-      <ResizablePanel id="mirror" defaultSize="45%" minSize="20%">
+      <ResizablePanel id="mirror" defaultSize="65%" minSize="20%">
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2.5 py-1.5">
             <HugeiconsIcon
@@ -107,8 +107,11 @@ export default function DevicePanel() {
           </div>
         </div>
       </ResizablePanel>
-      <ResizableHandle className="h-1 bg-transparent transition-colors hover:bg-border" />
-      <ResizablePanel id="logcat" defaultSize="55%" minSize="25%">
+      <ResizableHandle
+        withHandle
+        className="h-2.5 bg-border/50 transition-colors hover:bg-border"
+      />
+      <ResizablePanel id="logcat" defaultSize="35%" minSize="15%">
         <LogcatPanel />
       </ResizablePanel>
     </ResizablePanelGroup>

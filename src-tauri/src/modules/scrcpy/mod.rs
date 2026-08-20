@@ -434,8 +434,14 @@ pub fn scrcpy_key(state: tauri::State<'_, ScrcpyState>, id: u32, keycode: i32) -
     Ok(())
 }
 
-/// Enumerate the device's display ids (0 = main). Dual-screen devices report
-/// an extra id (e.g. 1 = 客显副屏).
+/// Enumerate the device's *actually in-use* display ids (0 = main). Some
+/// boards (e.g. Rockchip kitchen units) always register a second EXTERNAL/
+/// HDMI logical display even when nothing is physically attached to that
+/// port — that phantom display reports `mHasContent=false` in `dumpsys
+/// display`, unlike a real dual-screen unit where the customer-facing
+/// display actually has content drawn to it. Filter on that instead of just
+/// presence of a display id, or every single-screen device with a reserved
+/// HDMI-out would show up as "dual screen" with a permanently black mirror.
 #[tauri::command]
 pub fn scrcpy_list_displays(serial: String, adb_path: String) -> Result<Vec<u32>, String> {
     let out = adb(&adb_path, &serial)
@@ -443,15 +449,29 @@ pub fn scrcpy_list_displays(serial: String, adb_path: String) -> Result<Vec<u32>
         .output()
         .map_err(|e| format!("dumpsys display: {e}"))?;
     let text = String::from_utf8_lossy(&out.stdout);
+
     let mut ids: Vec<u32> = Vec::new();
-    for cap in text.split("mDisplayId=").skip(1) {
-        let num: String = cap.chars().take_while(|c| c.is_ascii_digit()).collect();
-        if let Ok(n) = num.parse::<u32>() {
-            if !ids.contains(&n) {
-                ids.push(n);
+    let mut current_id: Option<u32> = None;
+    let mut current_has_content = false;
+    let mut flush = |id: Option<u32>, has_content: bool, ids: &mut Vec<u32>| {
+        if let Some(id) = id {
+            if has_content && !ids.contains(&id) {
+                ids.push(id);
             }
         }
+    };
+    for line in text.lines() {
+        let t = line.trim();
+        if let Some(rest) = t.strip_prefix("mDisplayId=") {
+            flush(current_id, current_has_content, &mut ids);
+            current_id = rest.trim().parse::<u32>().ok();
+            current_has_content = false;
+        } else if let Some(rest) = t.strip_prefix("mHasContent=") {
+            current_has_content = rest.trim() == "true";
+        }
     }
+    flush(current_id, current_has_content, &mut ids);
+
     if ids.is_empty() {
         ids.push(0);
     }

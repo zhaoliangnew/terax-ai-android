@@ -34,6 +34,8 @@ export type EntryRowProps = {
   onOpenProject?: (path: string) => void;
   /** 当前打开的产品:用醒目底色高亮。 */
   isActiveProject?: boolean;
+  /** 已有终端 tab 打开的工程:用绿字标出。 */
+  isOpenedProject?: boolean;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -55,6 +57,7 @@ function EntryRowImpl(props: EntryRowProps) {
     isProjectDir = false,
     onOpenProject,
     isActiveProject = false,
+    isOpenedProject = false,
   } = props;
 
   const asProject = isProjectDir && !!onOpenProject;
@@ -134,10 +137,12 @@ function EntryRowImpl(props: EntryRowProps) {
       <span
         className={cn(
           "min-w-0 flex-1 truncate",
-          !isSelected &&
-            !gitignored &&
-            gitStatusCode &&
-            explorerGitTextClass(gitStatusCode),
+          isOpenedProject && !isActiveProject
+            ? "text-emerald-500"
+            : !isSelected &&
+                !gitignored &&
+                gitStatusCode &&
+                explorerGitTextClass(gitStatusCode),
         )}
       >
         {name}

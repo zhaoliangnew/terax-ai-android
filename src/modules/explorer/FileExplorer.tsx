@@ -67,6 +67,8 @@ type Props = {
   onOpenProject?: (path: string) => void;
   /** 当前打开的产品路径,在树中用醒目底色高亮。 */
   activeProjectPath?: string | null;
+  /** 已有终端 tab 打开的工程路径集合,在树中用绿色字体标出。 */
+  openedProjectPaths?: Set<string>;
   onOpenInSourceControl?: (path: string) => void;
   onOpenGitHistory?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
@@ -211,6 +213,7 @@ export const FileExplorer = memo(
       classifyProjectDir,
       onOpenProject,
       activeProjectPath,
+      openedProjectPaths,
       onOpenInSourceControl,
       onOpenGitHistory,
       onAttachToAgent,
@@ -540,6 +543,7 @@ export const FileExplorer = memo(
               isActiveProject={
                 !!activeProjectPath && row.path === activeProjectPath
               }
+              isOpenedProject={!!openedProjectPaths?.has(row.path)}
             />
           );
         }

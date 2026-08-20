@@ -13,7 +13,15 @@ import {
   type VideoEvent,
 } from "./lib/scrcpy";
 
-type Props = { serial: string; displayId?: number; label?: string };
+type Props = {
+  serial: string;
+  displayId?: number;
+  label?: string;
+  /** Secondary/customer-facing displays have no back-stack — hide 返回. */
+  showBackButton?: boolean;
+  /** Reports the device's native frame size once known (for layout decisions). */
+  onSize?: (w: number, h: number) => void;
+};
 
 type Status = "connecting" | "streaming" | "error" | "ended";
 
@@ -22,7 +30,13 @@ type Status = "connecting" | "streaming" | "error" | "ended";
  * paints frames to a canvas. Draws on the decoder output callback and closes
  * each VideoFrame immediately to avoid decode-queue backpressure.
  */
-export function ScreenMirror({ serial, displayId = 0, label }: Props) {
+export function ScreenMirror({
+  serial,
+  displayId = 0,
+  label,
+  showBackButton = true,
+  onSize,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +85,7 @@ export function ScreenMirror({ serial, displayId = 0, label }: Props) {
     (e: VideoEvent) => {
       if (e.kind === "size") {
         sizeRef.current = { w: e.width, h: e.height };
+        onSize?.(e.width, e.height);
         // Reconfigure decoder for the new resolution on the next config packet.
         configuredRef.current = false;
         return;
@@ -135,7 +150,7 @@ export function ScreenMirror({ serial, displayId = 0, label }: Props) {
         // decoder in a bad state; will surface via error callback
       }
     },
-    [ensureDecoder],
+    [ensureDecoder, onSize],
   );
 
   useEffect(() => {
@@ -174,17 +189,35 @@ export function ScreenMirror({ serial, displayId = 0, label }: Props) {
     };
   }, [serial, displayId, onEvent]);
 
-  // Map a canvas pointer event to video-frame coordinates.
+  // Map a canvas pointer event to video-frame coordinates. The canvas now
+  // fills its panel via `object-contain`, which letterboxes (adds blank
+  // bars) when the panel's aspect ratio doesn't match the device screen's —
+  // account for that inset instead of assuming the box IS the video.
   const toFrameXY = useCallback((e: React.PointerEvent) => {
     const canvas = canvasRef.current;
     const { w, h } = sizeRef.current;
     if (!canvas || w === 0 || h === 0) return null;
     const rect = canvas.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * w;
-    const y = ((e.clientY - rect.top) / rect.height) * h;
+    if (rect.width === 0 || rect.height === 0) return null;
+    const boxRatio = rect.width / rect.height;
+    const frameRatio = w / h;
+    let drawW = rect.width;
+    let drawH = rect.height;
+    let offX = 0;
+    let offY = 0;
+    if (boxRatio > frameRatio) {
+      drawW = rect.height * frameRatio;
+      offX = (rect.width - drawW) / 2;
+    } else {
+      drawH = rect.width / frameRatio;
+      offY = (rect.height - drawH) / 2;
+    }
+    const px = e.clientX - rect.left - offX;
+    const py = e.clientY - rect.top - offY;
+    if (px < 0 || py < 0 || px > drawW || py > drawH) return null; // clicked the letterbox bar
     return {
-      x: Math.max(0, Math.min(w - 1, x)),
-      y: Math.max(0, Math.min(h - 1, y)),
+      x: Math.max(0, Math.min(w - 1, (px / drawW) * w)),
+      y: Math.max(0, Math.min(h - 1, (py / drawH) * h)),
     };
   }, []);
 
@@ -219,7 +252,7 @@ export function ScreenMirror({ serial, displayId = 0, label }: Props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="zoom-exempt flex h-full min-h-0 flex-col">
       {label && (
         <div className="shrink-0 border-b border-border px-2 py-0.5 text-center text-[10px] text-muted-foreground">
           {label}
@@ -228,7 +261,7 @@ export function ScreenMirror({ serial, displayId = 0, label }: Props) {
       <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
         <canvas
           ref={canvasRef}
-          className="max-h-full max-w-full touch-none object-contain"
+          className="h-full w-full touch-none object-contain"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
@@ -248,14 +281,16 @@ export function ScreenMirror({ serial, displayId = 0, label }: Props) {
       </div>
       {/* nav bar */}
       <div className="flex shrink-0 items-center justify-center gap-6 border-t border-border py-1.5">
-        <button
-          type="button"
-          onClick={() => navKey(KEY_BACK)}
-          className="text-muted-foreground hover:text-foreground"
-          title="返回"
-        >
-          ◁
-        </button>
+        {showBackButton && (
+          <button
+            type="button"
+            onClick={() => navKey(KEY_BACK)}
+            className="text-muted-foreground hover:text-foreground"
+            title="返回"
+          >
+            ◁
+          </button>
+        )}
         <button
           type="button"
           onClick={() => navKey(KEY_HOME)}

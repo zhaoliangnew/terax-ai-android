@@ -663,6 +663,39 @@ export default function App() {
     [newTab],
   );
 
+  // 左侧项目树里,已有终端 tab 打开的安卓工程目录用绿字标出来,方便一眼看出
+  // 哪些是打开过的。按当前所有终端 tab 的 cwd 反查工程根,tab 关了就退出集合。
+  const projectRootCacheRef = useRef<Map<string, string | null>>(new Map());
+  const [openedProjectPaths, setOpenedProjectPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  useEffect(() => {
+    const cwds = Array.from(
+      new Set(
+        tabs
+          .filter((t) => t.kind === "terminal")
+          .map((t) => findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd ?? null)
+          .filter((c): c is string => !!c),
+      ),
+    );
+    let cancelled = false;
+    void (async () => {
+      const roots = new Set<string>();
+      for (const cwd of cwds) {
+        let root = projectRootCacheRef.current.get(cwd);
+        if (root === undefined) {
+          root = await findProjectRoot(cwd);
+          projectRootCacheRef.current.set(cwd, root);
+        }
+        if (root) roots.add(root);
+      }
+      if (!cancelled) setOpenedProjectPaths(roots);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tabs]);
+
   const cdInNewTab = useCallback(
     (path: string) => {
       // 安卓工程目录去重:目标(或其上层工程根)已有终端 tab 就切过去,不重复开;
@@ -1489,6 +1522,7 @@ export default function App() {
                                 classifyProjectDir={isAndroidProjectDir}
                                 onOpenProject={cdInNewTab}
                                 activeProjectPath={androidProjectRoot}
+                                openedProjectPaths={openedProjectPaths}
                                 onOpenInSourceControl={
                                   handleOpenRepositoryInSourceControl
                                 }
@@ -1601,7 +1635,7 @@ export default function App() {
                       onConnect={() => void openSettingsWindow("models")}
                     />
                     {androidProjectRoot && (
-                      <div className="flex shrink-0 items-center justify-center gap-2 border-t border-border px-3 py-1 text-[12px]">
+                      <div className="flex shrink-0 items-center justify-start gap-2 border-t border-border px-3 py-1 text-[12px]">
                         <span className="text-muted-foreground">项目</span>
                         <span className="font-medium">
                           {androidProjectRoot.split("/").slice(-2, -1)[0] ?? ""}
