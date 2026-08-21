@@ -2,10 +2,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Cancel01Icon,
-  Delete02Icon,
   PlusSignIcon,
   Refresh01Icon,
-  WifiDisconnected01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";

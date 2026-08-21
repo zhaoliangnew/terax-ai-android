@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CODE_TO_AKEYCODE, MODIFIER_AKEYCODES } from "./lib/keymap";
+import { CODE_TO_AKEYCODE } from "./lib/keymap";
 import {
   KEY_ACTION_DOWN,
   KEY_ACTION_UP,
@@ -265,7 +265,7 @@ export function ScreenMirror({
   );
 
   const downRef = useRef(false);
-  const onPointerDown = (e: React.PointerEvent) => {
+  const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.focus();
     // Mouse "back" side button — map to Android BACK instead of a touch.
     if (e.button === 3) {
