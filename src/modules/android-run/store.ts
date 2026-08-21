@@ -30,6 +30,30 @@ function loadDeviceNotes(): Record<string, string> {
   }
 }
 
+/** A device ever seen online, kept around after it goes offline so it shows
+ * up in the "调试设备" manager for one-click reconnect — keyed by SN (stable)
+ * rather than serial (an IP:port that can change on the next DHCP lease). */
+export type KnownDevice = {
+  sn: string;
+  serial: string;
+  vendor: string;
+  model: string;
+  androidVersion: string;
+  apiLevel: string;
+  lastSeen: number;
+};
+
+const KNOWN_DEVICES_KEY = "terax.android.knownDevices";
+function loadKnownDevices(): Record<string, KnownDevice> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(KNOWN_DEVICES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 /** Per-product device-panel config (device target, module, mirror state). */
 type ProductConfig = {
   serial: string | null;
@@ -56,11 +80,17 @@ type AndroidRunState = {
   byProduct: Record<string, ProductConfig>;
   /** 用户手动配置的 adb 绝对路径(空=自动解析)。 */
   adbPath: string;
-  /** serial -> 用户备注(比如 "出入库"),本地持久化。 */
+  /** sn -> 用户备注(比如 "出入库"),本地持久化,按 SN 绑定不受 IP 变化影响。 */
   deviceNotes: Record<string, string>;
+  /** sn -> 见过的设备(含离线的),用于"历史设备"面板。 */
+  knownDevices: Record<string, KnownDevice>;
+  /** 是否展开"历史设备"面板(渲染在镜像区域里,和投屏互斥)。 */
+  deviceManagerOpen: boolean;
 
   setAdbPath: (path: string) => void;
   setDeviceNote: (serial: string, note: string) => void;
+  forgetDevice: (sn: string) => void;
+  setDeviceManagerOpen: (open: boolean) => void;
   refreshDevices: () => Promise<void>;
   /** Called when the active terminal cwd changes. */
   setProjectRoot: (cwd: string | null) => Promise<void>;
@@ -76,6 +106,10 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
   byProduct: {},
   adbPath: savedAdbPath ?? "",
   deviceNotes: loadDeviceNotes(),
+  knownDevices: loadKnownDevices(),
+  deviceManagerOpen: false,
+
+  setDeviceManagerOpen: (open) => set({ deviceManagerOpen: open }),
 
   setAdbPath: (path) => {
     const v = path.trim();
@@ -86,14 +120,25 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
     void get().refreshDevices();
   },
 
-  setDeviceNote: (serial, note) =>
+  setDeviceNote: (sn, note) =>
     set((s) => {
       const v = note.trim();
       const notes = { ...s.deviceNotes };
-      if (v) notes[serial] = v;
-      else delete notes[serial];
+      if (v) notes[sn] = v;
+      else delete notes[sn];
       localStorage.setItem(DEVICE_NOTES_KEY, JSON.stringify(notes));
       return { deviceNotes: notes };
+    }),
+
+  forgetDevice: (sn) =>
+    set((s) => {
+      const known = { ...s.knownDevices };
+      delete known[sn];
+      localStorage.setItem(KNOWN_DEVICES_KEY, JSON.stringify(known));
+      const notes = { ...s.deviceNotes };
+      delete notes[sn];
+      localStorage.setItem(DEVICE_NOTES_KEY, JSON.stringify(notes));
+      return { knownDevices: known, deviceNotes: notes };
     }),
 
   refreshDevices: async () => {
@@ -113,7 +158,29 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
             byProduct[root] = { ...cfg, serial: firstOnline?.serial ?? null };
           }
         }
-        return { devices, byProduct };
+        // Remember every device we've actually talked to, for the "历史设备"
+        // manager — keyed by SN so it survives the device's IP changing.
+        // `lastSeen` tracks when it was last *selected*, not merely detected
+        // online — refreshDevices runs constantly in the background, so
+        // stamping it here would flatten every currently-online device to
+        // ~the same timestamp and the "most recently used" sort would stop
+        // meaning anything.
+        const knownDevices = { ...s.knownDevices };
+        for (const d of devices) {
+          if (d.state !== "device" || !d.sn) continue;
+          const existing = knownDevices[d.sn];
+          knownDevices[d.sn] = {
+            sn: d.sn,
+            serial: d.serial,
+            vendor: d.vendor,
+            model: d.model,
+            androidVersion: d.androidVersion,
+            apiLevel: d.apiLevel,
+            lastSeen: existing?.lastSeen ?? Date.now(),
+          };
+        }
+        localStorage.setItem(KNOWN_DEVICES_KEY, JSON.stringify(knownDevices));
+        return { devices, byProduct, knownDevices };
       });
     } catch {
       set({ devices: [] });
@@ -155,7 +222,21 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
       const root = s.projectRoot;
       if (!root) return {};
       const cfg = s.byProduct[root] ?? emptyConfig();
-      return { byProduct: { ...s.byProduct, [root]: { ...cfg, serial } } };
+      const patch: Partial<AndroidRunState> = {
+        byProduct: { ...s.byProduct, [root]: { ...cfg, serial } },
+      };
+      // Bump this device to the top of "历史设备" — that's what "most
+      // recently used" should track, not just "was seen online recently".
+      const sn = s.devices.find((d) => d.serial === serial)?.sn;
+      if (sn && s.knownDevices[sn]) {
+        const knownDevices = {
+          ...s.knownDevices,
+          [sn]: { ...s.knownDevices[sn], lastSeen: Date.now() },
+        };
+        localStorage.setItem(KNOWN_DEVICES_KEY, JSON.stringify(knownDevices));
+        patch.knownDevices = knownDevices;
+      }
+      return patch;
     }),
 
   selectModule: (module) =>

@@ -259,6 +259,7 @@ pub fn run() {
             scrcpy::scrcpy_list_displays,
             scrcpy::scrcpy_touch,
             scrcpy::scrcpy_key,
+            scrcpy::scrcpy_key_event,
             scrcpy::scrcpy_stop,
             fs::tree::list_subdirs,
             fs::tree::fs_read_dir,

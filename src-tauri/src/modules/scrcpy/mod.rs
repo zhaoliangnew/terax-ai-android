@@ -434,6 +434,33 @@ pub fn scrcpy_key(state: tauri::State<'_, ScrcpyState>, id: u32, keycode: i32) -
     Ok(())
 }
 
+/// Single down/up key event carrying live modifier state — used for forwarding
+/// the host keyboard while typing (as opposed to `scrcpy_key`'s fixed
+/// down+up pair with no modifiers, used for the nav-bar buttons). Real
+/// physical-key press/release timing plus metaState is what lets the device
+/// produce the right character (shifted symbols, held-key repeat, combos).
+#[tauri::command]
+pub fn scrcpy_key_event(
+    state: tauri::State<'_, ScrcpyState>,
+    id: u32,
+    keycode: i32,
+    action: u8,
+    meta_state: i32,
+) -> Result<(), String> {
+    let sessions = state.sessions.read().unwrap();
+    let session = sessions.get(&id).ok_or("session not found")?;
+    let control = session.control.clone();
+    drop(sessions);
+    let mut guard = control.lock().unwrap();
+    let mut msg = [0u8; 14];
+    msg[0] = 0x00; // INJECT_KEYCODE
+    msg[1] = action;
+    msg[2..6].copy_from_slice(&keycode.to_be_bytes());
+    // repeat = 0 (bytes 6..10)
+    msg[10..14].copy_from_slice(&meta_state.to_be_bytes());
+    guard.write_all(&msg).map_err(|e| e.to_string())
+}
+
 /// Enumerate the device's *actually in-use* display ids (0 = main). Some
 /// boards (e.g. Rockchip kitchen units) always register a second EXTERNAL/
 /// HDMI logical display even when nothing is physically attached to that

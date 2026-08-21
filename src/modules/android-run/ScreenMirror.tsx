@@ -1,9 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CODE_TO_AKEYCODE, MODIFIER_AKEYCODES } from "./lib/keymap";
 import {
+  KEY_ACTION_DOWN,
+  KEY_ACTION_UP,
   KEY_APP_SWITCH,
   KEY_BACK,
   KEY_HOME,
+  META_ALT_ON,
+  META_CTRL_ON,
+  META_META_ON,
+  META_SHIFT_ON,
   scrcpyKey,
+  scrcpyKeyEvent,
   scrcpyStart,
   scrcpyStop,
   scrcpyTouch,
@@ -12,6 +20,17 @@ import {
   TOUCH_UP,
   type VideoEvent,
 } from "./lib/scrcpy";
+
+const MODIFIER_META_BIT: Record<number, number> = {
+  59: META_SHIFT_ON, // ShiftLeft
+  60: META_SHIFT_ON, // ShiftRight
+  113: META_CTRL_ON, // ControlLeft
+  114: META_CTRL_ON, // ControlRight
+  57: META_ALT_ON, // AltLeft
+  58: META_ALT_ON, // AltRight
+  117: META_META_ON, // MetaLeft
+  118: META_META_ON, // MetaRight
+};
 
 type Props = {
   serial: string;
@@ -247,6 +266,15 @@ export function ScreenMirror({
 
   const downRef = useRef(false);
   const onPointerDown = (e: React.PointerEvent) => {
+    e.currentTarget.focus();
+    // Mouse "back" side button — map to Android BACK instead of a touch.
+    if (e.button === 3) {
+      e.preventDefault();
+      const id = sessionIdRef.current;
+      if (id != null) void scrcpyKey(id, KEY_BACK);
+      return;
+    }
+    if (e.button !== 0) return; // right-click/forward etc. aren't a touch
     const id = sessionIdRef.current;
     const p = toFrameXY(e, false);
     if (id == null || !p) return;
@@ -275,6 +303,29 @@ export function ScreenMirror({
     if (id != null) void scrcpyKey(id, keycode);
   };
 
+  // Forwards the physical keyboard to the device while the mirror is
+  // focused — down/up events with live metaState (not the nav buttons'
+  // fixed down+up pair), so held keys, repeat, and shifted symbols work.
+  const metaStateRef = useRef(0);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const id = sessionIdRef.current;
+    const akeycode = CODE_TO_AKEYCODE[e.code];
+    if (id == null || akeycode === undefined) return;
+    e.preventDefault();
+    const bit = MODIFIER_META_BIT[akeycode];
+    if (bit) metaStateRef.current |= bit;
+    void scrcpyKeyEvent(id, akeycode, KEY_ACTION_DOWN, metaStateRef.current);
+  };
+  const onKeyUp = (e: React.KeyboardEvent) => {
+    const id = sessionIdRef.current;
+    const akeycode = CODE_TO_AKEYCODE[e.code];
+    if (id == null || akeycode === undefined) return;
+    e.preventDefault();
+    void scrcpyKeyEvent(id, akeycode, KEY_ACTION_UP, metaStateRef.current);
+    const bit = MODIFIER_META_BIT[akeycode];
+    if (bit) metaStateRef.current &= ~bit;
+  };
+
   return (
     <div className="zoom-exempt flex h-full min-h-0 flex-col">
       {label && (
@@ -285,11 +336,14 @@ export function ScreenMirror({
       <div className="relative flex min-h-0 flex-1 items-center justify-center bg-black">
         <canvas
           ref={canvasRef}
-          className="h-full w-full touch-none object-contain"
+          tabIndex={0}
+          className="h-full w-full touch-none object-contain outline-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
+          onKeyDown={onKeyDown}
+          onKeyUp={onKeyUp}
         />
         {status !== "streaming" && (
           <div className="absolute inset-0 flex items-center justify-center text-[12px] text-muted-foreground">

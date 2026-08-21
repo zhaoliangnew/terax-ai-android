@@ -9,22 +9,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   ArrowDown01Icon,
-  Cancel01Icon,
   Folder01Icon,
   PlayIcon,
-  Refresh01Icon,
   SmartPhone01Icon,
   StopIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
-import {
-  adbCmd,
-  connectDevice,
-  disconnectDevice,
-  installCommand,
-} from "./lib/adb";
-import { ipSuffix } from "./lib/highlightSerial";
+import { useEffect } from "react";
+import { adbCmd, installCommand } from "./lib/adb";
 import { useLogcatStore } from "./logcatStore";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
 
@@ -33,23 +25,6 @@ type Props = {
 };
 
 const RUN_LABEL_PREFIX = "运行 · ";
-
-// Sort network devices by IP (numeric, not lexical, so .9 sorts before .71);
-// USB-attached devices (no IP in the serial) sort after, alphabetically.
-function compareDeviceSerial(a: { serial: string }, b: { serial: string }): number {
-  const ipA = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(a.serial);
-  const ipB = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(b.serial);
-  if (ipA && ipB) {
-    for (let i = 1; i <= 4; i++) {
-      const diff = Number(ipA[i]) - Number(ipB[i]);
-      if (diff !== 0) return diff;
-    }
-    return 0;
-  }
-  if (ipA) return -1;
-  if (ipB) return 1;
-  return a.serial.localeCompare(b.serial);
-}
 
 function metadataPkgExpr(module: string): string {
   const metaPath = `${module}/build/outputs/apk/debug/output-metadata.json`;
@@ -60,14 +35,11 @@ export function AndroidRunToolbar({ compact }: Props) {
   const devices = useAndroidRunStore((s) => s.devices);
   const devicesLoading = useAndroidRunStore((s) => s.devicesLoading);
   const refreshDevices = useAndroidRunStore((s) => s.refreshDevices);
-  const selectDevice = useAndroidRunStore((s) => s.selectDevice);
   const selectModule = useAndroidRunStore((s) => s.selectModule);
-  const adbPath = useAndroidRunStore((s) => s.adbPath);
-  const setAdbPath = useAndroidRunStore((s) => s.setAdbPath);
-  const deviceNotes = useAndroidRunStore((s) => s.deviceNotes);
-  const setDeviceNote = useAndroidRunStore((s) => s.setDeviceNote);
-  const [editingNote, setEditingNote] = useState<string | null>(null);
-  const [noteInput, setNoteInput] = useState("");
+  const deviceManagerOpen = useAndroidRunStore((s) => s.deviceManagerOpen);
+  const setDeviceManagerOpen = useAndroidRunStore(
+    (s) => s.setDeviceManagerOpen,
+  );
   const {
     root: projectRoot,
     serial: selectedSerial,
@@ -82,37 +54,6 @@ export function AndroidRunToolbar({ compact }: Props) {
   );
   const running =
     runSession != null && runSession.handle != null && !runSession.exited;
-
-  const [connectInput, setConnectInput] = useState("192.168.");
-  const [connecting, setConnecting] = useState(false);
-  const [connectError, setConnectError] = useState<string | null>(null);
-  const [disconnecting, setDisconnecting] = useState<string | null>(null);
-
-  const onConnect = async () => {
-    const target = connectInput.trim();
-    if (!target || connecting) return;
-    setConnecting(true);
-    setConnectError(null);
-    try {
-      await connectDevice(target);
-      setConnectInput("192.168.");
-      await refreshDevices();
-    } catch (err) {
-      setConnectError(String(err instanceof Error ? err.message : err));
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const onDisconnect = async (serial: string) => {
-    setDisconnecting(serial);
-    try {
-      await disconnectDevice(serial);
-      await refreshDevices();
-    } finally {
-      setDisconnecting(null);
-    }
-  };
 
   useEffect(() => {
     void refreshDevices();
@@ -147,223 +88,33 @@ export function AndroidRunToolbar({ compact }: Props) {
 
   return (
     <div className="flex shrink-0 items-center gap-1">
-      <DropdownMenu
-        onOpenChange={(open) => {
-          if (open) void refreshDevices();
-        }}
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setDeviceManagerOpen(!deviceManagerOpen)}
+        className="h-7 max-w-56 gap-1.5 rounded-md px-2 text-xs"
+        title={
+          selectedDevice
+            ? `${selectedDevice.vendor} ${selectedDevice.model} · ${selectedDevice.serial} · Android ${selectedDevice.androidVersion} · API ${selectedDevice.apiLevel}`
+            : "选择设备"
+        }
       >
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 max-w-56 gap-1.5 rounded-md px-2 text-xs"
-            title={
-              selectedDevice
-                ? `${selectedDevice.vendor} ${selectedDevice.model} · ${selectedDevice.serial} · Android ${selectedDevice.androidVersion} · API ${selectedDevice.apiLevel}`
-                : "选择设备"
-            }
-          >
-            <span
-              className={`size-1.5 shrink-0 rounded-full ${
-                selectedDevice?.state === "device"
-                  ? "bg-emerald-500"
-                  : "bg-muted-foreground/40"
-              }`}
-            />
-            <HugeiconsIcon
-              icon={SmartPhone01Icon}
-              size={13}
-              strokeWidth={1.75}
-            />
-            <span className="truncate">
-              {selectedDevice
-                ? `${selectedDevice.vendor ? `${selectedDevice.vendor} ` : ""}${selectedDevice.model}`
-                : devicesLoading
-                  ? "扫描设备…"
-                  : "无设备"}
-            </span>
-            <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-80">
-          <DropdownMenuLabel className="flex items-center gap-2 text-xs">
-            设备
-            {devicesLoading && (
-              <span className="text-[10px] text-muted-foreground">刷新中…</span>
-            )}
-          </DropdownMenuLabel>
-          {devices.filter((d) => d.state !== "offline").length === 0 && (
-            <DropdownMenuItem disabled className="text-xs">
-              没有在线设备
-            </DropdownMenuItem>
-          )}
-          {devices
-            .filter((d) => d.state !== "offline")
-            .sort(compareDeviceSerial)
-            .map((d) => {
-            const isNetworkDevice = d.serial.includes(":");
-            return (
-              <DropdownMenuItem
-                key={d.serial}
-                disabled={d.state !== "device"}
-                onSelect={() => selectDevice(d.serial)}
-                className="gap-2 text-xs"
-              >
-                <span
-                  className={`size-1.5 shrink-0 rounded-full ${
-                    d.state === "device"
-                      ? "bg-emerald-500"
-                      : "bg-muted-foreground/40"
-                  }`}
-                />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="whitespace-nowrap font-medium">
-                    {d.vendor ? `${d.vendor} · ` : ""}
-                    {d.model}
-                    {d.sn && (
-                      <span className="font-normal text-muted-foreground/70">
-                        {" "}
-                        · SN:{d.sn}
-                      </span>
-                    )}
-                  </span>
-                  <span className="whitespace-nowrap text-[12px] text-muted-foreground">
-                    {d.serial}
-                    {d.state === "device"
-                      ? ` · Android ${d.androidVersion} · API ${d.apiLevel}`
-                      : ` · ${d.state}`}
-                  </span>
-                  {d.sn &&
-                    (editingNote === d.sn ? (
-                      // biome-ignore lint/a11y/noAutofocus: opened by an explicit click to edit
-                      <input
-                        autoFocus
-                        value={noteInput}
-                        onChange={(e) => setNoteInput(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                          e.stopPropagation();
-                          if (e.key === "Enter") {
-                            setDeviceNote(d.sn, noteInput);
-                            setEditingNote(null);
-                          } else if (e.key === "Escape") {
-                            setEditingNote(null);
-                          }
-                        }}
-                        onBlur={() => {
-                          setDeviceNote(d.sn, noteInput);
-                          setEditingNote(null);
-                        }}
-                        placeholder="备注"
-                        className="mt-0.5 h-5 w-28 rounded border border-input bg-transparent px-1 text-[10px] outline-none focus:border-ring"
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          e.preventDefault();
-                          setNoteInput(deviceNotes[d.sn] ?? "");
-                          setEditingNote(d.sn);
-                        }}
-                        className="mt-0.5 w-fit"
-                      >
-                        {deviceNotes[d.sn] ? (
-                          <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
-                            {deviceNotes[d.sn]}
-                            {ipSuffix(d.serial) && ` · ${ipSuffix(d.serial)}`}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground">
-                            + 备注
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                </span>
-                {isNetworkDevice && (
-                  <button
-                    type="button"
-                    title="断开连接"
-                    disabled={disconnecting === d.serial}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      void onDisconnect(d.serial);
-                    }}
-                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-                  >
-                    <HugeiconsIcon
-                      icon={Cancel01Icon}
-                      size={12}
-                      strokeWidth={2}
-                    />
-                  </button>
-                )}
-              </DropdownMenuItem>
-            );
-          })}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => void refreshDevices()}
-            className="gap-2 text-xs"
-          >
-            <HugeiconsIcon icon={Refresh01Icon} size={13} strokeWidth={1.75} />
-            刷新设备
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <div className="px-2 py-1.5" onKeyDown={(e) => e.stopPropagation()}>
-            <div className="mb-1 text-[10px] text-muted-foreground">
-              连接新设备(IP 或 IP:端口,默认 5555)
-            </div>
-            <div className="flex items-center gap-1">
-              <input
-                value={connectInput}
-                onChange={(e) => setConnectInput(e.target.value)}
-                placeholder="192.168.1.100"
-                spellCheck={false}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter") void onConnect();
-                }}
-                className="h-7 min-w-0 flex-1 rounded border border-input bg-transparent px-2 font-mono text-[13px] outline-none focus:border-ring"
-              />
-              <Button
-                size="sm"
-                disabled={!connectInput.trim() || connecting}
-                onClick={() => void onConnect()}
-                className="h-7 shrink-0 px-2.5 text-xs"
-              >
-                {connecting ? "连接中…" : "连接"}
-              </Button>
-            </div>
-            {connectError && (
-              <div className="mt-1 text-[10px] text-red-500">
-                {connectError}
-              </div>
-            )}
-          </div>
-          <DropdownMenuSeparator />
-          <div className="px-2 py-1.5">
-            <div className="mb-1 text-[10px] text-muted-foreground">
-              adb 路径(留空=自动查找)
-            </div>
-            <input
-              defaultValue={adbPath}
-              placeholder="/Users/…/platform-tools/adb"
-              spellCheck={false}
-              onKeyDown={(e) => {
-                e.stopPropagation();
-                if (e.key === "Enter") {
-                  setAdbPath((e.target as HTMLInputElement).value);
-                }
-              }}
-              onBlur={(e) => setAdbPath(e.target.value)}
-              className="h-6 w-full rounded border border-input bg-transparent px-1.5 font-mono text-[10px] outline-none focus:border-ring"
-            />
-          </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        <span
+          className={`size-1.5 shrink-0 rounded-full ${
+            selectedDevice?.state === "device"
+              ? "bg-emerald-500"
+              : "bg-muted-foreground/40"
+          }`}
+        />
+        <HugeiconsIcon icon={SmartPhone01Icon} size={13} strokeWidth={1.75} />
+        <span className="truncate">
+          {selectedDevice
+            ? `${selectedDevice.vendor ? `${selectedDevice.vendor} ` : ""}${selectedDevice.model}`
+            : devicesLoading
+              ? "扫描设备…"
+              : "无设备"}
+        </span>
+      </Button>
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

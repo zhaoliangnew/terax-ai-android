@@ -104,6 +104,25 @@ export function scrcpyKey(id: number, keycode: number): Promise<void> {
   return invoke("scrcpy_key", { id, keycode });
 }
 
+// AMOTION_EVENT_ACTION_DOWN / _UP, reused for key actions.
+export const KEY_ACTION_DOWN = 0;
+export const KEY_ACTION_UP = 1;
+
+// AMETA_* modifier bits.
+export const META_SHIFT_ON = 1;
+export const META_ALT_ON = 2;
+export const META_CTRL_ON = 0x1000;
+export const META_META_ON = 0x10000;
+
+export function scrcpyKeyEvent(
+  id: number,
+  keycode: number,
+  action: number,
+  metaState: number,
+): Promise<void> {
+  return invoke("scrcpy_key_event", { id, keycode, action, metaState });
+}
+
 export function scrcpyStop(id: number): Promise<void> {
   return invoke("scrcpy_stop", { id });
 }

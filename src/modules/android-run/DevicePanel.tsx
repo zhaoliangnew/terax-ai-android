@@ -7,6 +7,7 @@ import { native } from "@/modules/ai/lib/native";
 import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AndroidRunToolbar } from "./AndroidRunToolbar";
+import { DeviceManagerPanel } from "./DeviceManagerPanel";
 import { DeviceMirror } from "./DeviceMirror";
 import { highlightSerial } from "./lib/highlightSerial";
 import LogcatPanel from "./LogcatDock";
@@ -105,6 +106,7 @@ export default function DevicePanel() {
                 </div>
               </div>
             )}
+            <DeviceManagerPanel />
           </div>
         </div>
       </ResizablePanel>
