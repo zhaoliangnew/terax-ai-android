@@ -45,6 +45,10 @@ export function ScreenMirror({
   const decoderRef = useRef<VideoDecoder | null>(null);
   const configuredRef = useRef(false);
   const configBytesRef = useRef<Uint8Array | null>(null);
+  // True while resyncing after a dropped frame: delta frames reference prior
+  // frames, so decoding one whose predecessor was dropped corrupts output
+  // (visible as ghosting/smearing) until the next self-contained keyframe.
+  const resyncingRef = useRef(false);
 
   const draw = useCallback((frame: VideoFrame) => {
     const canvas = canvasRef.current;
@@ -136,8 +140,16 @@ export function ScreenMirror({
         data = merged;
         configBytesRef.current = null;
       }
-      // Drop non-key frames while the queue is backing up to stay real-time.
-      if (decoder.decodeQueueSize > 4 && !e.keyFrame) return;
+      if (e.keyFrame) {
+        resyncingRef.current = false;
+      } else if (resyncingRef.current || decoder.decodeQueueSize > 4) {
+        // Stay real-time by dropping delta frames once we're behind, but a
+        // dropped frame breaks the reference chain for every delta frame
+        // after it — keep dropping until the next keyframe resyncs cleanly,
+        // instead of feeding the decoder a frame missing its reference.
+        resyncingRef.current = true;
+        return;
+      }
       try {
         decoder.decode(
           new EncodedVideoChunk({
@@ -159,6 +171,7 @@ export function ScreenMirror({
     setError(null);
     configuredRef.current = false;
     configBytesRef.current = null;
+    resyncingRef.current = false;
     scrcpyStart(serial, 1600, displayId, onEvent)
       .then((id) => {
         if (cancelled) {
@@ -193,38 +206,49 @@ export function ScreenMirror({
   // fills its panel via `object-contain`, which letterboxes (adds blank
   // bars) when the panel's aspect ratio doesn't match the device screen's —
   // account for that inset instead of assuming the box IS the video.
-  const toFrameXY = useCallback((e: React.PointerEvent) => {
-    const canvas = canvasRef.current;
-    const { w, h } = sizeRef.current;
-    if (!canvas || w === 0 || h === 0) return null;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return null;
-    const boxRatio = rect.width / rect.height;
-    const frameRatio = w / h;
-    let drawW = rect.width;
-    let drawH = rect.height;
-    let offX = 0;
-    let offY = 0;
-    if (boxRatio > frameRatio) {
-      drawW = rect.height * frameRatio;
-      offX = (rect.width - drawW) / 2;
-    } else {
-      drawH = rect.width / frameRatio;
-      offY = (rect.height - drawH) / 2;
-    }
-    const px = e.clientX - rect.left - offX;
-    const py = e.clientY - rect.top - offY;
-    if (px < 0 || py < 0 || px > drawW || py > drawH) return null; // clicked the letterbox bar
-    return {
-      x: Math.max(0, Math.min(w - 1, (px / drawW) * w)),
-      y: Math.max(0, Math.min(h - 1, (py / drawH) * h)),
-    };
-  }, []);
+  // `clamp: true` (move/up) keeps a drag alive when the pointer strays a bit
+  // past the video edge into the letterbox — dropping those events instead
+  // breaks Android's fling/scroll gesture recognition mid-swipe. `clamp:
+  // false` (down) still rejects a press that starts in the letterbox.
+  const toFrameXY = useCallback(
+    (e: React.PointerEvent, clamp: boolean) => {
+      const canvas = canvasRef.current;
+      const { w, h } = sizeRef.current;
+      if (!canvas || w === 0 || h === 0) return null;
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return null;
+      const boxRatio = rect.width / rect.height;
+      const frameRatio = w / h;
+      let drawW = rect.width;
+      let drawH = rect.height;
+      let offX = 0;
+      let offY = 0;
+      if (boxRatio > frameRatio) {
+        drawW = rect.height * frameRatio;
+        offX = (rect.width - drawW) / 2;
+      } else {
+        drawH = rect.width / frameRatio;
+        offY = (rect.height - drawH) / 2;
+      }
+      let px = e.clientX - rect.left - offX;
+      let py = e.clientY - rect.top - offY;
+      if (!clamp && (px < 0 || py < 0 || px > drawW || py > drawH)) {
+        return null; // pressed the letterbox bar
+      }
+      px = Math.max(0, Math.min(drawW, px));
+      py = Math.max(0, Math.min(drawH, py));
+      return {
+        x: Math.max(0, Math.min(w - 1, (px / drawW) * w)),
+        y: Math.max(0, Math.min(h - 1, (py / drawH) * h)),
+      };
+    },
+    [],
+  );
 
   const downRef = useRef(false);
   const onPointerDown = (e: React.PointerEvent) => {
     const id = sessionIdRef.current;
-    const p = toFrameXY(e);
+    const p = toFrameXY(e, false);
     if (id == null || !p) return;
     downRef.current = true;
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -233,7 +257,7 @@ export function ScreenMirror({
   const onPointerMove = (e: React.PointerEvent) => {
     if (!downRef.current) return;
     const id = sessionIdRef.current;
-    const p = toFrameXY(e);
+    const p = toFrameXY(e, true);
     if (id == null || !p) return;
     void scrcpyTouch(id, TOUCH_MOVE, p.x, p.y, 1.0);
   };
@@ -241,7 +265,7 @@ export function ScreenMirror({
     if (!downRef.current) return;
     downRef.current = false;
     const id = sessionIdRef.current;
-    const p = toFrameXY(e);
+    const p = toFrameXY(e, true);
     if (id == null || !p) return;
     void scrcpyTouch(id, TOUCH_UP, p.x, p.y, 0.0);
   };

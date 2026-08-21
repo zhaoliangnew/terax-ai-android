@@ -16,6 +16,20 @@ const savedAdbPath =
     : null;
 setAdbOverride(savedAdbPath);
 
+// Serial -> user note (e.g. "出入库"), so a subnet full of look-alike devices
+// stays identifiable. Keyed by serial, not persistent device id — a device
+// reconnecting over a different IP loses its note, same tradeoff as adbPath.
+const DEVICE_NOTES_KEY = "terax.android.deviceNotes";
+function loadDeviceNotes(): Record<string, string> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(DEVICE_NOTES_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 /** Per-product device-panel config (device target, module, mirror state). */
 type ProductConfig = {
   serial: string | null;
@@ -42,8 +56,11 @@ type AndroidRunState = {
   byProduct: Record<string, ProductConfig>;
   /** 用户手动配置的 adb 绝对路径(空=自动解析)。 */
   adbPath: string;
+  /** serial -> 用户备注(比如 "出入库"),本地持久化。 */
+  deviceNotes: Record<string, string>;
 
   setAdbPath: (path: string) => void;
+  setDeviceNote: (serial: string, note: string) => void;
   refreshDevices: () => Promise<void>;
   /** Called when the active terminal cwd changes. */
   setProjectRoot: (cwd: string | null) => Promise<void>;
@@ -58,6 +75,7 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
   projectRoot: null,
   byProduct: {},
   adbPath: savedAdbPath ?? "",
+  deviceNotes: loadDeviceNotes(),
 
   setAdbPath: (path) => {
     const v = path.trim();
@@ -67,6 +85,16 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
     set({ adbPath: v });
     void get().refreshDevices();
   },
+
+  setDeviceNote: (serial, note) =>
+    set((s) => {
+      const v = note.trim();
+      const notes = { ...s.deviceNotes };
+      if (v) notes[serial] = v;
+      else delete notes[serial];
+      localStorage.setItem(DEVICE_NOTES_KEY, JSON.stringify(notes));
+      return { deviceNotes: notes };
+    }),
 
   refreshDevices: async () => {
     if (get().devicesLoading) return;

@@ -8,6 +8,9 @@ export type AdbDevice = {
   model: string;
   androidVersion: string;
   apiLevel: string;
+  /** Hardware serial number (ro.serialno) — distinct from `serial`, which for
+   * a network device is its "ip:port" adb connection address, not the SN. */
+  sn: string;
 };
 
 const ADB_TIMEOUT_SECS = 15;
@@ -132,13 +135,15 @@ export async function listDevices(): Promise<AdbDevice[]> {
           model: row.serial,
           androidVersion: "",
           apiLevel: "",
+          sn: "",
         };
       }
-      const [vendor, model, androidVersion, apiLevel] = await Promise.all([
+      const [vendor, model, androidVersion, apiLevel, sn] = await Promise.all([
         getprop(row.serial, "ro.product.manufacturer"),
         getprop(row.serial, "ro.product.model"),
         getprop(row.serial, "ro.build.version.release"),
         getprop(row.serial, "ro.build.version.sdk"),
+        getprop(row.serial, "ro.serialno"),
       ]);
       return {
         ...row,
@@ -146,6 +151,7 @@ export async function listDevices(): Promise<AdbDevice[]> {
         model: model || row.serial,
         androidVersion,
         apiLevel,
+        sn,
       };
     }),
   );

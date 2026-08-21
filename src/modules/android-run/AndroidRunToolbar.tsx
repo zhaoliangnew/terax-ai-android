@@ -24,6 +24,7 @@ import {
   disconnectDevice,
   installCommand,
 } from "./lib/adb";
+import { ipSuffix } from "./lib/highlightSerial";
 import { useLogcatStore } from "./logcatStore";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
 
@@ -32,6 +33,23 @@ type Props = {
 };
 
 const RUN_LABEL_PREFIX = "运行 · ";
+
+// Sort network devices by IP (numeric, not lexical, so .9 sorts before .71);
+// USB-attached devices (no IP in the serial) sort after, alphabetically.
+function compareDeviceSerial(a: { serial: string }, b: { serial: string }): number {
+  const ipA = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(a.serial);
+  const ipB = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(b.serial);
+  if (ipA && ipB) {
+    for (let i = 1; i <= 4; i++) {
+      const diff = Number(ipA[i]) - Number(ipB[i]);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }
+  if (ipA) return -1;
+  if (ipB) return 1;
+  return a.serial.localeCompare(b.serial);
+}
 
 function metadataPkgExpr(module: string): string {
   const metaPath = `${module}/build/outputs/apk/debug/output-metadata.json`;
@@ -46,6 +64,10 @@ export function AndroidRunToolbar({ compact }: Props) {
   const selectModule = useAndroidRunStore((s) => s.selectModule);
   const adbPath = useAndroidRunStore((s) => s.adbPath);
   const setAdbPath = useAndroidRunStore((s) => s.setAdbPath);
+  const deviceNotes = useAndroidRunStore((s) => s.deviceNotes);
+  const setDeviceNote = useAndroidRunStore((s) => s.setDeviceNote);
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const [noteInput, setNoteInput] = useState("");
   const {
     root: projectRoot,
     serial: selectedSerial,
@@ -61,7 +83,7 @@ export function AndroidRunToolbar({ compact }: Props) {
   const running =
     runSession != null && runSession.handle != null && !runSession.exited;
 
-  const [connectInput, setConnectInput] = useState("");
+  const [connectInput, setConnectInput] = useState("192.168.");
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -73,7 +95,7 @@ export function AndroidRunToolbar({ compact }: Props) {
     setConnectError(null);
     try {
       await connectDevice(target);
-      setConnectInput("");
+      setConnectInput("192.168.");
       await refreshDevices();
     } catch (err) {
       setConnectError(String(err instanceof Error ? err.message : err));
@@ -163,19 +185,22 @@ export function AndroidRunToolbar({ compact }: Props) {
             <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-64">
+        <DropdownMenuContent align="end" className="min-w-80">
           <DropdownMenuLabel className="flex items-center gap-2 text-xs">
             设备
             {devicesLoading && (
               <span className="text-[10px] text-muted-foreground">刷新中…</span>
             )}
           </DropdownMenuLabel>
-          {devices.length === 0 && (
+          {devices.filter((d) => d.state !== "offline").length === 0 && (
             <DropdownMenuItem disabled className="text-xs">
               没有在线设备
             </DropdownMenuItem>
           )}
-          {devices.map((d) => {
+          {devices
+            .filter((d) => d.state !== "offline")
+            .sort(compareDeviceSerial)
+            .map((d) => {
             const isNetworkDevice = d.serial.includes(":");
             return (
               <DropdownMenuItem
@@ -195,12 +220,66 @@ export function AndroidRunToolbar({ compact }: Props) {
                   <span className="whitespace-nowrap font-medium">
                     {d.vendor ? `${d.vendor} · ` : ""}
                     {d.model}
+                    {d.sn && (
+                      <span className="font-normal text-muted-foreground/70">
+                        {" "}
+                        · SN:{d.sn}
+                      </span>
+                    )}
                   </span>
-                  <span className="whitespace-nowrap text-[10px] text-muted-foreground">
+                  <span className="whitespace-nowrap text-[12px] text-muted-foreground">
+                    {d.serial}
                     {d.state === "device"
-                      ? `${d.serial} · Android ${d.androidVersion} · API ${d.apiLevel}`
-                      : `${d.serial} · ${d.state}`}
+                      ? ` · Android ${d.androidVersion} · API ${d.apiLevel}`
+                      : ` · ${d.state}`}
                   </span>
+                  {d.sn &&
+                    (editingNote === d.sn ? (
+                      // biome-ignore lint/a11y/noAutofocus: opened by an explicit click to edit
+                      <input
+                        autoFocus
+                        value={noteInput}
+                        onChange={(e) => setNoteInput(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Enter") {
+                            setDeviceNote(d.sn, noteInput);
+                            setEditingNote(null);
+                          } else if (e.key === "Escape") {
+                            setEditingNote(null);
+                          }
+                        }}
+                        onBlur={() => {
+                          setDeviceNote(d.sn, noteInput);
+                          setEditingNote(null);
+                        }}
+                        placeholder="备注"
+                        className="mt-0.5 h-5 w-28 rounded border border-input bg-transparent px-1 text-[10px] outline-none focus:border-ring"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          e.preventDefault();
+                          setNoteInput(deviceNotes[d.sn] ?? "");
+                          setEditingNote(d.sn);
+                        }}
+                        className="mt-0.5 w-fit"
+                      >
+                        {deviceNotes[d.sn] ? (
+                          <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium text-emerald-400">
+                            {deviceNotes[d.sn]}
+                            {ipSuffix(d.serial) && ` · ${ipSuffix(d.serial)}`}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground/50 hover:text-muted-foreground">
+                            + 备注
+                          </span>
+                        )}
+                      </button>
+                    ))}
                 </span>
                 {isNetworkDevice && (
                   <button
@@ -247,13 +326,13 @@ export function AndroidRunToolbar({ compact }: Props) {
                   e.stopPropagation();
                   if (e.key === "Enter") void onConnect();
                 }}
-                className="h-6 min-w-0 flex-1 rounded border border-input bg-transparent px-1.5 font-mono text-[10px] outline-none focus:border-ring"
+                className="h-7 min-w-0 flex-1 rounded border border-input bg-transparent px-2 font-mono text-[13px] outline-none focus:border-ring"
               />
               <Button
                 size="sm"
                 disabled={!connectInput.trim() || connecting}
                 onClick={() => void onConnect()}
-                className="h-6 shrink-0 px-2 text-[10px]"
+                className="h-7 shrink-0 px-2.5 text-xs"
               >
                 {connecting ? "连接中…" : "连接"}
               </Button>

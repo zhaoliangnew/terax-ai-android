@@ -8,6 +8,7 @@ import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AndroidRunToolbar } from "./AndroidRunToolbar";
 import { DeviceMirror } from "./DeviceMirror";
+import { highlightSerial } from "./lib/highlightSerial";
 import LogcatPanel from "./LogcatDock";
 import {
   useActiveProductConfig,
@@ -39,9 +40,9 @@ export default function DevicePanel() {
             />
             <span className="text-[11px] font-semibold">屏幕镜像</span>
             {device && (
-              <span className="truncate text-[10px] text-muted-foreground">
+              <span className="truncate text-[13px] text-muted-foreground">
                 {device.vendor ? `${device.vendor} ` : ""}
-                {device.model} · {device.serial}
+                {device.model} · {highlightSerial(device.serial)}
               </span>
             )}
             <div className="ml-auto flex items-center gap-1">

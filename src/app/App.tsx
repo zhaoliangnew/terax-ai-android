@@ -1597,7 +1597,7 @@ export default function App() {
                 </div>
               </ResizablePanel>
               <ResizableHandle className="w-1 rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
-              <ResizablePanel id="workspace" defaultSize="39%" minSize="25%">
+              <ResizablePanel id="workspace" defaultSize="34%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     {androidProjectRoot && (
@@ -1672,7 +1672,7 @@ export default function App() {
                 </div>
               </ResizablePanel>
               <ResizableHandle className="w-1 rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
-              <ResizablePanel id="device" defaultSize="39%" minSize="20%">
+              <ResizablePanel id="device" defaultSize="44%" minSize="20%">
                 <div className="h-full min-h-0 pl-0.5 pr-2">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     <Suspense fallback={null}>
