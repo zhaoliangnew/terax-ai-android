@@ -36,6 +36,10 @@ import {
   findProjectRoot,
   isSupportedProductDir,
   OpenInToolMenu,
+  ProjectGroupButton,
+  DingGroupPickerDialog,
+  YunxiaoLinkDialog,
+  YunxiaoMenu,
   useAndroidRunStore,
 } from "@/modules/android-run";
 import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
@@ -413,6 +417,10 @@ export default function App() {
     }
   }, [androidProjectRoot]);
 
+  // 右键目录 → 关联云效项目(云效项目对应产品线目录,不是单个仓库)。
+  const [yunxiaoDir, setYunxiaoDir] = useState<string | null>(null);
+  const [dingGroupDir, setDingGroupDir] = useState<string | null>(null);
+
   // 切 tab 时把左栏定位到该 tab 的工程根,省得每次手动一层层展开找回来。
   const lastRevealedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -707,17 +715,6 @@ export default function App() {
       }
     },
     [inheritedCwdForNewTab, newAgentGroupTab],
-  );
-
-  const sendCd = useCallback(
-    (path: string) => {
-      if (activeLeafId === null) return;
-      const term = terminalRefs.current.get(activeLeafId);
-      if (!term) return;
-      term.write(`cd ${quoteShellArg(path)}\r`);
-      term.focus();
-    },
-    [activeLeafId],
   );
 
   // 强制新开一个终端(右键「Open New Terminal」),不去重。
@@ -1593,6 +1590,8 @@ export default function App() {
                                 onOpenGitHistory={handleOpenGitHistoryForPath}
                                 onAttachToAgent={handleAttachFileToAgent}
                                 onSetAsRoot={handleSetSpaceRoot}
+                                onLinkYunxiao={setYunxiaoDir}
+                                onLinkDingGroup={setDingGroupDir}
                                 headerExtra={
                                   showProductPane && androidProjectRoot ? (
                                     <button
@@ -1706,6 +1705,10 @@ export default function App() {
                             onLaunch={openAgentTerminal}
                           />
                           <OpenInToolMenu projectRoot={androidProjectRoot} />
+                          <YunxiaoMenu projectRoot={androidProjectRoot} />
+                          <ProjectGroupButton
+                            projectRoot={androidProjectRoot}
+                          />
                         </span>
                       </div>
                     )}
@@ -1801,10 +1804,7 @@ export default function App() {
 
           {!zenMode && (
             <StatusBar
-              cwd={activeCwd}
               filePath={activeFilePath}
-              home={home}
-              onCd={sendCd}
               onWorkspaceChange={handleWorkspaceChange}
               onOpenMini={openMini}
               onOpenAi={togglePanelAndFocus}
@@ -1814,6 +1814,16 @@ export default function App() {
               }
             />
           )}
+
+          <YunxiaoLinkDialog
+            dir={yunxiaoDir}
+            onClose={() => setYunxiaoDir(null)}
+          />
+
+          <DingGroupPickerDialog
+            dir={dingGroupDir}
+            onClose={() => setDingGroupDir(null)}
+          />
 
           <WindowVibrancyBridge />
 

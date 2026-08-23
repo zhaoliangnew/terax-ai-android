@@ -85,6 +85,10 @@ type Props = {
   onSetAsRoot?: (path: string) => void;
   /** 额外塞进头部按钮行的控件(比如产品文件区的开合开关)。 */
   headerExtra?: ReactNode;
+  /** 给这个目录绑定云效项目(云效项目对应产品线目录,不是单个仓库)。 */
+  onLinkYunxiao?: (path: string) => void;
+  /** 给这个目录绑定钉钉对接群,同样按目录继承。 */
+  onLinkDingGroup?: (path: string) => void;
   pathDropTarget?: TerminalPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
 };
@@ -242,6 +246,8 @@ export const FileExplorer = memo(
       onAttachToAgent,
       onSetAsRoot,
       headerExtra,
+      onLinkYunxiao,
+      onLinkDingGroup,
       pathDropTarget,
       gitStatus,
     },
@@ -859,7 +865,7 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onOpenFile(menuTarget.path, true)}
                     >
-                      Open
+                      打开
                     </ContextMenuItem>
                   )}
                   {menuTarget.isDir && onRevealInTerminal && (
@@ -867,7 +873,7 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onRevealInTerminal(menuTarget.path)}
                     >
-                      Open in Terminal
+                      在终端中打开
                     </ContextMenuItem>
                   )}
                   {menuTarget.isDir && onOpenNewTerminal && (
@@ -875,7 +881,23 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onOpenNewTerminal(menuTarget.path)}
                     >
-                      Open New Terminal
+                      新开终端
+                    </ContextMenuItem>
+                  )}
+                  {menuTarget.isDir && onLinkYunxiao && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => onLinkYunxiao(menuTarget.path)}
+                    >
+                      关联云效项目…
+                    </ContextMenuItem>
+                  )}
+                  {menuTarget.isDir && onLinkDingGroup && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => onLinkDingGroup(menuTarget.path)}
+                    >
+                      关联钉钉群…
                     </ContextMenuItem>
                   )}
                   {menuTarget.isDir && onSetAsRoot && (
@@ -883,7 +905,7 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onSetAsRoot(menuTarget.path)}
                     >
-                      Set as Space Root
+                      设为根目录
                     </ContextMenuItem>
                   )}
                   {menuTarget.isDir && onOpenInSourceControl && (
@@ -891,7 +913,7 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onOpenInSourceControl(menuTarget.path)}
                     >
-                      Open in Source Control
+                      在源代码管理中打开
                     </ContextMenuItem>
                   )}
                   {menuTarget.isDir && onOpenGitHistory && (
@@ -899,14 +921,14 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onOpenGitHistory(menuTarget.path)}
                     >
-                      Open Git History
+                      查看 Git 历史
                     </ContextMenuItem>
                   )}
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => void revealInFinder(menuTarget.path)}
                   >
-                    Reveal in Finder
+                    在访达中显示
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
@@ -920,7 +942,7 @@ export const FileExplorer = memo(
                       )
                     }
                   >
-                    New File
+                    新建文件
                   </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
@@ -933,14 +955,14 @@ export const FileExplorer = memo(
                       )
                     }
                   >
-                    New Folder
+                    新建文件夹
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => void copyToClipboard(menuTarget.path)}
                   >
-                    Copy Path
+                    复制路径
                   </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
@@ -950,14 +972,14 @@ export const FileExplorer = memo(
                       )
                     }
                   >
-                    Copy Relative Path
+                    复制相对路径
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => onAttachToAgent?.(menuTarget.path)}
                   >
-                    Attach to Agent
+                    附加到 AI
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
@@ -974,7 +996,7 @@ export const FileExplorer = memo(
                       }
                     }}
                   >
-                    {deleteConfirm ? "Click again to confirm" : "Delete"}
+                    {deleteConfirm ? "再点一次确认删除" : "删除"}
                   </ContextMenuItem>
                 </>
               ) : (
@@ -984,7 +1006,7 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onRevealInTerminal(rootPath)}
                     >
-                      Open in Terminal
+                      在终端中打开
                     </ContextMenuItem>
                   )}
                   {onOpenInSourceControl && (
@@ -992,7 +1014,7 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onOpenInSourceControl(rootPath)}
                     >
-                      Open in Source Control
+                      在源代码管理中打开
                     </ContextMenuItem>
                   )}
                   {onOpenGitHistory && (
@@ -1000,40 +1022,40 @@ export const FileExplorer = memo(
                       className={COMPACT_ITEM}
                       onSelect={() => onOpenGitHistory(rootPath)}
                     >
-                      Open Git History
+                      查看 Git 历史
                     </ContextMenuItem>
                   )}
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => void revealInFinder(rootPath)}
                   >
-                    Reveal in Finder
+                    在访达中显示
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => tree.beginCreate(rootPath, "file")}
                   >
-                    New File
+                    新建文件
                   </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => tree.beginCreate(rootPath, "dir")}
                   >
-                    New Folder
+                    新建文件夹
                   </ContextMenuItem>
                   <ContextMenuSeparator />
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => void copyToClipboard(rootPath)}
                   >
-                    Copy Path
+                    复制路径
                   </ContextMenuItem>
                   <ContextMenuItem
                     className={COMPACT_ITEM}
                     onSelect={() => tree.refresh(rootPath)}
                   >
-                    Refresh
+                    刷新
                   </ContextMenuItem>
                 </>
               )}

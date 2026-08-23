@@ -1,15 +1,4 @@
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  ArrowDown01Icon,
-  ExternalLinkIcon,
-  Folder01Icon,
-} from "@hugeicons/core-free-icons";
+import { Folder01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import {
@@ -25,8 +14,7 @@ type Props = {
   projectRoot: string;
 };
 
-/** The everyday two — worth a permanent button instead of a menu trip. The
- * rest stay in the dropdown so the bar doesn't turn into a toolbar zoo. */
+/** The two that get opened all day; anything else is a Finder trip away. */
 const PINNED: Record<string, { iconUrl: string }> = {
   "android-studio": { iconUrl: ANDROID_STUDIO_ICON },
   sourcetree: { iconUrl: SOURCETREE_ICON },
@@ -38,9 +26,9 @@ const ICON_BUTTON =
 /** "在外部打开" — hands the current project root to Android Studio / Sourcetree
  * / IDEA etc., so they open and focus this project rather than just launching. */
 export function OpenInToolMenu({ projectRoot }: Props) {
-  const [tools, setTools] = useState<
-    { tool: ExternalTool; appPath: string }[]
-  >([]);
+  const [tools, setTools] = useState<{ tool: ExternalTool; appPath: string }[]>(
+    [],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -52,8 +40,8 @@ export function OpenInToolMenu({ projectRoot }: Props) {
     };
   }, []);
 
+  // 只留常驻的几个;IntelliJ/Cursor 这类顺手在访达里打开就行,不值当再挂个下拉。
   const pinned = tools.filter(({ tool }) => tool.id in PINNED);
-  const rest = tools.filter(({ tool }) => !(tool.id in PINNED));
 
   return (
     <span className="flex items-center gap-1">
@@ -86,40 +74,6 @@ export function OpenInToolMenu({ projectRoot }: Props) {
       >
         <HugeiconsIcon icon={Folder01Icon} size={13} strokeWidth={1.75} />
       </button>
-
-      {rest.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              title="在其他外部工具中打开"
-              className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[12px] text-muted-foreground transition-colors hover:text-foreground"
-            >
-              <HugeiconsIcon
-                icon={ExternalLinkIcon}
-                size={12}
-                strokeWidth={1.75}
-              />
-              打开
-              <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={2} />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-44">
-            <DropdownMenuLabel className="text-xs">
-              在外部打开
-            </DropdownMenuLabel>
-            {rest.map(({ tool, appPath }) => (
-              <DropdownMenuItem
-                key={tool.id}
-                className="text-xs"
-                onSelect={() => void openInTool(appPath, projectRoot)}
-              >
-                {tool.name}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
     </span>
   );
 }
