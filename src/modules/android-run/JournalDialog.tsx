@@ -28,6 +28,7 @@ import {
   entryTime,
   loadDay,
   loadWeek,
+  monthDay,
   removeEntry,
   saveWeek,
   setDayField,
@@ -35,6 +36,7 @@ import {
   shiftWeek,
   type WeekLog,
   weekDayKeys,
+  weekdayName,
   weekKeyOf,
   weekLabel,
   weekMarkdown,
@@ -122,7 +124,13 @@ export function JournalDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex max-h-[80vh] flex-col gap-3 sm:max-w-2xl">
+      <DialogContent
+        className={cn(
+          "flex max-h-[80vh] flex-col gap-3",
+          // 七列要地方;按日就一栏,宽了反而空
+          mode === "week" ? "sm:max-w-4xl" : "sm:max-w-2xl",
+        )}
+      >
         <DialogHeader className="gap-1">
           <DialogTitle className="text-sm">日报</DialogTitle>
           <DialogDescription className="text-xs">
@@ -182,7 +190,7 @@ export function JournalDialog({ open, onClose }: Props) {
             <HugeiconsIcon icon={ArrowLeft01Icon} size={14} strokeWidth={2} />
           </button>
           <span className="min-w-0 flex-1 truncate text-center text-[13px] font-medium">
-            {mode === "day" ? `${day} ${dayLabel(day)}` : weekLabel(week)}
+            {mode === "day" ? `${day} ${weekdayName(day)}` : weekLabel(week)}
           </span>
           <button
             type="button"
@@ -302,41 +310,58 @@ export function JournalDialog({ open, onClose }: Props) {
                 </div>
               )
             ) : (
-              // 周视图只读:条目属于某一天,要改回那天改,免得同一条在两处能编辑
-              <div className="flex flex-col gap-2">
+              // 周视图只读:条目属于某一天,要改回那天改,免得同一条在两处能编辑。
+              // 七天平铺成七列,一眼看完一周 —— 竖着排要滚,还看不出哪天空着。
+              <div className="grid grid-cols-7 gap-1.5">
                 {weekDays.map(({ day: d, log }) => {
                   const today = d === dayKeyOf(new Date());
                   return (
-                    <div key={d} className="flex flex-col gap-0.5">
+                    <div
+                      key={d}
+                      className={cn(
+                        "flex min-w-0 flex-col gap-1 rounded border p-1.5",
+                        today
+                          ? "border-emerald-500/40 bg-emerald-500/5"
+                          : "border-border/60",
+                      )}
+                    >
                       <button
                         type="button"
+                        title={`跳到 ${d}`}
                         onClick={() => {
                           setMode("day");
                           setDay(d);
                         }}
                         className={cn(
-                          "w-fit rounded px-1 text-[12px] font-medium hover:bg-accent",
+                          "flex flex-col items-start leading-tight",
                           today
                             ? "text-emerald-500"
                             : "text-muted-foreground hover:text-foreground",
                         )}
                       >
-                        {dayLabel(d)}
-                        {today && " · 今天"}
+                        <span className="text-[12px] font-medium">
+                          {weekdayName(d)}
+                        </span>
+                        <span className="font-mono text-[10px] opacity-60 tabular-nums">
+                          {monthDay(d)}
+                        </span>
                       </button>
                       {log.entries.length === 0 ? (
-                        <span className="pl-4 text-[12px] text-muted-foreground/35">
+                        <span className="text-[11px] text-muted-foreground/30">
                           —
                         </span>
                       ) : (
-                        log.entries.map((e) => (
-                          <span
-                            key={e.id}
-                            className="pl-4 text-[13px] leading-relaxed"
-                          >
-                            · {e.text}
-                          </span>
-                        ))
+                        <div className="flex flex-col gap-1">
+                          {log.entries.map((e) => (
+                            <span
+                              key={e.id}
+                              title={`${entryTime(e.at)} ${e.text}`}
+                              className="break-words text-[12px] leading-snug"
+                            >
+                              {e.text}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                   );

@@ -201,6 +201,17 @@ export function dayLabel(key: string): string {
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${WEEKDAYS[mondayIndex(d)]}`;
 }
 
+/** 只要"周三"。周视图的列头用。 */
+export function weekdayName(key: string): string {
+  return WEEKDAYS[mondayIndex(parseDayKey(key))];
+}
+
+/** 只要"08-23"。 */
+export function monthDay(key: string): string {
+  const d = parseDayKey(key);
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 export function weekLabel(key: string): string {
   const m = mondayOfWeek(key);
   const sun = new Date(m.getFullYear(), m.getMonth(), m.getDate() + 6);
