@@ -1,4 +1,50 @@
 const LINKS_KEY = "terax.yunxiao.projectLinks";
+const MY_TASKS_KEY = "terax.yunxiao.myTasksUrl";
+
+/**
+ * 「我的云效任务」是全局的一个地址,跟目录无关 —— 每个人的待办页不一样,
+ * 所以不写死,自己填一次存本地。
+ */
+export function getMyTasksUrl(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(MY_TASKS_KEY) || null;
+}
+
+export function setMyTasksUrl(url: string): void {
+  const v = url.trim();
+  if (v) localStorage.setItem(MY_TASKS_KEY, v);
+  else localStorage.removeItem(MY_TASKS_KEY);
+}
+
+const TASK_LINKS_KEY = "terax.yunxiao.taskLinks";
+
+/**
+ * 「当前云效需求」跟着**工程**走,而且不继承 —— 它是"这个仓库我这会儿在做的
+ * 那条需求",换需求就改。跟按目录继承的「云效项目」是两码事:项目是产品线
+ * 长期的那个,需求是手头这一条。
+ */
+function loadTaskLinks(): Record<string, string> {
+  if (typeof localStorage === "undefined") return {};
+  try {
+    const raw = localStorage.getItem(TASK_LINKS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function getTaskLink(projectRoot: string): string | null {
+  return loadTaskLinks()[projectRoot.replace(/\/+$/, "")] ?? null;
+}
+
+export function setTaskLink(projectRoot: string, url: string): void {
+  const links = loadTaskLinks();
+  const key = projectRoot.replace(/\/+$/, "");
+  const v = url.trim();
+  if (v) links[key] = v;
+  else delete links[key];
+  localStorage.setItem(TASK_LINKS_KEY, JSON.stringify(links));
+}
 
 /**
  * 云效「项目」对应的是产品线**目录**(比如 `0.2.0-标准版本`),不是单个仓库 ——

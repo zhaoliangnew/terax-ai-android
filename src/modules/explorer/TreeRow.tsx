@@ -1,10 +1,14 @@
 import { cn } from "@/lib/utils";
-import type { ProjectKind } from "@/modules/android-run";
 import {
   type AgentPhaseState,
   useProjectAgentState,
 } from "@/modules/agent-status/AgentStatusDot";
-import { AndroidIcon, ArrowRight01Icon } from "@hugeicons/core-free-icons";
+import type { ProjectKind } from "@/modules/android-run";
+import {
+  AndroidIcon,
+  ArrowRight01Icon,
+  CloudIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
 import { InlineInput } from "./InlineInput";
@@ -54,6 +58,8 @@ export type EntryRowProps = {
   isOpenedProject?: boolean;
   /** 工程根 -> 该工程下所有终端 tab 的 pty id,驱动 Claude Code 状态灯。 */
   projectPtyIds?: Record<string, number[]>;
+  /** 这个目录本身绑了云效项目(不含继承),行尾挂个云图标。 */
+  yunxiaoLinked?: boolean;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -77,6 +83,7 @@ function EntryRowImpl(props: EntryRowProps) {
     isActiveProject = false,
     isOpenedProject = false,
     projectPtyIds,
+    yunxiaoLinked = false,
   } = props;
 
   const asProject = projectKind !== null && !!onOpenProject;
@@ -192,6 +199,15 @@ function EntryRowImpl(props: EntryRowProps) {
       >
         {name}
       </span>
+      {/* 绑过云效项目的目录挂个云 —— 否则绑没绑完全看不出来。 */}
+      {yunxiaoLinked && (
+        <HugeiconsIcon
+          icon={CloudIcon}
+          size={13}
+          strokeWidth={1.75}
+          className="mr-1 size-3.5 shrink-0 text-muted-foreground/50"
+        />
+      )}
     </button>
   );
 }

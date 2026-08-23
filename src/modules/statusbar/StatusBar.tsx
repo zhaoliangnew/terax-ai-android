@@ -13,6 +13,7 @@ import {
   CustomLinksMenu,
   DingGroupsMenu,
   KnowledgeBaseMenu,
+  MyYunxiaoButton,
 } from "@/modules/android-run";
 import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
@@ -47,8 +48,9 @@ export function StatusBar({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <KnowledgeBaseMenu />
-        <CustomLinksMenu />
+        <MyYunxiaoButton />
         <DingGroupsMenu />
+        <CustomLinksMenu />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />
         {privateActive ? (

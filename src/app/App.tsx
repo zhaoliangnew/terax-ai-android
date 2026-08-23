@@ -10,6 +10,7 @@ import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
 import { cn, isMarkdownPath } from "@/lib/utils";
+import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
 import {
   type AgentLaunchRequest,
   AgentNotificationsBridge,
@@ -31,18 +32,18 @@ import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import {
   AgentQuickLaunch,
-  type QuickAgentId,
   classifyProjectKind,
   findProjectRoot,
+  getTaskLink,
   isSupportedProductDir,
   OpenInToolMenu,
-  ProjectGroupButton,
-  DingGroupPickerDialog,
-  YunxiaoLinkDialog,
-  YunxiaoMenu,
+  ProjectLinksBar,
+  type QuickAgentId,
+  setTaskLink,
+  UrlPromptDialog,
   useAndroidRunStore,
+  YunxiaoLinkDialog,
 } from "@/modules/android-run";
-import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
 import {
@@ -119,11 +120,7 @@ import {
   type WorkspaceEnv,
   workspaceScopeKey,
 } from "@/modules/workspace";
-import {
-  Folder01Icon,
-  SidebarRightIcon,
-} from "@hugeicons/core-free-icons";
-import type { PanelImperativeHandle } from "react-resizable-panels";
+import { Folder01Icon, SidebarRightIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -139,6 +136,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { PanelImperativeHandle } from "react-resizable-panels";
 import { CloseDialogs } from "./components/CloseDialogs";
 
 const DevicePanel = lazy(() => import("@/modules/android-run/DevicePanel"));
@@ -419,7 +417,11 @@ export default function App() {
 
   // 右键目录 → 关联云效项目(云效项目对应产品线目录,不是单个仓库)。
   const [yunxiaoDir, setYunxiaoDir] = useState<string | null>(null);
-  const [dingGroupDir, setDingGroupDir] = useState<string | null>(null);
+  // 右键工程 → 填"当前云效需求"。跟目录级的云效项目分开:这个跟着仓库走,不继承。
+  const [taskDir, setTaskDir] = useState<string | null>(null);
+  // 云效需求地址有两个入口(工具栏按钮 / 目录树右键),改完靠这个信号互相同步。
+  const [linkVersion, setLinkVersion] = useState(0);
+  const bumpLinks = useCallback(() => setLinkVersion((n) => n + 1), []);
 
   // 切 tab 时把左栏定位到该 tab 的工程根,省得每次手动一层层展开找回来。
   const lastRevealedRef = useRef<string | null>(null);
@@ -446,11 +448,19 @@ export default function App() {
       const p = sidebarRef.current;
       const width = p?.getSize().inPixels ?? 0;
       if (p && width > 0) {
-        p.resize(`${Math.round(next ? width * 2 : width / 2)}px`);
+        const target = Math.min(
+          SIDEBAR_MAX_WIDTH,
+          Math.max(SIDEBAR_MIN_WIDTH, Math.round(next ? width * 2 : width / 2)),
+        );
+        p.resize(`${target}px`);
+        // 点开合也是用户主动调宽度,得记住 —— 侧栏默认只在手动拖动时才持久化,
+        // 不显式存的话下次启动会还原成展开时的宽度,产品区明明收着,左边树
+        // 却铺开一片空白。
+        persistSidebarWidth(target, true);
       }
       return next;
     });
-  }, [sidebarRef]);
+  }, [sidebarRef, persistSidebarWidth]);
   // 进产品后在右侧多加一块产品文件区(左侧钉住 Space 全部项目树)。
   const showProductPane =
     androidProjectRoot !== null &&
@@ -1561,71 +1571,69 @@ export default function App() {
                           sidebarView !== "explorer" && "hidden",
                         )}
                       >
-                          {/* 左:工作区全部项目树,钉在 Space 根目录(不跟随终端),
+                        {/* 左:工作区全部项目树,钉在 Space 根目录(不跟随终端),
                               始终可点别的项目/产品切换。 */}
-                          <div className="flex min-w-0 flex-1 flex-col">
-                            <div className="min-h-0 flex-1">
-                              <FileExplorer
-                                ref={explorerRef}
-                                rootPath={activeSpaceRoot ?? explorerRoot}
-                                gitStatus={
-                                  explorerGitDecorations
-                                    ? sourceControl.status
-                                    : null
-                                }
-                                activeFilePath={explorerActiveFilePath}
-                                onOpenFile={handleOpenFile}
-                                onPathRenamed={handlePathRenamed}
-                                onPathDeleted={handlePathDeleted}
-                                onRevealInTerminal={cdInNewTab}
-                                onOpenNewTerminal={openNewTerminalAt}
-                                classifyProjectDir={classifyProjectKind}
-                                onOpenProject={cdInNewTab}
-                                activeProjectPath={androidProjectRoot}
-                                openedProjectPaths={openedProjectPaths}
-                                projectPtyIds={projectPtyIds}
-                                onOpenInSourceControl={
-                                  handleOpenRepositoryInSourceControl
-                                }
-                                onOpenGitHistory={handleOpenGitHistoryForPath}
-                                onAttachToAgent={handleAttachFileToAgent}
-                                onSetAsRoot={handleSetSpaceRoot}
-                                onLinkYunxiao={setYunxiaoDir}
-                                onLinkDingGroup={setDingGroupDir}
-                                headerExtra={
-                                  showProductPane && androidProjectRoot ? (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        toggleProductPane()
-                                      }
-                                      title={
-                                        productPaneOpen
-                                          ? "收起产品目录文件"
-                                          : "展开产品目录文件"
-                                      }
-                                      className={cn(
-                                        "flex size-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
-                                        productPaneOpen
-                                          ? "text-emerald-500"
-                                          : "text-muted-foreground",
-                                      )}
-                                    >
-                                      <HugeiconsIcon
-                                        icon={SidebarRightIcon}
-                                        size={13}
-                                        strokeWidth={1.75}
-                                      />
-                                    </button>
-                                  ) : null
-                                }
-                                pathDropTarget={terminalPathDropTarget}
-                              />
-                            </div>
+                        <div className="flex min-w-0 flex-1 flex-col">
+                          <div className="min-h-0 flex-1">
+                            <FileExplorer
+                              ref={explorerRef}
+                              rootPath={activeSpaceRoot ?? explorerRoot}
+                              gitStatus={
+                                explorerGitDecorations
+                                  ? sourceControl.status
+                                  : null
+                              }
+                              activeFilePath={explorerActiveFilePath}
+                              onOpenFile={handleOpenFile}
+                              onPathRenamed={handlePathRenamed}
+                              onPathDeleted={handlePathDeleted}
+                              onRevealInTerminal={cdInNewTab}
+                              onOpenNewTerminal={openNewTerminalAt}
+                              classifyProjectDir={classifyProjectKind}
+                              onOpenProject={cdInNewTab}
+                              activeProjectPath={androidProjectRoot}
+                              openedProjectPaths={openedProjectPaths}
+                              projectPtyIds={projectPtyIds}
+                              onOpenInSourceControl={
+                                handleOpenRepositoryInSourceControl
+                              }
+                              onOpenGitHistory={handleOpenGitHistoryForPath}
+                              onAttachToAgent={handleAttachFileToAgent}
+                              onSetAsRoot={handleSetSpaceRoot}
+                              onLinkYunxiao={setYunxiaoDir}
+                              onLinkYunxiaoTask={setTaskDir}
+                              headerExtra={
+                                showProductPane && androidProjectRoot ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleProductPane()}
+                                    title={
+                                      productPaneOpen
+                                        ? "收起产品目录文件"
+                                        : "展开产品目录文件"
+                                    }
+                                    className={cn(
+                                      "flex size-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
+                                      productPaneOpen
+                                        ? "text-emerald-500"
+                                        : "text-muted-foreground",
+                                    )}
+                                  >
+                                    <HugeiconsIcon
+                                      icon={SidebarRightIcon}
+                                      size={13}
+                                      strokeWidth={1.75}
+                                    />
+                                  </button>
+                                ) : null
+                              }
+                              pathDropTarget={terminalPathDropTarget}
+                            />
                           </div>
-                          {showProductPane &&
-                            androidProjectRoot &&
-                            productPaneOpen && (
+                        </div>
+                        {showProductPane &&
+                          androidProjectRoot &&
+                          productPaneOpen && (
                             <div className="flex min-w-0 flex-1 flex-col border-l border-border/60">
                               <div className="min-h-0 flex-1">
                                 <FileExplorer
@@ -1705,9 +1713,10 @@ export default function App() {
                             onLaunch={openAgentTerminal}
                           />
                           <OpenInToolMenu projectRoot={androidProjectRoot} />
-                          <YunxiaoMenu projectRoot={androidProjectRoot} />
-                          <ProjectGroupButton
+                          <ProjectLinksBar
                             projectRoot={androidProjectRoot}
+                            version={linkVersion}
+                            onChanged={bumpLinks}
                           />
                         </span>
                       </div>
@@ -1820,9 +1829,15 @@ export default function App() {
             onClose={() => setYunxiaoDir(null)}
           />
 
-          <DingGroupPickerDialog
-            dir={dingGroupDir}
-            onClose={() => setDingGroupDir(null)}
+          <UrlPromptDialog
+            value={taskDir ? (getTaskLink(taskDir) ?? "") : null}
+            title="当前云效需求"
+            description={`贴上手头这条需求/任务的云效地址。只对 ${taskDir?.split("/").pop() ?? ""} 生效,换需求随时改。`}
+            onClose={() => setTaskDir(null)}
+            onSave={(url) => {
+              if (taskDir) setTaskLink(taskDir, url);
+              bumpLinks();
+            }}
           />
 
           <WindowVibrancyBridge />
@@ -1877,7 +1892,6 @@ export default function App() {
             rootPath={explorerRoot ?? home}
             onCreated={(path) => openFileTab(path)}
           />
-
 
           <CloseDialogs
             tabs={tabs}

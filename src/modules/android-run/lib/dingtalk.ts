@@ -4,7 +4,6 @@ import { DEFAULT_DING_ENTRIES } from "./dingDefaults";
 import { shellQuote } from "./openExternally";
 
 const GROUPS_KEY = "terax.dingtalk.groups";
-const BINDINGS_KEY = "terax.dingtalk.groupBindings";
 
 /**
  * 只存名字 —— 因为跳转做不到(见下面 revealConversation 的注释),
@@ -98,13 +97,23 @@ export function clearCustomGroups(): DingEntry[] {
 /**
  * 直接跳进某个群:做不到。
  *
- * 试过四条路,全断:
+ * 试过五条路,全断:
  *  - `dingtalk://dingtalkclient/action/openConversation` 只有手机端认,
  *    桌面版弹"暂时无法打开该链接,请在手机上查看";
  *  - `dd.openChatByConversationId()` 是 JSAPI,只能在钉钉自己的 H5 容器里跑;
  *  - AppleScript 模拟按键要 Accessibility 授权,而且钉钉搜索框那套手动流程
  *    本身就进不去群;
- *  - `dws chat` 清一色是服务端 API,没有操作本机客户端的命令。
+ *  - `dws chat` 清一色是服务端 API,没有操作本机客户端的命令;
+ *  - `dingtalk://dingtalkclient/page/conversation?cid=<cid>` —— 这条**是**
+ *    桌面版真正的进群入口(从客户端二进制里 strings 挖出来的,文档和网上都
+ *    没有,scheme 通道也验证过:`action/open_setting_wnd` 能弹出设置窗)。
+ *    卡在 cid:它要客户端内部的会话 id,而开放平台/dws 给的
+ *    `openConversationId` 是按 AppKey 加密过的另一套值,两者长得像
+ *    (都是 `cidXXX==`)但对不上。实测方法:拿一个有未读的群发链接,几秒后
+ *    `dws chat +unread-chats` 里它还在 → 没跳进去。本地库
+ *    `DBFiles/dingtalk.db` 是 SQLCipher 加密的,掏不出真 cid。
+ *    同理 `push_right_chat` / `makechat` / `open_conv_record` 也全卡在这。
+ *    要是哪天能拿到原始 cid(比如客户端提供"复制群链接"),这条路就通了。
  *
  * 所以退一步:把群名塞进剪贴板,再把钉钉切到前台,剩下粘贴一下。省掉
  * "想群名"和"切窗口"两步,不假装能一键直达。
@@ -117,35 +126,4 @@ export async function revealConversation(name: string): Promise<void> {
   toast.success("已复制群名", {
     description: `“${name}” —— 在钉钉搜索框粘贴即可`,
   });
-}
-
-// ---- 目录 → 群 的绑定 ----------------------------------------------------
-// 跟云效项目一样,群对应的是产品线**目录**,底下每个工程继承同一个对接群。
-
-function loadBindings(): Record<string, string> {
-  return read<Record<string, string>>(BINDINGS_KEY, {});
-}
-
-export function setGroupBinding(dir: string, name: string | null): void {
-  const all = loadBindings();
-  const key = dir.replace(/\/+$/, "");
-  if (name) all[key] = name;
-  else delete all[key];
-  localStorage.setItem(BINDINGS_KEY, JSON.stringify(all));
-}
-
-export type ResolvedGroup = { dir: string; name: string };
-
-/** 从 `startDir` 逐级向上找最近一个绑过群的目录。 */
-export function resolveGroupBinding(startDir: string): ResolvedGroup | null {
-  const all = loadBindings();
-  let dir = startDir.replace(/\/+$/, "");
-  while (dir.length > 1) {
-    const name = all[dir];
-    if (name) return { dir, name };
-    const parent = dir.slice(0, dir.lastIndexOf("/"));
-    if (!parent || parent === dir) break;
-    dir = parent;
-  }
-  return null;
 }

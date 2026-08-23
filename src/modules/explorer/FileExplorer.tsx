@@ -8,13 +8,20 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
-import type { ProjectKind } from "@/modules/android-run";
+import {
+  getProjectLink,
+  getTaskLink,
+  openExternally,
+  type ProjectKind,
+  resolveProjectLink,
+} from "@/modules/android-run";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
   ArrowUp01Icon,
   FileAddIcon,
+  FilterHorizontalIcon,
   Folder01Icon,
   FolderAddIcon,
   Refresh01Icon,
@@ -87,8 +94,8 @@ type Props = {
   headerExtra?: ReactNode;
   /** 给这个目录绑定云效项目(云效项目对应产品线目录,不是单个仓库)。 */
   onLinkYunxiao?: (path: string) => void;
-  /** 给这个目录绑定钉钉对接群,同样按目录继承。 */
-  onLinkDingGroup?: (path: string) => void;
+  /** 给这个工程填"当前云效需求"地址(跟着仓库走,不继承)。 */
+  onLinkYunxiaoTask?: (path: string) => void;
   pathDropTarget?: TerminalPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
 };
@@ -150,6 +157,8 @@ function buildRows(
   rootPath: string,
   tree: ReturnType<typeof useFileTree>,
   lookup: (path: string) => GitStatusCode | null,
+  /** 非空 = 只保留这些路径(以及它们的父目录),其余整棵子树都不画。 */
+  keep: Set<string> | null,
 ): { rows: Row[]; entryIndexByPath: Map<string, number> } {
   const rows: Row[] = [];
   const entryIndexByPath = new Map<string, number>();
@@ -159,6 +168,7 @@ function buildRows(
     if (!node || node.status !== "loaded") return;
     for (const entry of node.entries) {
       const path = tree.joinPath(parent, entry.name);
+      if (keep && !keep.has(path)) continue;
       const isDir = entry.kind === "dir";
       const expanded = isDir && tree.expanded.has(path);
       const isRenaming = tree.renaming === path;
@@ -247,7 +257,7 @@ export const FileExplorer = memo(
       onSetAsRoot,
       headerExtra,
       onLinkYunxiao,
-      onLinkDingGroup,
+      onLinkYunxiaoTask,
       pathDropTarget,
       gitStatus,
     },
@@ -267,13 +277,49 @@ export const FileExplorer = memo(
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
 
+    // 产品目录动辄上百个,平时只关心开着 tab 的那几个 —— 这个开关把树收成
+    // "只留有打开 tab 的工程 + 它们的父目录"。
+    const canFilterOpened = !!openedProjectPaths?.size;
+    const [onlyOpened, setOnlyOpened] = useState(
+      () => localStorage.getItem("terax.explorer.onlyOpened") === "1",
+    );
+    useEffect(() => {
+      localStorage.setItem("terax.explorer.onlyOpened", onlyOpened ? "1" : "0");
+    }, [onlyOpened]);
+
+    const keepPaths = useMemo(() => {
+      if (!onlyOpened || !canFilterOpened || !rootPath) return null;
+      const root = rootPath.replace(/\/+$/, "");
+      const keep = new Set<string>();
+      for (const p of openedProjectPaths ?? []) {
+        if (p !== root && !p.startsWith(`${root}/`)) continue;
+        keep.add(p);
+        let d = parentDir(p);
+        while (d && d.length > root.length) {
+          keep.add(d);
+          d = parentDir(d);
+        }
+      }
+      return keep;
+    }, [onlyOpened, canFilterOpened, openedProjectPaths, rootPath]);
+
+    // 光过滤还不够:父目录没展开就看不到里面的工程,而展开又是加载子节点的
+    // 触发点,所以这里真去展开,而不是画的时候假装展开。
+    useEffect(() => {
+      if (!keepPaths) return;
+      for (const p of keepPaths) {
+        if (!openedProjectPaths?.has(p) && !tree.expanded.has(p))
+          tree.toggle(p);
+      }
+    }, [keepPaths, openedProjectPaths, tree.expanded, tree.toggle]);
+
     const { rows, entryIndexByPath } = useMemo(() => {
       if (!rootPath)
         return {
           rows: [] as Row[],
           entryIndexByPath: new Map<string, number>(),
         };
-      return buildRows(rootPath, tree, lookupGitStatus);
+      return buildRows(rootPath, tree, lookupGitStatus, keepPaths);
       // `tree` is intentionally omitted: its identity changes every render, but
       // the listed fields are the only inputs buildRows actually reads.
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -284,6 +330,7 @@ export const FileExplorer = memo(
       tree.renaming,
       tree.pendingCreate,
       lookupGitStatus,
+      keepPaths,
     ]);
 
     // Classify visible directories as gradle projects (async, cached). Project
@@ -415,7 +462,10 @@ export const FileExplorer = memo(
         const viewTop = el.scrollTop;
         const viewBottom = viewTop + el.clientHeight;
         const margin = ROW_HEIGHT * 2;
-        if (top >= viewTop + margin && top + ROW_HEIGHT <= viewBottom - margin) {
+        if (
+          top >= viewTop + margin &&
+          top + ROW_HEIGHT <= viewBottom - margin
+        ) {
           return;
         }
         el.scrollTop = Math.max(0, top - el.clientHeight * 0.35);
@@ -627,7 +677,10 @@ export const FileExplorer = memo(
               onSelectPath={setSelectedPath}
               gitStatusCode={row.gitStatusCode}
               gitignored={gitDecorations && row.gitignored}
-              projectKind={row.isDir ? (projectDirs.get(row.path) ?? null) : null}
+              projectKind={
+                row.isDir ? (projectDirs.get(row.path) ?? null) : null
+              }
+              yunxiaoLinked={row.isDir && getProjectLink(row.path) !== null}
               onOpenProject={onOpenProject}
               isActiveProject={
                 !!activeProjectPath && row.path === activeProjectPath
@@ -734,6 +787,26 @@ export const FileExplorer = memo(
           >
             <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={2} />
           </Button>
+          {canFilterOpened && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "size-6",
+                onlyOpened
+                  ? "text-emerald-500 hover:text-emerald-400"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setOnlyOpened((v) => !v)}
+              title={onlyOpened ? "显示全部目录" : "只看已打开的工程"}
+            >
+              <HugeiconsIcon
+                icon={FilterHorizontalIcon}
+                size={13}
+                strokeWidth={2}
+              />
+            </Button>
+          )}
           {headerExtra}
         </div>
 
@@ -884,22 +957,47 @@ export const FileExplorer = memo(
                       新开终端
                     </ContextMenuItem>
                   )}
-                  {menuTarget.isDir && onLinkYunxiao && (
+                  {/* 绑定在祖先目录上也算数(继承),所以工程行上也能直接打开
+                      产品线的云效项目 —— 否则绑完了没地方点开。 */}
+                  {menuTarget.isDir && resolveProjectLink(menuTarget.path) && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}
-                      onSelect={() => onLinkYunxiao(menuTarget.path)}
+                      onSelect={() => {
+                        const link = resolveProjectLink(menuTarget.path);
+                        if (link) openExternally(link.url);
+                      }}
                     >
-                      关联云效项目…
+                      打开云效项目
                     </ContextMenuItem>
                   )}
-                  {menuTarget.isDir && onLinkDingGroup && (
-                    <ContextMenuItem
-                      className={COMPACT_ITEM}
-                      onSelect={() => onLinkDingGroup(menuTarget.path)}
-                    >
-                      关联钉钉群…
-                    </ContextMenuItem>
-                  )}
+                  {/* 工程目录挂"当前需求"(跟着这个仓库走),产品线目录才挂
+                      "云效项目"(底下所有工程继承)—— 两个层级两回事,别混在
+                      一个菜单项里。 */}
+                  {menuTarget.isDir &&
+                    projectDirs.has(menuTarget.path) &&
+                    onLinkYunxiaoTask && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => onLinkYunxiaoTask(menuTarget.path)}
+                      >
+                        {getTaskLink(menuTarget.path)
+                          ? "修改当前云效需求…"
+                          : "关联当前云效需求…"}
+                      </ContextMenuItem>
+                    )}
+                  {menuTarget.isDir &&
+                    !projectDirs.has(menuTarget.path) &&
+                    onLinkYunxiao && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => onLinkYunxiao(menuTarget.path)}
+                      >
+                        {/* 已经绑过就说"修改",免得以为会再加一个 */}
+                        {getProjectLink(menuTarget.path)
+                          ? "修改云效项目…"
+                          : "关联云效项目…"}
+                      </ContextMenuItem>
+                    )}
                   {menuTarget.isDir && onSetAsRoot && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}

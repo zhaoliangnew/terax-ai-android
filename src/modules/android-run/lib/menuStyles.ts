@@ -6,7 +6,7 @@
 
 /** 底栏上的触发按钮。 */
 export const MENU_TRIGGER =
-  "flex items-center gap-1.5 rounded border border-border px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+  "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded border border-border px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
 /** 下拉里的标题行。 */
 export const MENU_HEAD =
