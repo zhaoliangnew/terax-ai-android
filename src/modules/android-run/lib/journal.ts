@@ -299,19 +299,19 @@ function section(title: string, body: string): string {
 
 export function dayMarkdown(day: string, byKind = false): string {
   const log = loadDay(day);
+  // 复制出去的不带时刻:日报里"几点几分做的"没人关心,还占地方。界面上留着,
+  // 那是给自己回忆用的。
   const entries = byKind
     ? groupByKind(log.entries)
         .map(
           (g) =>
             `- ${g.kind ?? "未分类"}\n${g.items
-              .map((e) => `  - ${entryTime(e.at)} ${e.text}`)
+              .map((e) => `  - ${e.text}`)
               .join("\n")}`,
         )
         .join("\n")
     : log.entries
-        .map(
-          (e) => `- ${entryTime(e.at)}${e.kind ? ` [${e.kind}]` : ""} ${e.text}`,
-        )
+        .map((e) => `- ${e.kind ? `[${e.kind}] ` : ""}${e.text}`)
         .join("\n");
   const parts = [
     `## ${day}(${dayLabel(day).split(" ")[1]})`,
