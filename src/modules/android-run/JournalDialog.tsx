@@ -208,26 +208,31 @@ export function JournalDialog({ open, onClose }: Props) {
     setDay(weekDayKeys(next)[offset < 0 ? 0 : offset]);
   };
 
-  const submit = useCallback(() => {
-    if (!draft.trim()) return;
-    // 记到"现在"所在的那天,不是当前翻到的那天 —— 翻着历史顺手记一条,
-    // 结果落到上周三去,那就麻烦了。
-    const now = new Date();
-    const key = dayKeyOf(now);
-    addEntry(key, draft, now, kind);
-    setDraft("");
-    // 记完就关:多数时候打开它就是为了记这一条,记完还杵在那儿反而要多点一下
-    if (closeAfter) {
-      onClose();
-      return;
-    }
-    if (key === day) setDayLog(loadDay(day));
-    else {
-      setMode("day");
-      setDay(key);
-      toast.success("已记到今天", { description: dayLabel(key) });
-    }
-  }, [draft, day, kind, closeAfter, onClose]);
+  // withKind:点类型标签直接记的时候传进来 —— setKind 是异步的,同一轮里读
+  // kind 还是旧值,不能指望它。
+  const submit = useCallback(
+    (withKind: EntryKind = kind) => {
+      if (!draft.trim()) return;
+      // 记到"现在"所在的那天,不是当前翻到的那天 —— 翻着历史顺手记一条,
+      // 结果落到上周三去,那就麻烦了。
+      const now = new Date();
+      const key = dayKeyOf(now);
+      addEntry(key, draft, now, withKind);
+      setDraft("");
+      // 记完就关:多数时候打开它就是为了记这一条,记完还杵在那儿反而要多点一下
+      if (closeAfter) {
+        onClose();
+        return;
+      }
+      if (key === day) setDayLog(loadDay(day));
+      else {
+        setMode("day");
+        setDay(key);
+        toast.success("已记到今天", { description: dayLabel(key) });
+      }
+    },
+    [draft, day, kind, closeAfter, onClose],
+  );
 
   // 周/月共用一份数据:一行一天。周把七天都列出来(空的留个"—",一眼看出哪天
   // 漏了);月里空着的日子直接不显示 —— 三十行里二十行是"—"就没法看了。
@@ -673,7 +678,7 @@ export function JournalDialog({ open, onClose }: Props) {
                     className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-[14px] outline-none focus:border-ring"
                   />
                   <Button
-                    onClick={submit}
+                    onClick={() => submit()}
                     disabled={!draft.trim()}
                     className="h-10 shrink-0 px-5 text-[13.5px]"
                   >
@@ -685,7 +690,15 @@ export function JournalDialog({ open, onClose }: Props) {
                     <button
                       key={k}
                       type="button"
-                      onClick={() => setKind(k)}
+                      title={
+                        draft.trim() ? `直接记成「${k}」` : `之后记的算「${k}」`
+                      }
+                      // 输入框里有字就直接记成这一类:少一次"先选类型再回车"。
+                      // 空的时候才是单纯切换,免得手滑点一下就冒出一条空记录。
+                      onClick={() => {
+                        setKind(k);
+                        if (draft.trim()) submit(k);
+                      }}
                       className={cn(
                         "rounded-full border px-3 py-1 text-[12.5px] transition-colors",
                         kind === k
