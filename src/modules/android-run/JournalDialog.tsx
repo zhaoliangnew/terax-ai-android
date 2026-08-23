@@ -30,7 +30,6 @@ import {
   entryTime,
   groupByKind,
   type JournalEntry,
-  lastKind,
   loadDay,
   loadMonth,
   loadWeek,
@@ -81,6 +80,11 @@ const KIND_TONE: Record<EntryKind, string> = {
   其他: "border-border bg-accent text-foreground",
 };
 
+/** 存的时候是往后追加,看的时候要最新的在最上面。 */
+function newestFirst<T>(entries: T[]): T[] {
+  return [...entries].reverse();
+}
+
 function KindTag({ kind }: { kind?: EntryKind }) {
   if (!kind) return null;
   return (
@@ -116,7 +120,9 @@ export function JournalDialog({ open, onClose }: Props) {
   const [weekLog, setWeekLog] = useState<WeekLog>(() => loadWeek(week));
   const [monthLog, setMonthLog] = useState<MonthLog>(() => loadMonth(month));
   const [draft, setDraft] = useState("");
-  const [kind, setKind] = useState<EntryKind>(() => lastKind());
+  // 默认永远是开发任务 —— 绝大多数记录都是它。这一次里改过就跟着你改的走,
+  // 但下次打开重新回到开发任务,不去记上次选的那个。
+  const [kind, setKind] = useState<EntryKind>(ENTRY_KINDS[0]);
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
     null,
   );
@@ -141,7 +147,7 @@ export function JournalDialog({ open, onClose }: Props) {
     setWeekLog(loadWeek(w));
     setMonthLog(loadMonth(m));
     setDraft("");
-    setKind(lastKind());
+    setKind(ENTRY_KINDS[0]);
     setCloseAfter(closeAfterAdd());
     setEditing(null);
   }, [open]);
@@ -486,8 +492,8 @@ export function JournalDialog({ open, onClose }: Props) {
               ) : (
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
                   {group === "time"
-                    ? dayLog.entries.map(entryRow)
-                    : groupByKind(dayLog.entries).map((g) => (
+                    ? newestFirst(dayLog.entries).map(entryRow)
+                    : groupByKind(newestFirst(dayLog.entries)).map((g) => (
                         <div
                           key={g.kind ?? "未分类"}
                           className="mb-2 flex flex-col"
@@ -517,7 +523,7 @@ export function JournalDialog({ open, onClose }: Props) {
                     这{mode === "week" ? "周" : "个月"}还没记过
                   </span>
                 ) : (
-                  groupByKind(periodEntries).map((g) => (
+                  groupByKind(newestFirst(periodEntries)).map((g) => (
                     <div key={g.kind ?? "未分类"} className="flex flex-col">
                       <div className="flex items-center gap-2 px-2 py-1">
                         {g.kind ? (
@@ -595,7 +601,7 @@ export function JournalDialog({ open, onClose }: Props) {
                               —
                             </span>
                           ) : (
-                            entries.map((e) => (
+                            newestFirst(entries).map((e) => (
                               <div
                                 key={e.id}
                                 className="flex items-start gap-2.5"

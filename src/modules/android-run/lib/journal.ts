@@ -29,21 +29,6 @@ export type JournalEntry = {
   kind?: EntryKind;
 };
 
-const LAST_KIND_KEY = "terax.journal.lastKind";
-
-/** 上次选的类型。一天里多半连着记同一类,省得每条都重选。 */
-export function lastKind(): EntryKind {
-  if (typeof localStorage === "undefined") return ENTRY_KINDS[0];
-  const v = localStorage.getItem(LAST_KIND_KEY);
-  return (ENTRY_KINDS as readonly string[]).includes(v ?? "")
-    ? (v as EntryKind)
-    : ENTRY_KINDS[0];
-}
-
-export function rememberKind(kind: EntryKind): void {
-  localStorage.setItem(LAST_KIND_KEY, kind);
-}
-
 const CLOSE_AFTER_KEY = "terax.journal.closeAfterAdd";
 
 /** 记完一条要不要顺手关掉窗口。默认关掉:多数时候打开它就是为了记这一条。 */
@@ -162,7 +147,6 @@ export function addEntry(
 ): DayLog {
   const trimmed = text.trim();
   if (!trimmed) return loadDay(day);
-  rememberKind(kind);
   const log = loadDay(day);
   const entry: JournalEntry = {
     id: `${at.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
