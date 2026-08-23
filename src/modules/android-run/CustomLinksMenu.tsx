@@ -67,7 +67,9 @@ export function CustomLinksMenu() {
           挂在角落里既压着终端又只能长这么高。 */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="flex max-h-[70vh] flex-col gap-0 p-0 sm:max-w-2xl">
-          <DialogHeader className="flex-row items-center justify-between gap-3 space-y-0 border-b border-border px-4 py-3 pr-10">
+          {/* "添加"跟在标题后面,右上角整片留给关闭按钮 —— 它是绝对定位的
+              (top-4 right-4),挤在同一行右端必然对不齐。 */}
+          <DialogHeader className="flex-row items-center gap-3 space-y-0 border-b border-border px-4 py-3 pr-14">
             <DialogTitle className="text-[14px] font-semibold">
               收藏夹
             </DialogTitle>
