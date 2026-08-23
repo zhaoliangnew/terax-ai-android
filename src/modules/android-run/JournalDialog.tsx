@@ -121,7 +121,28 @@ export function JournalDialog({ open, onClose }: Props) {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
     null,
   );
-  const listRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollListToBottom = useCallback(() => {
+    // 连等两帧再滚:第一次打开时这个 div 是刚挂上的,弹窗还在放入场动画,
+    // 当帧量到的 scrollHeight 还不是排版完的值,滚了也是白滚。
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = listRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    });
+  }, []);
+
+  // 用回调 ref 而不是只靠 effect:effect 跑的时候 ref 可能还没接上(内容随
+  // 弹窗一起挂载),接上的那一刻自己滚一次最稳。
+  const attachList = useCallback(
+    (el: HTMLDivElement | null) => {
+      listRef.current = el;
+      if (el) scrollListToBottom();
+    },
+    [scrollListToBottom],
+  );
   // 记录怎么排:按时间是"发生顺序",按分类是"日报要交的样子"
   const [group, setGroup] = useState<"time" | "kind">("time");
   const [closeAfter, setCloseAfter] = useState(() => closeAfterAdd());
@@ -156,9 +177,8 @@ export function JournalDialog({ open, onClose }: Props) {
   // 换天、刚记完,都把列表滚到底,不然新记的那条在屏幕外面。
   // biome-ignore lint/correctness/useExhaustiveDependencies: 这几个都是"该重新滚一次"的信号
   useEffect(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [open, day, mode, group, dayLog]);
+    scrollListToBottom();
+  }, [open, day, mode, group, dayLog, scrollListToBottom]);
 
   const today = dayKeyOf(new Date());
   const thisWeek = weekKeyOf(new Date());
@@ -495,7 +515,7 @@ export function JournalDialog({ open, onClose }: Props) {
                 </span>
               ) : (
                 <div
-                  ref={listRef}
+                  ref={attachList}
                   className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1"
                 >
                   {group === "time"
