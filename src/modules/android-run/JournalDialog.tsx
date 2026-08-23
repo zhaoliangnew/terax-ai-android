@@ -343,14 +343,20 @@ export function JournalDialog({ open, onClose }: Props) {
           >
             <HugeiconsIcon icon={ArrowRight01Icon} size={18} strokeWidth={2} />
           </button>
+          {/* 翻远了才出现,而且是绿的 —— 灰色 ghost 混在一排按钮里根本看不见,
+              而这颗是"我迷路了,带我回去"的按钮,就该显眼。 */}
           <Button
-            variant="ghost"
+            variant="outline"
             onClick={() => {
               setDay(today);
               setWeek(thisWeek);
             }}
             disabled={atNow}
-            className="h-9 shrink-0 text-[13px]"
+            className={cn(
+              "h-9 shrink-0 text-[13px]",
+              !atNow &&
+                "border-emerald-500/50 text-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-400",
+            )}
           >
             回到{mode === "day" ? "今天" : "本周"}
           </Button>
