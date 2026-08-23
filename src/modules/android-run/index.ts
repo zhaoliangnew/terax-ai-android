@@ -4,6 +4,7 @@ export {
   type QuickAgentId,
 } from "./AgentQuickLaunch";
 export { AndroidRunToolbar } from "./AndroidRunToolbar";
+export { ApifoxMenu } from "./ApifoxMenu";
 export { CustomLinksMenu } from "./CustomLinksMenu";
 export { DingGroupsMenu } from "./DingGroupsMenu";
 export { KnowledgeBaseMenu } from "./KnowledgeBaseMenu";

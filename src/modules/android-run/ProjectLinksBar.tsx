@@ -76,7 +76,8 @@ export function ProjectLinksBar({ projectRoot, version, onChanged }: Props) {
         className={cn(MENU_TRIGGER, !task && "text-muted-foreground/45")}
       >
         <HugeiconsIcon icon={Task01Icon} size={13} strokeWidth={1.75} />
-        当前云效需求
+        {/* 工程面板窄下来就只剩图标 —— 文案两个加起来快 200px,不让它挤面包屑。 */}
+        <span className="@max-[520px]:hidden">当前云效需求</span>
       </button>
 
       {codeupPath && (
@@ -87,7 +88,7 @@ export function ProjectLinksBar({ projectRoot, version, onChanged }: Props) {
           className={MENU_TRIGGER}
         >
           <HugeiconsIcon icon={GitBranchIcon} size={13} strokeWidth={1.75} />
-          云效仓库
+          <span className="@max-[520px]:hidden">云效仓库</span>
         </button>
       )}
 

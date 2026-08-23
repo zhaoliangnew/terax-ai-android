@@ -8,21 +8,29 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useEffect, useState } from "react";
-import {
-  fallbackTitle,
-  type QuickLink,
-  upsertQuickLink,
-} from "./lib/quickLinks";
+import { fallbackTitle, type QuickLink } from "./lib/quickLinks";
 
 type Props = {
   /** 要编辑的入口;null = 关闭。新增就传一个空壳。 */
   link: QuickLink | null;
   onClose: () => void;
-  onSaved: (links: QuickLink[]) => void;
+  /** 存哪张表由调用方决定 —— 收藏夹和 Apifox 各存各的。 */
+  onSave: (link: QuickLink) => void;
+  /** 弹窗标题,默认"收藏夹"。 */
+  title?: string;
+  description?: string;
+  placeholder?: string;
 };
 
 /** 新增/编辑一个自定义入口。 */
-export function QuickLinkEditDialog({ link, onClose, onSaved }: Props) {
+export function QuickLinkEditDialog({
+  link,
+  onClose,
+  onSave,
+  title = "收藏夹",
+  description = "贴上云效知识库、钉钉文档之类的地址,点击即用系统浏览器打开。",
+  placeholder = "https://alidocs.dingtalk.com/i/nodes/…",
+}: Props) {
   const [draft, setDraft] = useState<QuickLink | null>(link);
 
   // 每次换一个条目重新开,草稿跟着重置。
@@ -33,13 +41,11 @@ export function QuickLinkEditDialog({ link, onClose, onSaved }: Props) {
     const url = draft.url.trim();
     // 地址是空的就当没填,直接关掉,不留空条目。
     if (url) {
-      onSaved(
-        upsertQuickLink({
-          ...draft,
-          url,
-          title: draft.title.trim() || fallbackTitle(url),
-        }),
-      );
+      onSave({
+        ...draft,
+        url,
+        title: draft.title.trim() || fallbackTitle(url),
+      });
     }
     onClose();
   };
@@ -48,9 +54,9 @@ export function QuickLinkEditDialog({ link, onClose, onSaved }: Props) {
     <Dialog open={link !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-sm">收藏夹</DialogTitle>
+          <DialogTitle className="text-sm">{title}</DialogTitle>
           <DialogDescription className="text-xs">
-            贴上云效知识库、钉钉文档之类的地址,点击即用系统浏览器打开。
+            {description}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
@@ -73,7 +79,7 @@ export function QuickLinkEditDialog({ link, onClose, onSaved }: Props) {
               e.stopPropagation();
               if (e.key === "Enter") commit();
             }}
-            placeholder="https://alidocs.dingtalk.com/i/nodes/…"
+            placeholder={placeholder}
             spellCheck={false}
             className="h-8 w-full rounded border border-input bg-transparent px-2 font-mono text-[12px] outline-none focus:border-ring"
           />

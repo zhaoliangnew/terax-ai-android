@@ -1677,26 +1677,33 @@ export default function App() {
               <ResizablePanel id="workspace" defaultSize="34%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
+                    {/* @container:窄下来的时候右边那几个按钮自己缩成图标,
+                        不然面包屑先被挤没,按钮还是溢出去被裁一半。 */}
                     {androidProjectRoot && (
-                      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[15px]">
-                        <HugeiconsIcon
-                          icon={Folder01Icon}
-                          size={14}
-                          strokeWidth={1.75}
-                          className="shrink-0 text-muted-foreground/70"
-                        />
-                        <span className="truncate text-muted-foreground/80">
-                          {androidProjectRoot.split("/").slice(-2, -1)[0] ?? ""}
+                      <div className="@container flex shrink-0 items-center gap-2 overflow-hidden border-b border-border px-3 py-1.5 text-[15px]">
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <HugeiconsIcon
+                            icon={Folder01Icon}
+                            size={14}
+                            strokeWidth={1.75}
+                            className="shrink-0 text-muted-foreground/70"
+                          />
+                          <span className="truncate text-muted-foreground/80">
+                            {androidProjectRoot.split("/").slice(-2, -1)[0] ??
+                              ""}
+                          </span>
+                          <span className="shrink-0 text-muted-foreground/40">
+                            /
+                          </span>
+                          <span className="truncate font-semibold text-emerald-500">
+                            {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
+                          </span>
+                          <AgentStatusDot
+                            projectRoot={androidProjectRoot}
+                            projectPtyIds={projectPtyIds}
+                          />
                         </span>
-                        <span className="text-muted-foreground/40">/</span>
-                        <span className="truncate font-semibold text-emerald-500">
-                          {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
-                        </span>
-                        <AgentStatusDot
-                          projectRoot={androidProjectRoot}
-                          projectPtyIds={projectPtyIds}
-                        />
-                        <span className="ml-auto flex items-center gap-2">
+                        <span className="flex shrink-0 items-center gap-2">
                           <AgentQuickLaunch
                             projectRoot={androidProjectRoot}
                             busyAgent={activeTerminalAgent}

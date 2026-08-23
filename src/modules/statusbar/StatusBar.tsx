@@ -10,6 +10,7 @@ import {
   AiStatusBarControls,
 } from "@/modules/ai/components/AiStatusBarControls";
 import {
+  ApifoxMenu,
   CustomLinksMenu,
   DingGroupsMenu,
   KnowledgeBaseMenu,
@@ -50,6 +51,7 @@ export function StatusBar({
         <KnowledgeBaseMenu />
         <MyYunxiaoButton />
         <DingGroupsMenu />
+        <ApifoxMenu />
         <CustomLinksMenu />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />

@@ -28,6 +28,7 @@ import {
   newLinkId,
   type QuickLink,
   removeQuickLink,
+  upsertQuickLink,
 } from "./lib/quickLinks";
 import { MenuRowIcon } from "./MenuRowIcon";
 import { QuickLinkEditDialog } from "./QuickLinkEditDialog";
@@ -122,7 +123,7 @@ export function CustomLinksMenu() {
       <QuickLinkEditDialog
         link={editing}
         onClose={() => setEditing(null)}
-        onSaved={setLinks}
+        onSave={(l) => setLinks(upsertQuickLink(l))}
       />
     </>
   );
