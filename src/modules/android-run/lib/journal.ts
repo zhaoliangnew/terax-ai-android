@@ -180,6 +180,11 @@ export function mondayOfWeek(key: string): Date {
   );
 }
 
+/** 某一天属于哪一周。按日视图上面那排星期要知道自己该画哪七天。 */
+export function weekOfDay(key: string): string {
+  return weekKeyOf(parseDayKey(key));
+}
+
 export function shiftWeek(key: string, delta: number): string {
   const m = mondayOfWeek(key);
   m.setDate(m.getDate() + delta * 7);

@@ -40,6 +40,7 @@ import {
   weekKeyOf,
   weekLabel,
   weekMarkdown,
+  weekOfDay,
 } from "./lib/journal";
 
 type Props = {
@@ -225,6 +226,42 @@ export function JournalDialog({ open, onClose }: Props) {
             复制
           </Button>
         </div>
+
+        {/* 按日时把本周七天摆出来直接点 —— 只有 ‹ › 的话,想回到周三得连点好几下,
+            而且看不出这周还剩几天没写。 */}
+        {mode === "day" && (
+          <div className="grid grid-cols-7 gap-1">
+            {weekDayKeys(weekOfDay(day)).map((d) => {
+              const picked = d === day;
+              const today = d === dayKeyOf(new Date());
+              return (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDay(d)}
+                  className={cn(
+                    "flex flex-col items-center rounded border py-1 leading-tight transition-colors",
+                    picked
+                      ? "border-ring bg-accent text-foreground"
+                      : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "text-[12px] font-medium",
+                      today && !picked && "text-emerald-500",
+                    )}
+                  >
+                    {weekdayName(d)}
+                  </span>
+                  <span className="font-mono text-[10px] opacity-60 tabular-nums">
+                    {monthDay(d)}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* 按日整块滚;按周不滚,让七列撑满高度、各自内部滚 */}
         <div
