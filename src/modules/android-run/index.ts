@@ -11,6 +11,7 @@ export { AndroidRunToolbar } from "./AndroidRunToolbar";
 export { ApifoxMenu } from "./ApifoxMenu";
 export { CustomLinksMenu } from "./CustomLinksMenu";
 export { DingGroupsMenu } from "./DingGroupsMenu";
+export { JournalButton } from "./JournalButton";
 export { KnowledgeBaseMenu } from "./KnowledgeBaseMenu";
 export {
   type AdbDevice,

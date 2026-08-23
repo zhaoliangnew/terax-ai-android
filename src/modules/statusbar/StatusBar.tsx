@@ -13,6 +13,7 @@ import {
   ApifoxMenu,
   CustomLinksMenu,
   DingGroupsMenu,
+  JournalButton,
   KnowledgeBaseMenu,
   MyYunxiaoButton,
 } from "@/modules/android-run";
@@ -50,6 +51,7 @@ export function StatusBar({
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <KnowledgeBaseMenu />
         <MyYunxiaoButton />
+        <JournalButton />
         <DingGroupsMenu />
         <ApifoxMenu />
         <CustomLinksMenu />
