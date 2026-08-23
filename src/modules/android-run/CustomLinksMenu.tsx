@@ -50,8 +50,7 @@ export function CustomLinksMenu() {
   const apps = custom.filter((l) => l.target === "app");
   const sites = custom.filter((l) => l.target !== "app");
 
-  const add = (target?: "app") =>
-    setEditing({ id: newLinkId(), title: "", url: "", target });
+  const add = () => setEditing({ id: newLinkId(), title: "", url: "" });
 
   return (
     <>
@@ -77,27 +76,17 @@ export function CustomLinksMenu() {
         >
           <div className={MENU_HEAD}>
             收藏夹
-            {/* 两个入口而不是一个:加的时候就知道自己在加什么,省掉进去再选一次 */}
-            <span className="flex items-center gap-1">
-              <button
-                type="button"
-                title="收藏一个本机应用"
-                onClick={() => add("app")}
-                className={MENU_ACTION}
-              >
-                <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
-                应用
-              </button>
-              <button
-                type="button"
-                title="收藏一个网址"
-                onClick={() => add()}
-                className={MENU_ACTION}
-              >
-                <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
-                网页
-              </button>
-            </span>
+            {/* 一个入口就够 —— 弹窗里第一行就是"网址/应用"的开关,
+                在这儿再分一次是重复。 */}
+            <button
+              type="button"
+              title="添加收藏"
+              onClick={() => add()}
+              className={MENU_ACTION}
+            >
+              <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
+              添加
+            </button>
           </div>
 
           <div className="max-h-[28rem] overflow-y-auto pb-2">
