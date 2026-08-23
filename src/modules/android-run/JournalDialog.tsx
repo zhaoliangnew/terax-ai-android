@@ -473,20 +473,14 @@ export function JournalDialog({ open, onClose }: Props) {
                 )}
               </div>
             ) : (
-              // 七天平铺成七列,一眼看完一周;竖着排要滚,还看不出哪天空着
-              <div className="grid min-h-0 flex-1 grid-cols-7 gap-2">
+              // 一天一段竖着排。原来是七列平铺,那是照 1400px 的弹窗设计的 ——
+              // 弹窗收小之后每列只剩八十来像素,一句话要折四行,反而看不清。
+              // 竖排跟"按分类"结构一致,宽度多少都不变形。
+              <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
                 {weekDays.map(({ day: d, log }) => {
-                  const isTodayCol = d === today;
+                  const isTodayRow = d === today;
                   return (
-                    <div
-                      key={d}
-                      className={cn(
-                        "flex min-w-0 flex-col gap-2 overflow-y-auto rounded-md border p-2",
-                        isTodayCol
-                          ? "border-emerald-500/40 bg-emerald-500/5"
-                          : "border-border/60",
-                      )}
-                    >
+                    <div key={d} className="flex flex-col">
                       <button
                         type="button"
                         title={`跳到 ${d}`}
@@ -495,38 +489,38 @@ export function JournalDialog({ open, onClose }: Props) {
                           setDay(d);
                         }}
                         className={cn(
-                          "flex shrink-0 flex-col items-start leading-tight",
-                          isTodayCol
+                          "flex w-fit items-center gap-2 rounded px-2 py-1 text-[13px] font-medium hover:bg-accent",
+                          isTodayRow
                             ? "text-emerald-500"
                             : "text-muted-foreground hover:text-foreground",
                         )}
                       >
-                        <span className="text-[13px] font-medium">
-                          {weekdayName(d)}
-                        </span>
+                        {weekdayName(d)}
                         <span className="font-mono text-[11px] opacity-60 tabular-nums">
                           {monthDay(d)}
                         </span>
+                        {isTodayRow && (
+                          <span className="text-[11px] opacity-70">今天</span>
+                        )}
                       </button>
                       {log.entries.length === 0 ? (
-                        <span className="text-[12px] text-muted-foreground/30">
+                        <span className="px-2 py-1 text-[12.5px] text-muted-foreground/30">
                           —
                         </span>
                       ) : (
-                        <div className="flex flex-col gap-2">
-                          {log.entries.map((e) => (
-                            <span
-                              key={e.id}
-                              title={`${entryTime(e.at)} ${e.kind ?? ""} ${e.text}`}
-                              className="flex flex-col items-start gap-1"
-                            >
+                        log.entries.map((e) => (
+                          <div
+                            key={e.id}
+                            className="flex items-start gap-2.5 px-2 py-1"
+                          >
+                            <span className="shrink-0 pt-0.5">
                               <KindTag kind={e.kind} />
-                              <span className="break-words text-[12.5px] leading-snug">
-                                {e.text}
-                              </span>
                             </span>
-                          ))}
-                        </div>
+                            <span className="min-w-0 flex-1 text-[13.5px] leading-relaxed">
+                              {e.text}
+                            </span>
+                          </div>
+                        ))
                       )}
                     </div>
                   );
