@@ -76,8 +76,9 @@ export function ProjectLinksBar({ projectRoot, version, onChanged }: Props) {
         className={cn(MENU_TRIGGER, !task && "text-muted-foreground/45")}
       >
         <HugeiconsIcon icon={Task01Icon} size={13} strokeWidth={1.75} />
-        {/* 工程面板窄下来就只剩图标 —— 文案两个加起来快 200px,不让它挤面包屑。 */}
-        <span className="@max-[520px]:hidden">当前云效需求</span>
+        {/* 换成上下两行之后还是塞不下才丢文案(两条加起来快 200px),
+            这时候按钮已经独占一行,面包屑不受影响。 */}
+        <span className="@max-[400px]:hidden">当前云效需求</span>
       </button>
 
       {codeupPath && (
@@ -88,7 +89,7 @@ export function ProjectLinksBar({ projectRoot, version, onChanged }: Props) {
           className={MENU_TRIGGER}
         >
           <HugeiconsIcon icon={GitBranchIcon} size={13} strokeWidth={1.75} />
-          <span className="@max-[520px]:hidden">云效仓库</span>
+          <span className="@max-[400px]:hidden">云效仓库</span>
         </button>
       )}
 

@@ -1677,11 +1677,12 @@ export default function App() {
               <ResizablePanel id="workspace" defaultSize="34%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
-                    {/* @container:窄下来的时候右边那几个按钮自己缩成图标,
-                        不然面包屑先被挤没,按钮还是溢出去被裁一半。 */}
+                    {/* @container 分三档:够宽一行摆下;窄了换成上下两行,
+                        把整行让给产品/工程名(这两个必须看清);再窄下去按钮
+                        那行只留图标。写死一行的话面包屑先被挤成"0.. / a..."。 */}
                     {androidProjectRoot && (
-                      <div className="@container flex shrink-0 items-center gap-2 overflow-hidden border-b border-border px-3 py-1.5 text-[15px]">
-                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                      <div className="@container flex shrink-0 items-center gap-2 overflow-hidden border-b border-border px-3 py-1.5 text-[15px] @max-[520px]:flex-col @max-[520px]:items-stretch @max-[520px]:gap-1">
+                        <span className="flex min-w-0 flex-1 items-center gap-2 @max-[520px]:flex-none">
                           <HugeiconsIcon
                             icon={Folder01Icon}
                             size={14}
@@ -1703,7 +1704,7 @@ export default function App() {
                             projectPtyIds={projectPtyIds}
                           />
                         </span>
-                        <span className="flex shrink-0 items-center gap-2">
+                        <span className="flex shrink-0 items-center gap-2 @max-[520px]:justify-start">
                           <AgentQuickLaunch
                             projectRoot={androidProjectRoot}
                             busyAgent={activeTerminalAgent}
@@ -1740,17 +1741,18 @@ export default function App() {
                         onSetMarkdownView={setMarkdownView}
                       />
                       {/* 终端空白处的水印:纯装饰,pointer-events-none 保证不挡
-                          选中/点击,也不参与滚动。 */}
+                          选中/点击,也不参与滚动。字号跟着面板宽度走(cqw),
+                          写死的话面板一窄工程名就顶出去被裁。 */}
                       {isTerminalTab && androidProjectRoot && (
                         <div
                           aria-hidden
-                          className="pointer-events-none absolute inset-0 flex select-none flex-col items-center justify-center gap-2 opacity-[0.12]"
+                          className="@container pointer-events-none absolute inset-0 flex select-none flex-col items-center justify-center gap-2 px-6 opacity-[0.12]"
                         >
-                          <span className="text-[34px] leading-none tracking-[0.18em]">
+                          <span className="max-w-full truncate text-[clamp(12px,4.5cqw,34px)] leading-none tracking-[0.18em]">
                             {androidProjectRoot.split("/").slice(-2, -1)[0] ??
                               ""}
                           </span>
-                          <span className="text-[52px] leading-none font-bold tracking-[0.06em]">
+                          <span className="max-w-full truncate text-[clamp(16px,7cqw,52px)] leading-none font-bold tracking-[0.06em]">
                             {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                           </span>
                         </div>
