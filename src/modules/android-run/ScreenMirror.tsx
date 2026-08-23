@@ -229,40 +229,42 @@ export function ScreenMirror({
   // past the video edge into the letterbox — dropping those events instead
   // breaks Android's fling/scroll gesture recognition mid-swipe. `clamp:
   // false` (down) still rejects a press that starts in the letterbox.
-  const toFrameXY = useCallback(
-    (e: React.PointerEvent, clamp: boolean) => {
-      const canvas = canvasRef.current;
-      const { w, h } = sizeRef.current;
-      if (!canvas || w === 0 || h === 0) return null;
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return null;
-      const boxRatio = rect.width / rect.height;
-      const frameRatio = w / h;
-      let drawW = rect.width;
-      let drawH = rect.height;
-      let offX = 0;
-      let offY = 0;
-      if (boxRatio > frameRatio) {
-        drawW = rect.height * frameRatio;
-        offX = (rect.width - drawW) / 2;
-      } else {
-        drawH = rect.width / frameRatio;
-        offY = (rect.height - drawH) / 2;
-      }
-      let px = e.clientX - rect.left - offX;
-      let py = e.clientY - rect.top - offY;
-      if (!clamp && (px < 0 || py < 0 || px > drawW || py > drawH)) {
-        return null; // pressed the letterbox bar
-      }
-      px = Math.max(0, Math.min(drawW, px));
-      py = Math.max(0, Math.min(drawH, py));
-      return {
-        x: Math.max(0, Math.min(w - 1, (px / drawW) * w)),
-        y: Math.max(0, Math.min(h - 1, (py / drawH) * h)),
-      };
-    },
-    [],
-  );
+  const toFrameXY = useCallback((e: React.PointerEvent, clamp: boolean) => {
+    const canvas = canvasRef.current;
+    const { w, h } = sizeRef.current;
+    if (!canvas || w === 0 || h === 0) return null;
+    // 全程用 canvas 自己的坐标系:clientWidth/Height 和 offsetX/Y 都是相对
+    // 这个元素的,界面缩放(`zoom`)怎么变都一致。别混 getBoundingClientRect
+    // 和 clientX —— 这个 WebKit 上前者是布局坐标、后者是视觉坐标,zoom 不等于
+    // 100% 时两者差一个倍数,点哪儿都会偏(面板分隔条就栽在这上面)。
+    const boxW = canvas.clientWidth;
+    const boxH = canvas.clientHeight;
+    if (boxW === 0 || boxH === 0) return null;
+    const boxRatio = boxW / boxH;
+    const frameRatio = w / h;
+    let drawW = boxW;
+    let drawH = boxH;
+    let offX = 0;
+    let offY = 0;
+    if (boxRatio > frameRatio) {
+      drawW = boxH * frameRatio;
+      offX = (boxW - drawW) / 2;
+    } else {
+      drawH = boxW / frameRatio;
+      offY = (boxH - drawH) / 2;
+    }
+    let px = e.nativeEvent.offsetX - offX;
+    let py = e.nativeEvent.offsetY - offY;
+    if (!clamp && (px < 0 || py < 0 || px > drawW || py > drawH)) {
+      return null; // pressed the letterbox bar
+    }
+    px = Math.max(0, Math.min(drawW, px));
+    py = Math.max(0, Math.min(drawH, py));
+    return {
+      x: Math.max(0, Math.min(w - 1, (px / drawW) * w)),
+      y: Math.max(0, Math.min(h - 1, (py / drawH) * h)),
+    };
+  }, []);
 
   const downRef = useRef(false);
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {

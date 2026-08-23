@@ -15,15 +15,16 @@
     "windows": [
       {
         "title": "Android Dev",
-        "width": 800,
-        "height": 600,
+        "width": 1440,
+        "height": 900,
         "minWidth": 420,
         "minHeight": 280,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "visible": false,
         "transparent": true,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "maximized": true
       }
     ],
     "security": {
