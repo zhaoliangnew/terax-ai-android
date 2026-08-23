@@ -320,8 +320,10 @@ export function JournalDialog({ open, onClose }: Props) {
         {/* 顶栏:是日还是周、看的哪一天、怎么翻 —— 一行说完 */}
         <DialogHeader className="shrink-0 gap-0 border-b border-border px-4 py-3">
           <div className="flex items-center gap-3 pr-8">
+            {/* 跟右边那个开关叫一个名字。原来这里写"日报"、开关写"按日",
+                同一件事两种叫法,读起来要在脑子里对一次。 */}
             <DialogTitle className="shrink-0 text-lg font-semibold">
-              {mode === "day" ? "日报" : mode === "week" ? "周报" : "月报"}
+              {mode === "day" ? "按日" : mode === "week" ? "按周" : "按月"}
             </DialogTitle>
             <span className="min-w-0 truncate text-[15px] text-muted-foreground">
               {mode === "day"
