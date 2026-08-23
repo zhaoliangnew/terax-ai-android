@@ -291,6 +291,8 @@ export function JournalDialog({ open, onClose }: Props) {
   };
   // 标题跟着周期走:一眼知道自己在写哪一档的计划,不用回头看顶上选的是什么
   const periodWord = mode === "day" ? "今日" : mode === "week" ? "周" : "月";
+  // "做了什么"前面用"本周/本月"更顺口("周做了什么"读着别扭)
+  const doneWord = mode === "day" ? "今日" : mode === "week" ? "本周" : "本月";
   const setSummary = (v: string) => {
     if (mode === "day") setDayLog(setDayField(day, "summary", v));
     else if (mode === "week")
@@ -483,10 +485,11 @@ export function JournalDialog({ open, onClose }: Props) {
         <div className="flex min-h-0 flex-1 gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="flex shrink-0 items-center gap-3">
-              <span className={LABEL}>做了什么</span>
+              <span className={LABEL}>{doneWord}做了什么</span>
               {/* 排法是个次要选项,不该跟标题抢 —— 去掉边框和底色,就是两个小字,
                   选中的亮一点。原来那个描边胶囊比"做了什么"本身还显眼。 */}
-              <div className="flex items-center gap-2 text-[12px]">
+              {/* 排法靠右:左边是"这块是什么",右边是"怎么排",两件事分开站 */}
+              <div className="ml-auto flex items-center gap-2 text-[12px]">
                 {(
                   [
                     ["time", mode === "day" ? "按时间" : "按天"],
