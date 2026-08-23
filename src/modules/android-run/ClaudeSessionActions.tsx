@@ -31,7 +31,8 @@ export function ClaudeSessionActions({ onRun }: Props) {
         className={BUTTON}
       >
         <HugeiconsIcon icon={Exchange01Icon} size={12} strokeWidth={1.75} />
-        切换模型
+        {/* 挤到只剩一行放不下时只留图标,tooltip 里还有全称。 */}
+        <span className="@max-[400px]:hidden">切换模型</span>
       </button>
       <button
         type="button"
@@ -40,7 +41,7 @@ export function ClaudeSessionActions({ onRun }: Props) {
         className={BUTTON}
       >
         <HugeiconsIcon icon={PackageMovingIcon} size={12} strokeWidth={1.75} />
-        压缩上下文
+        <span className="@max-[400px]:hidden">压缩上下文</span>
       </button>
       <button
         type="button"
@@ -50,7 +51,7 @@ export function ClaudeSessionActions({ onRun }: Props) {
         className={cn(BUTTON, "hover:bg-red-500/10 hover:text-red-400")}
       >
         <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.75} />
-        清空上下文
+        <span className="@max-[400px]:hidden">清空上下文</span>
       </button>
     </span>
   );

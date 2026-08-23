@@ -1786,25 +1786,30 @@ export default function App() {
                       keysLoaded={keysLoaded}
                       onConnect={() => void openSettingsWindow("models")}
                     />
+                    {/* 跟顶栏同一套:面包屑不给 min-w-0、内容 nowrap,塞不下时
+                        被挤到第二行的是按钮那一组,工程名不会先被截。 */}
                     {androidProjectRoot && (
-                      <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-1 text-[14px]">
-                        <HugeiconsIcon
-                          icon={Folder01Icon}
-                          size={13}
-                          strokeWidth={1.75}
-                          className="shrink-0 text-muted-foreground/70"
-                        />
-                        <span className="truncate text-muted-foreground/80">
-                          {androidProjectRoot.split("/").slice(-2, -1)[0] ?? ""}
-                        </span>
-                        <span className="text-muted-foreground/40">/</span>
-                        <span className="truncate font-semibold text-emerald-500">
-                          {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
+                      <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-t border-border px-3 py-1 text-[14px]">
+                        <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
+                          <HugeiconsIcon
+                            icon={Folder01Icon}
+                            size={13}
+                            strokeWidth={1.75}
+                            className="shrink-0 text-muted-foreground/70"
+                          />
+                          <span className="text-muted-foreground/80 @max-[360px]:truncate">
+                            {androidProjectRoot.split("/").slice(-2, -1)[0] ??
+                              ""}
+                          </span>
+                          <span className="shrink-0 text-muted-foreground/40">
+                            /
+                          </span>
+                          <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
+                            {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
+                          </span>
                         </span>
                         {activeTerminalAgent === "claude" && (
-                          <span className="ml-auto">
-                            <ClaudeSessionActions onRun={runInActiveTerminal} />
-                          </span>
+                          <ClaudeSessionActions onRun={runInActiveTerminal} />
                         )}
                       </div>
                     )}
