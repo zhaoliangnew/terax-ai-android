@@ -105,7 +105,8 @@ function AutoTextarea({
     />
   );
 }
-const LABEL = "text-[12px] font-medium text-muted-foreground";
+const LABEL =
+  "border-b border-border/50 pb-1 text-[12px] font-semibold text-foreground/70";
 const NAV =
   "flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
@@ -183,10 +184,35 @@ export function JournalDialog({ open, onClose }: Props) {
           摆得下。固定高度而不是跟着内容长 —— 记两条和记二十条,布局别乱跳。
           日/周同宽同高,切模式时不晃。 */}
       <DialogContent className="flex h-[88vh] w-[92vw] max-w-none flex-col gap-3 sm:max-w-[1400px]">
+        {/* 日/周是这个页面最上层的选择,所以放在标题这一行,标题本身也跟着变 ——
+            埋在下面一排按钮里的话,人得先找一圈才知道现在在看哪个。 */}
         <DialogHeader className="gap-1">
-          <DialogTitle className="text-sm">日报</DialogTitle>
+          <div className="flex items-center gap-3">
+            <DialogTitle className="text-sm">
+              {mode === "day" ? "日报" : "周报"}
+            </DialogTitle>
+            <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5">
+              {(["day", "week"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
+                  className={cn(
+                    "rounded px-2.5 py-0.5 text-[12px] transition-colors",
+                    mode === m
+                      ? "bg-accent font-medium text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {m === "day" ? "按日" : "按周"}
+                </button>
+              ))}
+            </div>
+          </div>
           <DialogDescription className="text-xs">
-            做完一件事随手记一条,写日报/周报时一键复制。
+            {mode === "day"
+              ? "做完一件事随手记一条,写日报时一键复制。"
+              : "对着这一周的记录写计划和总结,一键复制。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -201,7 +227,7 @@ export function JournalDialog({ open, onClose }: Props) {
               e.stopPropagation();
               if (e.key === "Enter") submit();
             }}
-            placeholder="刚做完什么?回车记下"
+            placeholder="刚做完什么?回车记到今天"
             className="h-8 min-w-0 flex-1 rounded border border-input bg-transparent px-2 text-[13px] outline-none focus:border-ring"
           />
           <Button size="sm" onClick={submit} className="h-8 shrink-0 text-xs">
@@ -210,25 +236,7 @@ export function JournalDialog({ open, onClose }: Props) {
           </Button>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex shrink-0 items-center gap-0.5 rounded border border-border p-0.5">
-            {(["day", "week"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={cn(
-                  "rounded px-2 py-0.5 text-[12px] transition-colors",
-                  mode === m
-                    ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {m === "day" ? "按日" : "按周"}
-              </button>
-            ))}
-          </div>
-
+        <div className="flex items-center gap-2 border-t border-border/60 pt-2">
           <button
             type="button"
             className={NAV}
