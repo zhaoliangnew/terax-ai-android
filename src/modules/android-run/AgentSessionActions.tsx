@@ -9,8 +9,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 type Props = {
   /** 当前终端里跑着的 agent 名(agentActivity 记的那个)。 */
   agent: string;
-  /** 把一行(带回车)打进当前终端。 */
-  onRun: (line: string) => void;
+  /** 把一条斜杠命令发进当前终端(回车由调用方补,不要带在这里)。 */
+  onRun: (command: string) => void;
 };
 
 /**
@@ -43,7 +43,7 @@ export function AgentSessionActions({ agent, onRun }: Props) {
       <button
         type="button"
         title={`切换模型 · ${who} /model`}
-        onClick={() => onRun("/model\r")}
+        onClick={() => onRun("/model")}
         className={BUTTON}
       >
         <HugeiconsIcon icon={Exchange01Icon} size={12} strokeWidth={1.75} />
@@ -53,7 +53,7 @@ export function AgentSessionActions({ agent, onRun }: Props) {
       <button
         type="button"
         title={`压缩上下文 · ${who} /compact`}
-        onClick={() => onRun("/compact\r")}
+        onClick={() => onRun("/compact")}
         className={BUTTON}
       >
         <HugeiconsIcon icon={PackageMovingIcon} size={12} strokeWidth={1.75} />
@@ -63,7 +63,7 @@ export function AgentSessionActions({ agent, onRun }: Props) {
         type="button"
         // 点下去就没了,没有二次确认 —— 所以给个红色的 hover,别跟旁边两个一样。
         title={`清空上下文 · ${who} /clear(立即执行,不可撤销)`}
-        onClick={() => onRun("/clear\r")}
+        onClick={() => onRun("/clear")}
         className={cn(BUTTON, "hover:bg-red-500/10 hover:text-red-400")}
       >
         <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.75} />

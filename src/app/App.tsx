@@ -754,15 +754,21 @@ export default function App() {
     return ptyId === null ? null : (agentByPty[ptyId] ?? null);
   }, [activeLeafId, agentByPty]);
 
-  // 往当前终端里打一行。给底栏那几个 Claude 斜杠命令按钮用 —— 它们只在
-  // 当前终端确实跑着 Claude 时才显示,所以这里不用再判断打给谁。
+  // 往当前终端里发一条斜杠命令。给底栏那几个按钮用 —— 它们只在当前终端确实
+  // 跑着 Claude/Codex 时才显示,所以这里不用再判断打给谁。
+  //
+  // 回车必须跟命令分开发:这两个 TUI 都有粘贴识别 —— 一串字节挤在一起到达时
+  // 按粘贴处理,而粘贴里的回车是"换行",不是"提交"。实测 `/clear\r` 一次写进去,
+  // Codex 的输入框里就留着 `/clear` 加一个空行,人还得自己再按一下回车。
+  // 隔开一拍,回车才会被当成单独按下的 Enter。
   const runInActiveTerminal = useCallback(
-    (line: string) => {
+    (command: string) => {
       const t =
         activeLeafId !== null ? terminalRefs.current.get(activeLeafId) : null;
       if (!t) return;
-      t.write(line);
+      t.write(command);
       t.focus();
+      setTimeout(() => t.write("\r"), 120);
     },
     [activeLeafId],
   );
