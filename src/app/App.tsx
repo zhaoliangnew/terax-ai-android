@@ -1673,7 +1673,7 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-6 hover:bg-border" />
+              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-border/45 transition-colors duration-[var(--dur-fast)] after:w-5 hover:bg-border" />
               <ResizablePanel id="workspace" defaultSize="34%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
@@ -1792,7 +1792,7 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-6 hover:bg-border" />
+              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-border/45 transition-colors duration-[var(--dur-fast)] after:w-5 hover:bg-border" />
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}
