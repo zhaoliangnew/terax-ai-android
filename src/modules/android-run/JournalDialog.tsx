@@ -90,7 +90,7 @@ function KindTag({ kind }: { kind?: EntryKind }) {
  *  - 顶部一行选日/周和翻页,顺带把当前日期写在标题里,少一行说明文字;
  *  - 主体左右分栏:左边是攒下来的记录(会越来越长),右边是计划和总结
  *    (要动笔写,所以给它一个能读的行宽 —— 1400px 通栏的输入框没法写字);
- *  - 录入固定在最底下,输入框+类型+按钮是一整块,跟聊天框一个位置感。
+ *  - 录入贴在左栏记录的下面 —— 它喂的就是那个列表,放一起手不用来回横穿。
  *
  * 日和周各存各的计划/总结;周的"做了什么"不单独记,直接汇总那一周每天的条目
  * —— 一件事只记一次,写周报时不用再抄一遍。
@@ -527,6 +527,52 @@ export function JournalDialog({ open, onClose }: Props) {
                 })}
               </div>
             )}
+
+            {/* 录入就贴在记录下面 —— 它喂的就是上面这个列表,放在左栏里,
+                手在"看记录"和"记一条"之间不用横穿整个弹窗。按周不出现:
+                记的东西天然属于某一天。 */}
+            {mode === "day" && (
+              <div className="mt-1 flex shrink-0 flex-col gap-2 border-t border-border/60 pt-3">
+                <div className="flex items-center gap-2">
+                  <input
+                    // biome-ignore lint/a11y/noAutofocus: 这个弹窗就是为了"立刻记一条"
+                    autoFocus
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") submit();
+                    }}
+                    placeholder={`刚做完什么?回车记到 ${monthDay(today)} ${weekdayName(today)}`}
+                    className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-[14px] outline-none focus:border-ring"
+                  />
+                  <Button
+                    onClick={submit}
+                    disabled={!draft.trim()}
+                    className="h-10 shrink-0 px-5 text-[13.5px]"
+                  >
+                    记一条
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {ENTRY_KINDS.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setKind(k)}
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-[12.5px] transition-colors",
+                        kind === k
+                          ? KIND_TONE[k]
+                          : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                      )}
+                    >
+                      {k}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* 右栏定宽:输入框要能读,1400px 通栏的一行字扫不过来 */}
@@ -559,56 +605,6 @@ export function JournalDialog({ open, onClose }: Props) {
             </div>
           </div>
         </div>
-
-        {/* 录入固定在最底下,自成一块:上面是"看",这里是"写"。
-            只在按日出现 —— 记的东西天然属于某一天,按周是拿来汇总和写总结的,
-            摆个"记到今天"的输入框在那儿只会让人愣一下。 */}
-        {mode === "day" && (
-          <div className="shrink-0 border-t border-border bg-foreground/[0.03] px-5 py-3">
-            {/* 收成一小块居中放:输入框、类型、按钮三样贴在一起,记一条手不用
-                横穿整个 1400px。键盘流更省 —— 打开就在输入框里,打完回车。 */}
-            <div className="mx-auto flex w-full max-w-[52rem] flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <input
-                  // biome-ignore lint/a11y/noAutofocus: 这个弹窗就是为了"立刻记一条"
-                  autoFocus
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === "Enter") submit();
-                  }}
-                  placeholder={`刚做完什么?回车记到 ${monthDay(today)} ${weekdayName(today)}`}
-                  className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-[14px] outline-none focus:border-ring"
-                />
-                <Button
-                  onClick={submit}
-                  disabled={!draft.trim()}
-                  className="h-10 shrink-0 px-5 text-[13.5px]"
-                >
-                  记一条
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {ENTRY_KINDS.map((k) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setKind(k)}
-                    className={cn(
-                      "rounded-full border px-3 py-1 text-[12.5px] transition-colors",
-                      kind === k
-                        ? KIND_TONE[k]
-                        : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                    )}
-                  >
-                    {k}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
       </DialogContent>
     </Dialog>
   );
