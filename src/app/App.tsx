@@ -1673,30 +1673,32 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
+              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-6 hover:bg-border" />
               <ResizablePanel id="workspace" defaultSize="34%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
-                    {/* @container 分三档:够宽一行摆下;窄了换成上下两行,
-                        把整行让给产品/工程名(这两个必须看清);再窄下去按钮
-                        那行只留图标。写死一行的话面包屑先被挤成"0.. / a..."。 */}
+                    {/* 换行交给 flex-wrap 自己判断:面包屑不给 min-w-0、内容
+                        nowrap,它的最小宽度就是完整的产品/工程名,塞不下时被挤
+                        走的是按钮那一组(换到第二行),名字始终完整。定死一个
+                        断点的话名字长短一变就又不准了。
+                        @container 只留给最后一档:第二行也摆不开就丢按钮文案。 */}
                     {androidProjectRoot && (
-                      <div className="@container flex shrink-0 items-center gap-2 overflow-hidden border-b border-border px-3 py-1.5 text-[15px] @max-[520px]:flex-col @max-[520px]:items-stretch @max-[520px]:gap-1">
-                        <span className="flex min-w-0 flex-1 items-center gap-2 @max-[520px]:flex-none">
+                      <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-border px-3 py-1.5 text-[15px]">
+                        <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
                           <HugeiconsIcon
                             icon={Folder01Icon}
                             size={14}
                             strokeWidth={1.75}
                             className="shrink-0 text-muted-foreground/70"
                           />
-                          <span className="truncate text-muted-foreground/80">
+                          <span className="text-muted-foreground/80 @max-[360px]:truncate">
                             {androidProjectRoot.split("/").slice(-2, -1)[0] ??
                               ""}
                           </span>
                           <span className="shrink-0 text-muted-foreground/40">
                             /
                           </span>
-                          <span className="truncate font-semibold text-emerald-500">
+                          <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
                             {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                           </span>
                           <AgentStatusDot
@@ -1704,7 +1706,7 @@ export default function App() {
                             projectPtyIds={projectPtyIds}
                           />
                         </span>
-                        <span className="flex shrink-0 items-center gap-2 @max-[520px]:justify-start">
+                        <span className="flex shrink-0 items-center gap-2">
                           <AgentQuickLaunch
                             projectRoot={androidProjectRoot}
                             busyAgent={activeTerminalAgent}
@@ -1790,7 +1792,7 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
+              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-6 hover:bg-border" />
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}
