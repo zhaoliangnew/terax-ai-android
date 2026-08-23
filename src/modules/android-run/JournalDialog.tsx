@@ -124,9 +124,10 @@ export function JournalDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      {/* 日/周一个宽度:按周那七列要地方,按日跟着一起展开 —— 两边不一样宽的话
-          切一下模式弹窗就跳一下,很晃眼。 */}
-      <DialogContent className="flex max-h-[80vh] flex-col gap-3 sm:max-w-4xl">
+      {/* 铺满大半个窗口:这是个专门用来写东西的弹窗,七列一周、几十条记录都要
+          摆得下。固定高度而不是跟着内容长 —— 记两条和记二十条,布局别乱跳。
+          日/周同宽同高,切模式时不晃。 */}
+      <DialogContent className="flex h-[88vh] w-[92vw] max-w-none flex-col gap-3 sm:max-w-[1400px]">
         <DialogHeader className="gap-1">
           <DialogTitle className="text-sm">日报</DialogTitle>
           <DialogDescription className="text-xs">
@@ -225,11 +226,17 @@ export function JournalDialog({ open, onClose }: Props) {
           </Button>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+        {/* 按日整块滚;按周不滚,让七列撑满高度、各自内部滚 */}
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col gap-3 pr-1",
+            mode === "day" ? "overflow-y-auto" : "overflow-hidden",
+          )}
+        >
           <div className="flex flex-col gap-1">
             <span className={LABEL}>计划</span>
             <textarea
-              rows={2}
+              rows={3}
               value={mode === "day" ? dayLog.plan : weekLog.plan}
               onChange={(e) => {
                 const v = e.target.value;
@@ -242,7 +249,7 @@ export function JournalDialog({ open, onClose }: Props) {
             />
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex min-h-0 flex-1 flex-col gap-1">
             <span className={LABEL}>做了什么</span>
             {mode === "day" ? (
               dayLog.entries.length === 0 ? (
@@ -308,14 +315,14 @@ export function JournalDialog({ open, onClose }: Props) {
             ) : (
               // 周视图只读:条目属于某一天,要改回那天改,免得同一条在两处能编辑。
               // 七天平铺成七列,一眼看完一周 —— 竖着排要滚,还看不出哪天空着。
-              <div className="grid grid-cols-7 gap-1.5">
+              <div className="grid min-h-0 flex-1 grid-cols-7 gap-1.5">
                 {weekDays.map(({ day: d, log }) => {
                   const today = d === dayKeyOf(new Date());
                   return (
                     <div
                       key={d}
                       className={cn(
-                        "flex min-w-0 flex-col gap-1 rounded border p-1.5",
+                        "flex min-w-0 flex-col gap-1 overflow-y-auto rounded border p-1.5",
                         today
                           ? "border-emerald-500/40 bg-emerald-500/5"
                           : "border-border/60",
@@ -369,7 +376,7 @@ export function JournalDialog({ open, onClose }: Props) {
           <div className="flex flex-col gap-1">
             <span className={LABEL}>总结</span>
             <textarea
-              rows={3}
+              rows={4}
               value={mode === "day" ? dayLog.summary : weekLog.summary}
               onChange={(e) => {
                 const v = e.target.value;
