@@ -124,13 +124,9 @@ export function JournalDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent
-        className={cn(
-          "flex max-h-[80vh] flex-col gap-3",
-          // 七列要地方;按日就一栏,宽了反而空
-          mode === "week" ? "sm:max-w-4xl" : "sm:max-w-2xl",
-        )}
-      >
+      {/* 日/周一个宽度:按周那七列要地方,按日跟着一起展开 —— 两边不一样宽的话
+          切一下模式弹窗就跳一下,很晃眼。 */}
+      <DialogContent className="flex max-h-[80vh] flex-col gap-3 sm:max-w-4xl">
         <DialogHeader className="gap-1">
           <DialogTitle className="text-sm">日报</DialogTitle>
           <DialogDescription className="text-xs">
