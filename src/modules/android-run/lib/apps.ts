@@ -2,6 +2,7 @@ import { IS_MAC, IS_WINDOWS } from "@/lib/platform";
 import { native } from "@/modules/ai/lib/native";
 import { homeDir } from "@tauri-apps/api/path";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { toast } from "sonner";
 
 export type InstalledApp = { name: string; path: string };
 
@@ -13,12 +14,24 @@ export type InstalledApp = { name: string; path: string };
  * PowerShell —— 拼字符串迟早出错,交给插件去分发。
  */
 export function openApp(path: string): void {
-  void openPath(path);
+  open(path, "打不开这个应用");
 }
 
 /** 在文件管理器里打开一个目录(访达 / 资源管理器 / Files)。 */
 export function openFolderInFileManager(path: string): void {
-  void openPath(path);
+  open(path, "打不开这个目录");
+}
+
+/**
+ * 失败要说话。
+ *
+ * 之前写成 `void openPath(path)`,权限没配够时插件返回的 ForbiddenPath 被吞了 ——
+ * 表现就是"点了完全没反应",查半天。
+ */
+function open(path: string, whenFailed: string): void {
+  openPath(path).catch((e) => {
+    toast.error(whenFailed, { description: `${path} · ${e}` });
+  });
 }
 
 /** 找不到就返回空数组 —— 目录不存在、没权限,都不该让调用方炸掉。 */
