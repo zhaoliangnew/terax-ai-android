@@ -24,8 +24,11 @@ import {
   dayKeyOf,
   dayLabel,
   dayMarkdown,
+  ENTRY_KINDS,
+  type EntryKind,
   editEntry,
   entryTime,
+  lastKind,
   loadDay,
   loadWeek,
   monthDay,
@@ -105,6 +108,30 @@ function AutoTextarea({
     />
   );
 }
+/** 选中态的配色。类型多了之后,颜色比读字快。 */
+const KIND_TONE: Record<EntryKind, string> = {
+  开发任务: "border-emerald-500/40 bg-emerald-500/15 text-emerald-400",
+  售后: "border-amber-500/40 bg-amber-500/15 text-amber-400",
+  技术支持: "border-blue-500/40 bg-blue-500/15 text-blue-400",
+  会议: "border-violet-500/40 bg-violet-500/15 text-violet-400",
+  咨询: "border-cyan-500/40 bg-cyan-500/15 text-cyan-400",
+  其他: "border-border bg-accent text-foreground",
+};
+
+function KindTag({ kind }: { kind?: EntryKind }) {
+  if (!kind) return null;
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded border px-1 py-px text-[10px] leading-none",
+        KIND_TONE[kind],
+      )}
+    >
+      {kind}
+    </span>
+  );
+}
+
 const LABEL =
   "border-b border-border/50 pb-1 text-[12px] font-semibold text-foreground/70";
 const NAV =
@@ -123,6 +150,7 @@ export function JournalDialog({ open, onClose }: Props) {
   const [dayLog, setDayLog] = useState<DayLog>(() => loadDay(day));
   const [weekLog, setWeekLog] = useState<WeekLog>(() => loadWeek(week));
   const [draft, setDraft] = useState("");
+  const [kind, setKind] = useState<EntryKind>(() => lastKind());
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
     null,
   );
@@ -134,6 +162,7 @@ export function JournalDialog({ open, onClose }: Props) {
     setDay(today);
     setWeek(weekKeyOf(new Date()));
     setDraft("");
+    setKind(lastKind());
     setEditing(null);
   }, [open]);
 
@@ -149,7 +178,7 @@ export function JournalDialog({ open, onClose }: Props) {
     // 结果落到上周三去,那就麻烦了。
     const now = new Date();
     const today = dayKeyOf(now);
-    addEntry(today, draft, now);
+    addEntry(today, draft, now, kind);
     setDraft("");
     if (today === day) setDayLog(loadDay(day));
     else {
@@ -157,7 +186,7 @@ export function JournalDialog({ open, onClose }: Props) {
       setDay(today);
       toast.success("已记到今天", { description: dayLabel(today) });
     }
-  }, [draft, day]);
+  }, [draft, day, kind]);
 
   // 周一到周日七天全列出来,空的也留位置 —— 一眼看出哪天没写,
   // 而不是"这天没记"和"这天不存在"长得一样。
@@ -234,6 +263,25 @@ export function JournalDialog({ open, onClose }: Props) {
             <HugeiconsIcon icon={PlusSignIcon} size={13} strokeWidth={2} />
             记一条
           </Button>
+        </div>
+
+        {/* 类型单选。记完不清空,一天里多半连着记同一类;下次打开也是上次那个。 */}
+        <div className="flex flex-wrap items-center gap-1">
+          {ENTRY_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setKind(k)}
+              className={cn(
+                "rounded-full border px-2.5 py-0.5 text-[12px] transition-colors",
+                kind === k
+                  ? KIND_TONE[k]
+                  : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+              )}
+            >
+              {k}
+            </button>
+          ))}
         </div>
 
         <div className="flex items-center gap-2 border-t border-border/60 pt-2">
@@ -356,6 +404,9 @@ export function JournalDialog({ open, onClose }: Props) {
                       <span className="shrink-0 pt-px font-mono text-[11px] text-muted-foreground/60 tabular-nums">
                         {entryTime(e.at)}
                       </span>
+                      <span className="shrink-0 pt-0.5">
+                        <KindTag kind={e.kind} />
+                      </span>
                       {editing?.id === e.id ? (
                         <input
                           // biome-ignore lint/a11y/noAutofocus: 点了才进编辑态
@@ -448,10 +499,13 @@ export function JournalDialog({ open, onClose }: Props) {
                           {log.entries.map((e) => (
                             <span
                               key={e.id}
-                              title={`${entryTime(e.at)} ${e.text}`}
-                              className="break-words text-[12px] leading-snug"
+                              title={`${entryTime(e.at)} ${e.kind ?? ""} ${e.text}`}
+                              className="flex flex-col items-start gap-0.5"
                             >
-                              {e.text}
+                              <KindTag kind={e.kind} />
+                              <span className="break-words text-[12px] leading-snug">
+                                {e.text}
+                              </span>
                             </span>
                           ))}
                         </div>

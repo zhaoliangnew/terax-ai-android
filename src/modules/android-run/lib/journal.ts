@@ -8,12 +8,41 @@
  * 时间一律用**本地日**切分,不用 UTC —— 晚上十一点记的东西必须落在今天。
  */
 
+/** 记一条时选的类型。顺序就是界面上的顺序,常用的在前。 */
+export const ENTRY_KINDS = [
+  "开发任务",
+  "售后",
+  "技术支持",
+  "会议",
+  "咨询",
+  "其他",
+] as const;
+
+export type EntryKind = (typeof ENTRY_KINDS)[number];
+
 export type JournalEntry = {
   id: string;
   /** ISO 时间戳,显示只用到时:分。 */
   at: string;
   text: string;
+  /** 老数据没有这个字段,渲染时就不显示标签 —— 不给它硬塞一个"其他"。 */
+  kind?: EntryKind;
 };
+
+const LAST_KIND_KEY = "terax.journal.lastKind";
+
+/** 上次选的类型。一天里多半连着记同一类,省得每条都重选。 */
+export function lastKind(): EntryKind {
+  if (typeof localStorage === "undefined") return ENTRY_KINDS[0];
+  const v = localStorage.getItem(LAST_KIND_KEY);
+  return (ENTRY_KINDS as readonly string[]).includes(v ?? "")
+    ? (v as EntryKind)
+    : ENTRY_KINDS[0];
+}
+
+export function rememberKind(kind: EntryKind): void {
+  localStorage.setItem(LAST_KIND_KEY, kind);
+}
 
 export type DayLog = {
   plan: string;
@@ -93,14 +122,21 @@ export function setDayField(
   return saveDay(day, { ...log, [field]: value });
 }
 
-export function addEntry(day: string, text: string, at: Date): DayLog {
+export function addEntry(
+  day: string,
+  text: string,
+  at: Date,
+  kind: EntryKind,
+): DayLog {
   const trimmed = text.trim();
   if (!trimmed) return loadDay(day);
+  rememberKind(kind);
   const log = loadDay(day);
   const entry: JournalEntry = {
     id: `${at.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
     at: at.toISOString(),
     text: trimmed,
+    kind,
   };
   return saveDay(day, { ...log, entries: [...log.entries, entry] });
 }
@@ -238,7 +274,7 @@ function section(title: string, body: string): string {
 export function dayMarkdown(day: string): string {
   const log = loadDay(day);
   const entries = log.entries
-    .map((e) => `- ${entryTime(e.at)} ${e.text}`)
+    .map((e) => `- ${entryTime(e.at)}${e.kind ? ` [${e.kind}]` : ""} ${e.text}`)
     .join("\n");
   const parts = [
     `## ${day}(${dayLabel(day).split(" ")[1]})`,
@@ -255,7 +291,9 @@ export function weekMarkdown(week: string): string {
     .map((d) => {
       const dayLog = loadDay(d);
       if (dayLog.entries.length === 0) return "";
-      const lines = dayLog.entries.map((e) => `  - ${e.text}`).join("\n");
+      const lines = dayLog.entries
+        .map((e) => `  - ${e.kind ? `[${e.kind}] ` : ""}${e.text}`)
+        .join("\n");
       return `- ${dayLabel(d)}\n${lines}`;
     })
     .filter(Boolean)
