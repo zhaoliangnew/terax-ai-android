@@ -1,0 +1,57 @@
+import { cn } from "@/lib/utils";
+import {
+  Delete02Icon,
+  Exchange01Icon,
+  PackageMovingIcon,
+} from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
+
+type Props = {
+  /** 把一行(带回车)打进当前终端。 */
+  onRun: (line: string) => void;
+};
+
+const BUTTON =
+  "flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
+
+/**
+ * 当前终端里跑着 Claude 时,底栏给三个最常用的斜杠命令留个按钮。
+ *
+ * 就是把 `/model`、`/compact`、`/clear` 打进去回车 —— 手敲也一样,只是这三条
+ * 一天要用很多次,不值当每次都切回键盘拼。跑着别的 agent(或者压根没跑)时
+ * 整组不显示,免得把命令打进 shell 里。
+ */
+export function ClaudeSessionActions({ onRun }: Props) {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <button
+        type="button"
+        title="切换模型 · /model"
+        onClick={() => onRun("/model\r")}
+        className={BUTTON}
+      >
+        <HugeiconsIcon icon={Exchange01Icon} size={12} strokeWidth={1.75} />
+        切换模型
+      </button>
+      <button
+        type="button"
+        title="压缩上下文 · /compact"
+        onClick={() => onRun("/compact\r")}
+        className={BUTTON}
+      >
+        <HugeiconsIcon icon={PackageMovingIcon} size={12} strokeWidth={1.75} />
+        压缩上下文
+      </button>
+      <button
+        type="button"
+        // 点下去就没了,没有二次确认 —— 所以给个红色的 hover,别跟旁边两个一样。
+        title="清空上下文 · /clear(立即执行,不可撤销)"
+        onClick={() => onRun("/clear\r")}
+        className={cn(BUTTON, "hover:bg-red-500/10 hover:text-red-400")}
+      >
+        <HugeiconsIcon icon={Delete02Icon} size={12} strokeWidth={1.75} />
+        清空上下文
+      </button>
+    </span>
+  );
+}

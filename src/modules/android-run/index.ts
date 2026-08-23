@@ -5,6 +5,7 @@ export {
 } from "./AgentQuickLaunch";
 export { AndroidRunToolbar } from "./AndroidRunToolbar";
 export { ApifoxMenu } from "./ApifoxMenu";
+export { ClaudeSessionActions } from "./ClaudeSessionActions";
 export { CustomLinksMenu } from "./CustomLinksMenu";
 export { DingGroupsMenu } from "./DingGroupsMenu";
 export { KnowledgeBaseMenu } from "./KnowledgeBaseMenu";

@@ -32,6 +32,7 @@ import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import {
   AgentQuickLaunch,
+  ClaudeSessionActions,
   classifyProjectKind,
   findProjectRoot,
   getTaskLink,
@@ -751,6 +752,19 @@ export default function App() {
     const ptyId = ptyIdForLeaf(activeLeafId);
     return ptyId === null ? null : (agentByPty[ptyId] ?? null);
   }, [activeLeafId, agentByPty]);
+
+  // 往当前终端里打一行。给底栏那几个 Claude 斜杠命令按钮用 —— 它们只在
+  // 当前终端确实跑着 Claude 时才显示,所以这里不用再判断打给谁。
+  const runInActiveTerminal = useCallback(
+    (line: string) => {
+      const t =
+        activeLeafId !== null ? terminalRefs.current.get(activeLeafId) : null;
+      if (!t) return;
+      t.write(line);
+      t.focus();
+    },
+    [activeLeafId],
+  );
 
   // 一键起 agent:优先直接用当前终端(你多半已经在这个工程的终端里了,再开一个
   // 纯属添乱);只有当前 tab 不是终端时才新开一个。
@@ -1787,6 +1801,11 @@ export default function App() {
                         <span className="truncate font-semibold text-emerald-500">
                           {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                         </span>
+                        {activeTerminalAgent === "claude" && (
+                          <span className="ml-auto">
+                            <ClaudeSessionActions onRun={runInActiveTerminal} />
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
