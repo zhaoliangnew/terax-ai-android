@@ -72,12 +72,22 @@ function AutoTextarea({
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
+  // 光靠 scrollHeight 会让空框缩成一行 —— `rows` 只决定 JS 接手前的初始高度,
+  // 之后就被 style.height 盖掉了。所以自己按行高算一个下限。
   const fit = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto"; // 先塌回去,不然只涨不缩
-    el.style.height = `${el.scrollHeight}px`;
-  }, []);
+    const cs = getComputedStyle(el);
+    const line = Number.parseFloat(cs.lineHeight) || 21;
+    // box-sizing 是 border-box:height 含 padding 和边框,scrollHeight 只含 padding
+    const chrome =
+      Number.parseFloat(cs.paddingTop) +
+      Number.parseFloat(cs.paddingBottom) +
+      Number.parseFloat(cs.borderTopWidth) +
+      Number.parseFloat(cs.borderBottomWidth);
+    el.style.height = `${Math.max(el.scrollHeight + 2, minRows * line + chrome)}px`;
+  }, [minRows]);
 
   // value 不参与计算,但它一变就得重新量 —— 换日期、切日/周,内容整个都换了
   // biome-ignore lint/correctness/useExhaustiveDependencies: value 是重算信号
@@ -307,17 +317,11 @@ export function JournalDialog({ open, onClose }: Props) {
           </div>
         )}
 
-        {/* 按日整块滚;按周不滚,让七列撑满高度、各自内部滚 */}
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col gap-3 pr-1",
-            mode === "day" ? "overflow-y-auto" : "overflow-hidden",
-          )}
-        >
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
           <div className="flex flex-col gap-1">
             <span className={LABEL}>计划</span>
             <AutoTextarea
-              minRows={3}
+              minRows={mode === "week" ? 6 : 3}
               value={mode === "day" ? dayLog.plan : weekLog.plan}
               onChange={(v) => {
                 if (mode === "day") setDayLog(setDayField(day, "plan", v));
@@ -327,13 +331,7 @@ export function JournalDialog({ open, onClose }: Props) {
             />
           </div>
 
-          <div
-            className={cn(
-              "flex flex-col gap-1",
-              // 按周那七列要占满剩下的高度;按日是线性内容,撑满只会在中间留一大片空白
-              mode === "week" && "min-h-0 flex-1",
-            )}
-          >
+          <div className="flex flex-col gap-1">
             <span className={LABEL}>做了什么</span>
             {mode === "day" ? (
               dayLog.entries.length === 0 ? (
@@ -399,7 +397,7 @@ export function JournalDialog({ open, onClose }: Props) {
             ) : (
               // 周视图只读:条目属于某一天,要改回那天改,免得同一条在两处能编辑。
               // 七天平铺成七列,一眼看完一周 —— 竖着排要滚,还看不出哪天空着。
-              <div className="grid min-h-0 flex-1 grid-cols-7 gap-1.5">
+              <div className="grid max-h-[32vh] grid-cols-7 gap-1.5">
                 {weekDays.map(({ day: d, log }) => {
                   const today = d === dayKeyOf(new Date());
                   return (
@@ -460,7 +458,7 @@ export function JournalDialog({ open, onClose }: Props) {
           <div className="flex flex-col gap-1">
             <span className={LABEL}>总结</span>
             <AutoTextarea
-              minRows={3}
+              minRows={mode === "week" ? 8 : 3}
               value={mode === "day" ? dayLog.summary : weekLog.summary}
               onChange={(v) => {
                 if (mode === "day") setDayLog(setDayField(day, "summary", v));
