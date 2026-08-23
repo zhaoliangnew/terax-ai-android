@@ -19,3 +19,15 @@ export function labelFor(t: Tab): string {
   const parts = t.cwd.split(/[\\/]/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : "/";
 }
+
+/**
+ * The directory *containing* a terminal tab's cwd, shown as a second line so
+ * same-named products under different version folders stay distinguishable.
+ * Null whenever the label isn't cwd-derived (custom title, editor tab, …).
+ */
+export function parentLabelFor(t: Tab): string | null {
+  if (t.kind !== "terminal") return null;
+  if (t.customTitle || !t.cwd) return null;
+  const parts = t.cwd.split(/[\\/]/).filter(Boolean);
+  return parts.length >= 2 ? parts[parts.length - 2] : null;
+}

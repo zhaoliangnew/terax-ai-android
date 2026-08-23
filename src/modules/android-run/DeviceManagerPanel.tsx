@@ -367,7 +367,7 @@ export function DeviceManagerPanel() {
                             "rounded px-2 py-0.5 text-[12px] font-medium",
                             isOnline
                               ? "bg-emerald-500/20 text-emerald-400"
-                              : "bg-muted-foreground/15 text-muted-foreground",
+                              : "bg-emerald-500/10 text-emerald-500/50",
                           )}
                         >
                           {deviceNotes[d.sn]}

@@ -274,14 +274,14 @@ function BranchDropdown({
           <span className="max-w-24 truncate">{repoLabel}</span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-56">
+      <DropdownMenuContent align="start" className="max-w-[26rem] min-w-64">
         {displayRepoRoot ? (
           <>
             <DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/85">
               Repository
             </DropdownMenuLabel>
             <div
-              className="truncate px-2 pb-1.5 text-[11px] text-muted-foreground"
+              className="px-2 pb-1.5 text-[11px] leading-snug break-all text-muted-foreground"
               title={displayRepoRoot}
             >
               {displayRepoRoot}
@@ -333,7 +333,9 @@ function BranchDropdown({
                       ) : (
                         <span className="w-3.5 shrink-0" />
                       )}
-                      <span className="min-w-0 flex-1 truncate">{b.name}</span>
+                      <span className="min-w-0 flex-1 break-all" title={b.name}>
+                        {b.name}
+                      </span>
                     </DropdownMenuItem>
                   ))}
                 </DropdownMenuGroup>
@@ -363,9 +365,9 @@ function BranchDropdown({
                         className="shrink-0 text-muted-foreground"
                       />
                       <div className="flex min-w-0 flex-col">
-                        <span className="truncate">{b.name}</span>
+                        <span className="break-all">{b.name}</span>
                         {b.worktreePath && (
-                          <span className="truncate text-[10px] text-muted-foreground">
+                          <span className="break-all text-[10px] text-muted-foreground">
                             {b.worktreePath}
                           </span>
                         )}

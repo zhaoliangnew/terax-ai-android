@@ -8,10 +8,12 @@ import {
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import type { ProjectKind } from "@/modules/android-run";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
+  ArrowUp01Icon,
   FileAddIcon,
   Folder01Icon,
   FolderAddIcon,
@@ -23,6 +25,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   forwardRef,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -50,6 +53,8 @@ export type FileExplorerHandle = {
   focus: () => void;
   isFocused: () => boolean;
   focusSearch: () => void;
+  /** Expand every ancestor of `path` and scroll it into view. */
+  revealPath: (path: string) => void;
 };
 
 type Props = {
@@ -61,8 +66,10 @@ type Props = {
   onRevealInTerminal?: (path: string) => void;
   /** Force-open a brand-new terminal (no dedup), even if one already exists. */
   onOpenNewTerminal?: (path: string) => void;
-  /** Async check: is this dir a gradle project root? Enables the 安卓工程 treatment. */
-  classifyProjectDir?: (path: string) => Promise<boolean>;
+  /** Async check: which runnable project this dir is (null = plain folder).
+   * A hit gets the 工程 treatment: kind-specific icon, no expand, click opens
+   * a terminal tab. */
+  classifyProjectDir?: (path: string) => Promise<ProjectKind | null>;
   /** Click handler for a detected 安卓工程 dir (opens/locates its terminal). */
   onOpenProject?: (path: string) => void;
   /** 当前打开的产品路径,在树中用醒目底色高亮。 */
@@ -74,6 +81,10 @@ type Props = {
   onOpenInSourceControl?: (path: string) => void;
   onOpenGitHistory?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
+  /** 把这个目录设为当前 Space 的根目录(左栏"产品目录"专用)。 */
+  onSetAsRoot?: (path: string) => void;
+  /** 额外塞进头部按钮行的控件(比如产品文件区的开合开关)。 */
+  headerExtra?: ReactNode;
   pathDropTarget?: TerminalPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
 };
@@ -120,6 +131,15 @@ function basename(path: string): string {
 function parentOf(path: string, fallback: string): string {
   const i = path.lastIndexOf("/");
   return i > 0 ? path.slice(0, i) : fallback;
+}
+
+/** Parent of a root path, or null at the filesystem root (nothing above "/"). */
+function parentDir(path: string | null): string | null {
+  if (!path) return null;
+  const trimmed = path.replace(/\/+$/, "");
+  const i = trimmed.lastIndexOf("/");
+  if (i < 0) return null;
+  return i === 0 ? "/" : trimmed.slice(0, i);
 }
 
 function buildRows(
@@ -220,6 +240,8 @@ export const FileExplorer = memo(
       onOpenInSourceControl,
       onOpenGitHistory,
       onAttachToAgent,
+      onSetAsRoot,
+      headerExtra,
       pathDropTarget,
       gitStatus,
     },
@@ -260,8 +282,10 @@ export const FileExplorer = memo(
 
     // Classify visible directories as gradle projects (async, cached). Project
     // dirs get the 安卓工程 treatment: robot icon, no expand, click opens terminal.
-    const projectCacheRef = useRef<Map<string, boolean>>(new Map());
-    const [projectDirs, setProjectDirs] = useState<Set<string>>(new Set());
+    const projectCacheRef = useRef<Map<string, ProjectKind | null>>(new Map());
+    const [projectDirs, setProjectDirs] = useState<Map<string, ProjectKind>>(
+      new Map(),
+    );
     useEffect(() => {
       if (!classifyProjectDir) return;
       const dirPaths = rows.flatMap((r) =>
@@ -272,22 +296,20 @@ export const FileExplorer = memo(
         let changed = false;
         for (const p of dirPaths) {
           if (projectCacheRef.current.has(p)) continue;
-          const ok = await classifyProjectDir(p);
-          projectCacheRef.current.set(p, ok);
-          if (ok) {
+          const kind = await classifyProjectDir(p);
+          projectCacheRef.current.set(p, kind);
+          if (kind) {
             changed = true;
             // 工程目录不该展开:若在归类前已被展开,自动收起。
             if (tree.expanded.has(p)) tree.toggle(p);
           }
         }
         if (!cancelled && changed) {
-          setProjectDirs(
-            new Set(
-              [...projectCacheRef.current.entries()]
-                .filter(([, v]) => v)
-                .map(([k]) => k),
-            ),
-          );
+          const next = new Map<string, ProjectKind>();
+          for (const [k, v] of projectCacheRef.current) {
+            if (v) next.set(k, v);
+          }
+          setProjectDirs(next);
         }
       })();
       return () => {
@@ -370,10 +392,27 @@ export const FileExplorer = memo(
     });
 
     const scrollEntryIntoView = useCallback(
-      (path: string) => {
+      (path: string, align: "auto" | "reveal" = "auto") => {
         const index = entryIndexByPath.get(path);
         if (index === undefined) return;
-        virtualizer.scrollToIndex(index, { align: "auto" });
+        if (align === "auto") {
+          virtualizer.scrollToIndex(index, { align: "auto" });
+          return;
+        }
+        // "reveal": leave the view alone when the row is already on screen —
+        // yanking a visible row to the middle is more disorienting than not
+        // scrolling at all. Only when it's off screen do we scroll, and then
+        // to a bit above centre so there's context below it.
+        const el = scrollRef.current;
+        if (!el) return;
+        const top = index * ROW_HEIGHT;
+        const viewTop = el.scrollTop;
+        const viewBottom = viewTop + el.clientHeight;
+        const margin = ROW_HEIGHT * 2;
+        if (top >= viewTop + margin && top + ROW_HEIGHT <= viewBottom - margin) {
+          return;
+        }
+        el.scrollTop = Math.max(0, top - el.clientHeight * 0.35);
       },
       [entryIndexByPath, virtualizer],
     );
@@ -389,12 +428,53 @@ export const FileExplorer = memo(
       if (!entryIndexByPath.has(activeFilePath)) return;
       lastSyncedActivePathRef.current = activeFilePath;
       setSelectedPath(activeFilePath);
-      requestAnimationFrame(() => scrollEntryIntoView(activeFilePath));
+      requestAnimationFrame(() =>
+        scrollEntryIntoView(activeFilePath, "reveal"),
+      );
     }, [activeFilePath, entryIndexByPath, scrollEntryIntoView]);
+
+    // Revealing walks down one level per render: expanding a dir kicks off an
+    // async children fetch, so we re-run as `entryIndexByPath` grows until the
+    // target finally shows up in the flattened rows.
+    const [revealTarget, setRevealTarget] = useState<string | null>(null);
+    useEffect(() => {
+      if (!revealTarget || !rootPath) return;
+      if (!revealTarget.startsWith(`${rootPath}/`)) {
+        setRevealTarget(null);
+        return;
+      }
+      if (entryIndexByPath.has(revealTarget)) {
+        setSelectedPath(revealTarget);
+        const target = revealTarget;
+        // Center it — landing flush against the bottom edge (what "auto" gives
+        // when scrolling down) buries the hit under the fold.
+        requestAnimationFrame(() => scrollEntryIntoView(target, "reveal"));
+        setRevealTarget(null);
+        return;
+      }
+      // Expand the shallowest ancestor that isn't open yet.
+      const rel = revealTarget.slice(rootPath.length + 1).split("/");
+      let dir = rootPath;
+      for (let i = 0; i < rel.length - 1; i++) {
+        dir = `${dir}/${rel[i]}`;
+        if (!tree.expanded.has(dir)) {
+          tree.expand(dir);
+          return;
+        }
+      }
+    }, [
+      revealTarget,
+      rootPath,
+      entryIndexByPath,
+      scrollEntryIntoView,
+      tree.expand,
+      tree.expanded,
+    ]);
 
     useImperativeHandle(
       ref,
       () => ({
+        revealPath: (p: string) => setRevealTarget(p),
         focus: () => {
           containerRef.current?.focus();
           if (!selectedPath && entryPaths.length > 0) {
@@ -541,7 +621,7 @@ export const FileExplorer = memo(
               onSelectPath={setSelectedPath}
               gitStatusCode={row.gitStatusCode}
               gitignored={gitDecorations && row.gitignored}
-              isProjectDir={row.isDir && projectDirs.has(row.path)}
+              projectKind={row.isDir ? (projectDirs.get(row.path) ?? null) : null}
               onOpenProject={onOpenProject}
               isActiveProject={
                 !!activeProjectPath && row.path === activeProjectPath
@@ -593,6 +673,23 @@ export const FileExplorer = memo(
             {basename(rootPath)}
           </span>
 
+          {/* 只有左栏(能设根目录的那个)才需要"上一级",否则设错了就退不回来。 */}
+          {onSetAsRoot && parentDir(rootPath) && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground"
+              onClick={() => {
+                const up = parentDir(rootPath);
+                if (up) onSetAsRoot(up);
+              }}
+              title={`上一级 · ${parentDir(rootPath)}`}
+              aria-label="Go to parent folder"
+            >
+              <HugeiconsIcon icon={ArrowUp01Icon} size={13} strokeWidth={2} />
+            </Button>
+          )}
+
           <Button
             variant="ghost"
             size="icon"
@@ -631,6 +728,7 @@ export const FileExplorer = memo(
           >
             <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={2} />
           </Button>
+          {headerExtra}
         </div>
 
         <ExplorerSearch
@@ -778,6 +876,14 @@ export const FileExplorer = memo(
                       onSelect={() => onOpenNewTerminal(menuTarget.path)}
                     >
                       Open New Terminal
+                    </ContextMenuItem>
+                  )}
+                  {menuTarget.isDir && onSetAsRoot && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => onSetAsRoot(menuTarget.path)}
+                    >
+                      Set as Space Root
                     </ContextMenuItem>
                   )}
                   {menuTarget.isDir && onOpenInSourceControl && (

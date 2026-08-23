@@ -48,7 +48,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { labelFor } from "./lib/tabLabel";
+import { labelFor, parentLabelFor } from "./lib/tabLabel";
 import type { EditorTab, Tab } from "./lib/useTabs";
 import { NewTabMenu } from "./NewTabMenu";
 
@@ -216,11 +216,11 @@ export function TabBar({
         >
           <TabsList
             ref={listRef}
-            className="relative h-7 w-max gap-0.5 bg-transparent p-0"
+            className="relative h-10 w-max gap-0.5 bg-transparent p-0"
           >
             <span
               aria-hidden
-              className="pointer-events-none absolute left-0 top-1/2 h-7 rounded-md bg-foreground/[0.07] shadow-sm ring-1 ring-inset ring-foreground/[0.05]"
+              className="pointer-events-none absolute left-0 top-1/2 h-10 rounded-md bg-foreground/[0.06]"
               style={
                 pill
                   ? {
@@ -258,7 +258,7 @@ export function TabBar({
                     <div
                       data-tab-id={t.id}
                       className={cn(
-                        "flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-accent text-xs text-foreground",
+                        "flex h-10 shrink-0 items-center gap-1.5 rounded-md bg-accent text-xs text-foreground",
                         compact ? "px-1.5" : "px-2",
                       )}
                     >
@@ -341,7 +341,7 @@ export function TabBar({
                     }
                   }}
                   className={cn(
-                    "group relative z-[1] h-7 shrink-0 justify-between gap-1.5 rounded-md bg-transparent text-xs transition-colors data-active:bg-transparent dark:data-active:bg-transparent",
+                    "group relative z-[1] h-10 shrink-0 justify-between gap-1.5 rounded-md bg-transparent text-xs transition-colors data-active:bg-transparent dark:data-active:bg-transparent",
                     isNew && "terax-tab-in",
                     isActive
                       ? "text-foreground dark:text-foreground"
@@ -464,8 +464,34 @@ export function TabBar({
                     )}
                     {/* Preview tabs use italic to signal the transient state,
                         matching the visual convention from VSCode. */}
-                    <span className={cn("truncate", isPreview && "italic")}>
-                      {labelFor(t)}
+                    <span
+                      className={cn(
+                        "flex min-w-0 flex-col justify-center leading-tight",
+                        isPreview && "italic",
+                      )}
+                    >
+                      {parentLabelFor(t) && (
+                        // 只有选中的 tab 亮绿,其余压暗 —— 否则每个 tab 都一条
+                        // 绿字,反而看不出哪个是当前的。
+                        <span
+                          className={cn(
+                            "truncate text-[10px]",
+                            isActive
+                              ? "text-emerald-400"
+                              : "text-muted-foreground/55",
+                          )}
+                        >
+                          {parentLabelFor(t)}
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          "truncate",
+                          isActive && "font-semibold text-emerald-400",
+                        )}
+                      >
+                        {labelFor(t)}
+                      </span>
                     </span>
                     {t.kind === "editor" && t.dirty ? (
                       <span

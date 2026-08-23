@@ -1040,6 +1040,24 @@ export function getSlotForLeaf(leafId: number): Slot | null {
   return slots.find((s) => s.currentLeafId === leafId) ?? null;
 }
 
+/**
+ * Turn off every mouse-reporting mode on a leaf's terminal.
+ *
+ * A TUI (Claude Code, Codex…) enables mouse tracking on startup and is meant to
+ * disable it on exit; when it dies without doing so, xterm keeps encoding every
+ * click and drag as `CSI < b ; x ; y M` and writes it to the plain shell, which
+ * echoes the gibberish back as if you'd typed it. Feeding the resets *into*
+ * xterm (not the pty) makes it drop the modes locally.
+ */
+export function resetMouseModes(leafId: number): void {
+  const slot = slots.find((s) => s.currentLeafId === leafId);
+  if (!slot) return;
+  // 1000 normal, 1002 button-drag, 1003 any-motion, 1005/1006/1015 encodings.
+  slot.term.write(
+    "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1005l\x1b[?1006l\x1b[?1015l",
+  );
+}
+
 export function isLeafAltScreen(leafId: number): boolean {
   const slot = slots.find((s) => s.currentLeafId === leafId);
   return slot ? isAltScreen(slot) : false;

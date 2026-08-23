@@ -92,7 +92,7 @@ export function AndroidRunToolbar({ compact }: Props) {
         variant="outline"
         size="sm"
         onClick={() => setDeviceManagerOpen(!deviceManagerOpen)}
-        className="h-7 max-w-56 gap-1.5 rounded-md px-2 text-xs"
+        className="h-7 max-w-56 gap-1.5 rounded-md px-2 text-[13px]"
         title={
           selectedDevice
             ? `${selectedDevice.vendor} ${selectedDevice.model} · ${selectedDevice.serial} · Android ${selectedDevice.androidVersion} · API ${selectedDevice.apiLevel}`
@@ -121,7 +121,7 @@ export function AndroidRunToolbar({ compact }: Props) {
           <Button
             variant="outline"
             size="sm"
-            className="h-7 max-w-44 gap-1.5 rounded-md px-2 text-xs"
+            className="h-7 max-w-44 gap-1.5 rounded-md px-2 text-[13px]"
             title={projectRoot ? `模块 · ${projectRoot}` : "模块"}
           >
             <HugeiconsIcon icon={Folder01Icon} size={13} strokeWidth={1.75} />
@@ -152,7 +152,7 @@ export function AndroidRunToolbar({ compact }: Props) {
         disabled={!canRun}
         onClick={onRun}
         title="编译安装并启动 (installDebug + launch)"
-        className="h-7 gap-1 rounded-md bg-emerald-600 px-2.5 text-xs text-white hover:bg-emerald-500"
+        className="h-7 gap-1 rounded-md bg-emerald-600 px-2.5 text-[13px] text-white hover:bg-emerald-500"
       >
         <HugeiconsIcon icon={PlayIcon} size={13} strokeWidth={2} />
         {!compact && "运行"}

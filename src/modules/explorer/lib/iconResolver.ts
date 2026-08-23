@@ -96,6 +96,11 @@ export function fileIconUrl(name: string): string {
   return buildDataUrl(DEFAULT_FILE) ?? "";
 }
 
+/** Data URL for a catppuccin icon by its own name (e.g. "flutter"). */
+export function namedIconUrl(iconName: string): string | null {
+  return buildDataUrl(iconName);
+}
+
 export function folderIconUrl(name: string, expanded: boolean): string {
   const lower = name.toLowerCase();
 

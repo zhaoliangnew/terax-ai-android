@@ -29,11 +29,15 @@ export const useAgentActivityStore = create<AgentActivityStore>((set) => ({
       if (s.agents[id] === agent) return s;
       return { agents: { ...s.agents, [id]: agent } };
     }),
+  // Clears both "needs you" states once the tab is actually looked at.
+  // `finished` used to time out on its own after a few seconds, which meant a
+  // run that ended while you were in another tab was gone before you saw it.
   acknowledgeAttention: (ids) =>
     set((s) => {
       let phases: Record<number, AgentPhase> | null = null;
       for (const id of ids) {
-        if (s.phases[id] !== "attention") continue;
+        const phase = s.phases[id];
+        if (phase !== "attention" && phase !== "finished") continue;
         phases ??= { ...s.phases };
         phases[id] = "idle";
       }
@@ -50,17 +54,6 @@ export const useAgentActivityStore = create<AgentActivityStore>((set) => ({
     }),
 }));
 
-const FINISHED_TTL_MS = 6000;
-const finishedTimers = new Map<number, ReturnType<typeof setTimeout>>();
-
-function clearFinishedTimer(id: number): void {
-  const t = finishedTimers.get(id);
-  if (t) {
-    clearTimeout(t);
-    finishedTimers.delete(id);
-  }
-}
-
 let onExited: ((ptyId: number) => void) | null = null;
 let bound = false;
 
@@ -68,9 +61,13 @@ let bound = false;
  * pty, or `null` to ignore. Pure so the mapping stays unit-testable. */
 export function phaseForSignal(
   kind: string,
-): Exclude<AgentPhase, "idle"> | "exited" | null {
+): AgentPhase | "exited" | null {
   switch (kind) {
+    // Launching only *arms* the pty — the agent is sitting at an empty prompt,
+    // not working. Claude/Codex hooks fire `working` on UserPromptSubmit, so
+    // treating `started` as working left a fresh idle session lit up 🟡.
     case "started":
+      return "idle";
     case "working":
       return "working";
     case "attention":
@@ -96,7 +93,6 @@ export function ensureAgentActivityListener(
     const { id, agent } = e.payload;
     const action = phaseForSignal(e.payload.kind);
     if (action === null) return;
-    clearFinishedTimer(id);
     const store = useAgentActivityStore.getState();
     if (action === "exited") {
       store.clear(id);
@@ -106,16 +102,6 @@ export function ensureAgentActivityListener(
     // The agent name only rides the `started` signal (incl. self-arm).
     if (agent) store.setAgent(id, agent);
     store.setPhase(id, action);
-    if (action === "finished") {
-      finishedTimers.set(
-        id,
-        setTimeout(() => {
-          finishedTimers.delete(id);
-          const s = useAgentActivityStore.getState();
-          if (s.phases[id] === "finished") s.setPhase(id, "idle");
-        }, FINISHED_TTL_MS),
-      );
-    }
   });
 }
 

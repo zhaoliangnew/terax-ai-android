@@ -8,7 +8,9 @@ import {
 
 describe("phaseForSignal", () => {
   it("maps lifecycle kinds to phases", () => {
-    expect(phaseForSignal("started")).toBe("working");
+    // `started` only arms the pty: the agent is idle at its prompt until a
+    // real `working` signal (UserPromptSubmit) arrives.
+    expect(phaseForSignal("started")).toBe("idle");
     expect(phaseForSignal("working")).toBe("working");
     expect(phaseForSignal("attention")).toBe("attention");
     expect(phaseForSignal("finished")).toBe("finished");

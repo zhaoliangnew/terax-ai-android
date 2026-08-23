@@ -221,6 +221,41 @@ export async function discoverModules(projectRoot: string): Promise<string[]> {
   return ["app"];
 }
 
+export type ProjectKind = "android" | "flutter";
+
+/** Which kind of runnable project `dir` is, or null when it's a plain folder. */
+export async function classifyProjectKind(
+  dir: string,
+): Promise<ProjectKind | null> {
+  if (await isFlutterProjectDir(dir)) return "flutter";
+  if (await isAndroidProjectDir(dir)) return "android";
+  return null;
+}
+
+async function isFlutterProjectDir(dir: string): Promise<boolean> {
+  const d = dir.replace(/\/+$/, "");
+  try {
+    const res = await native.readFile(`${d}/pubspec.yaml`);
+    if (res.kind !== "text") return false;
+    return /^flutter:\s*$/m.test(res.content);
+  } catch {
+    return false;
+  }
+}
+
+/** True for a real Android app/library module or a Flutter project — not
+ * just any gradle root (e.g. a plain JVM/Kotlin-multiplatform project). */
+export async function isSupportedProductDir(dir: string): Promise<boolean> {
+  if (await isFlutterProjectDir(dir)) return true;
+  const modules = await discoverModules(dir);
+  for (const m of modules) {
+    if (await hasFile(`${dir}/${m}/src/main/AndroidManifest.xml`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export type ApkMetadata = { applicationId: string };
 
 export async function readApplicationId(

@@ -39,9 +39,9 @@ export default function DevicePanel() {
               strokeWidth={1.75}
               className="text-muted-foreground"
             />
-            <span className="text-[11px] font-semibold">屏幕镜像</span>
+            <span className="text-[13px] font-semibold">屏幕镜像</span>
             {device && (
-              <span className="truncate text-[13px] text-muted-foreground">
+              <span className="truncate text-[14px] text-muted-foreground">
                 {device.vendor ? `${device.vendor} ` : ""}
                 {device.model} · {highlightSerial(device.serial)}
               </span>
@@ -52,7 +52,7 @@ export default function DevicePanel() {
                   <button
                     type="button"
                     onClick={() => setMirroring(false)}
-                    className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                    className="rounded border border-border px-2 py-0.5 text-[12px] text-muted-foreground hover:text-foreground"
                   >
                     停止投屏
                   </button>
@@ -60,7 +60,7 @@ export default function DevicePanel() {
                   <button
                     type="button"
                     onClick={() => setMirroring(true)}
-                    className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] text-white hover:bg-emerald-500"
+                    className="rounded bg-emerald-600 px-2 py-0.5 text-[12px] text-white hover:bg-emerald-500"
                   >
                     投屏
                   </button>
@@ -75,7 +75,7 @@ export default function DevicePanel() {
                     )
                   }
                   title="用官方 scrcpy 独立窗口打开(保底方案)"
-                  className="rounded border border-border px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                  className="rounded border border-border px-2 py-0.5 text-[12px] text-muted-foreground hover:text-foreground"
                 >
                   外部窗口
                 </button>
@@ -93,18 +93,25 @@ export default function DevicePanel() {
               />
             ))}
             {!(mirroring && selectedSerial) && (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="flex flex-col items-center gap-2 text-muted-foreground">
+              // 整块空白就是"开始投屏"的按钮 —— 比让人去右上角找那颗小按钮
+              // 顺手得多。没有在线设备时退化成纯提示。
+              <button
+                type="button"
+                disabled={!online}
+                onClick={() => setMirroring(true)}
+                className="absolute inset-0 flex items-center justify-center enabled:cursor-pointer enabled:hover:bg-accent/20"
+              >
+                <span className="flex flex-col items-center gap-2 text-muted-foreground">
                   <HugeiconsIcon
                     icon={SmartPhone01Icon}
                     size={36}
                     strokeWidth={1}
                   />
-                  <span className="text-[11px]">
-                    {online ? "点「投屏」开始镜像" : "没有在线设备"}
+                  <span className="text-[12px]">
+                    {online ? "点击开始投屏" : "没有在线设备"}
                   </span>
-                </div>
-              </div>
+                </span>
+              </button>
             )}
             <DeviceManagerPanel />
           </div>
@@ -112,7 +119,7 @@ export default function DevicePanel() {
       </ResizablePanel>
       <ResizableHandle
         withHandle
-        className="h-2.5 bg-border/50 transition-colors hover:bg-border"
+        className="h-2.5 cursor-row-resize bg-border/50 transition-colors hover:bg-border"
       />
       <ResizablePanel id="logcat" defaultSize="35%" minSize="15%">
         <LogcatPanel />

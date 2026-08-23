@@ -9,7 +9,6 @@ import {
   AiOpenButton,
   AiStatusBarControls,
 } from "@/modules/ai/components/AiStatusBarControls";
-import { useAndroidRunStore } from "@/modules/android-run";
 import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon } from "@hugeicons/core-free-icons";
@@ -45,28 +44,10 @@ export function StatusBar({
 }: Props) {
   const panelOpen = useChatStore((s) => s.panelOpen);
 
-  const androidProjectRoot = useAndroidRunStore((s) => s.projectRoot);
-  const androidCrumb = androidProjectRoot
-    ? {
-        project: androidProjectRoot.split("/").slice(-2, -1)[0] ?? "",
-        product: androidProjectRoot.split("/").slice(-1)[0] ?? "",
-      }
-    : null;
-
   return (
     <footer className="flex h-8 shrink-0 items-center justify-between gap-3 pl-3 pr-4 text-[11px]">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
-        {androidCrumb && (
-          <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
-            <span>{androidCrumb.project}</span>
-            <span className="opacity-60">/</span>
-            <span className="font-medium text-emerald-500">
-              {androidCrumb.product}
-            </span>
-            <span className="mx-1 h-3 w-px bg-border" />
-          </span>
-        )}
         <CwdBreadcrumb cwd={cwd} filePath={filePath} home={home} onCd={onCd} />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />

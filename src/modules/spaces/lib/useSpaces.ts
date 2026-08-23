@@ -33,6 +33,7 @@ type State = {
   ) => void;
   create: (input: CreateInput) => SpaceMeta;
   rename: (id: string, name: string) => void;
+  setRoot: (id: string, root: string) => void;
   setEnv: (id: string, env: WorkspaceEnv) => void;
   setColor: (id: string, color: number | undefined) => void;
   reorder: (orderedIds: string[]) => void;
@@ -73,6 +74,14 @@ export const useSpaces = create<State>((set, get) => ({
   rename: (id, name) => {
     const spaces = get().spaces.map((s) =>
       s.id === id ? { ...s, name, updatedAt: Date.now() } : s,
+    );
+    set({ spaces });
+    void saveSpacesList(spaces);
+  },
+
+  setRoot: (id, root) => {
+    const spaces = get().spaces.map((s) =>
+      s.id === id ? { ...s, root, updatedAt: Date.now() } : s,
     );
     set({ spaces });
     void saveSpacesList(spaces);

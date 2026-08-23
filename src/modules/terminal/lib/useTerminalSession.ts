@@ -48,6 +48,7 @@ import {
   poolSlotStats,
   refreshLeafSlot,
   releaseSlot,
+  resetMouseModes,
   setSlotFocused,
 } from "./rendererPool";
 import { useTerminalFont } from "./useTerminalFont";
@@ -369,6 +370,10 @@ function onLeafCommandState(leafId: number, running: boolean): void {
 ensureAgentActivityListener((ptyId) => {
   const leafId = leafIdForPty(ptyId);
   if (leafId === null) return;
+  // The agent owned the mouse while it ran; if it exited without restoring the
+  // terminal, every later click would be typed into the shell as escape-code
+  // gibberish. Clearing the modes here costs nothing when it exited cleanly.
+  resetMouseModes(leafId);
   const s = sessions.get(leafId);
   if (s) scheduleHiddenRelease(leafId, s);
 });

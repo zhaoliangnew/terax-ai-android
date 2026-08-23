@@ -9,7 +9,7 @@ import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
-import { isMarkdownPath } from "@/lib/utils";
+import { cn, isMarkdownPath } from "@/lib/utils";
 import {
   type AgentLaunchRequest,
   AgentNotificationsBridge,
@@ -30,8 +30,12 @@ import {
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import {
+  AgentQuickLaunch,
+  type QuickAgentId,
+  classifyProjectKind,
   findProjectRoot,
-  isAndroidProjectDir,
+  isSupportedProductDir,
+  OpenInToolMenu,
   useAndroidRunStore,
 } from "@/modules/android-run";
 import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
@@ -72,7 +76,6 @@ import {
   useSourceControlContext,
 } from "@/modules/source-control";
 import {
-  SpaceSwitcher,
   useSpacePersistence,
   useSpaces,
   useSpacesBoot,
@@ -112,6 +115,12 @@ import {
   type WorkspaceEnv,
   workspaceScopeKey,
 } from "@/modules/workspace";
+import {
+  Folder01Icon,
+  SidebarRightIcon,
+} from "@hugeicons/core-free-icons";
+import type { PanelImperativeHandle } from "react-resizable-panels";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -147,11 +156,7 @@ export default function App() {
     allocId,
     booted,
     replaceTabs,
-    moveTabToSpace,
-    reorderTab,
     reorderTabByGap,
-    newTabInSpace,
-    removeTabsForSpace,
     markBooted,
     setActiveSpaceForNewTabs,
     newTab,
@@ -248,6 +253,13 @@ export default function App() {
   const activeSpaceRoot = useSpaces(
     (s) => s.spaces.find((sp) => sp.id === s.activeId)?.root ?? null,
   );
+  const setSpaceRoot = useSpaces((s) => s.setRoot);
+  const handleSetSpaceRoot = useCallback(
+    (path: string) => {
+      if (activeSpaceId) setSpaceRoot(activeSpaceId, path);
+    },
+    [activeSpaceId, setSpaceRoot],
+  );
   const activeSpaceIdRef = useRef(activeSpaceId);
   useLayoutEffect(() => {
     tabsRef.current = tabs;
@@ -310,8 +322,6 @@ export default function App() {
     adoptWorkspaceEnv,
   ]);
 
-  const [switcherOpen, setSwitcherOpen] = useState(false);
-
   const spaceTabs = useMemo(
     () => tabs.filter((t) => t.spaceId === (activeSpaceId ?? DEFAULT_SPACE_ID)),
     [tabs, activeSpaceId],
@@ -372,10 +382,72 @@ export default function App() {
 
   // 当前产品(gradle 工程根),由 android-run 从活动终端 cwd 发现。
   const androidProjectRoot = useAndroidRunStore((s) => s.projectRoot);
+  // 只有真正的 Android/Flutter 工程才值得多开一块产品文件区,普通 gradle
+  // 工程(没有 AndroidManifest,也不是 Flutter)不算,避免误判。
+  const [productDirSupported, setProductDirSupported] = useState(false);
+  useEffect(() => {
+    if (!androidProjectRoot) {
+      setProductDirSupported(false);
+      return;
+    }
+    let cancelled = false;
+    void isSupportedProductDir(androidProjectRoot).then((ok) => {
+      if (!cancelled) setProductDirSupported(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [androidProjectRoot]);
+  // 右侧设备栏只对安卓/Flutter 工程有意义。普通目录(文档、资料夹)里它只会
+  // 显示"没有在线设备",白占半屏 —— 折叠掉而不是卸载,这样投屏会话还活着,
+  // 切回工程 tab 立刻就在,不用重连。
+  const devicePanelRef = useRef<PanelImperativeHandle | null>(null);
+  useEffect(() => {
+    const p = devicePanelRef.current;
+    if (!p) return;
+    const collapsed = p.getSize().asPercentage <= 0;
+    if (androidProjectRoot) {
+      if (collapsed) p.resize("44%");
+    } else if (!collapsed) {
+      p.collapse();
+    }
+  }, [androidProjectRoot]);
+
+  // 切 tab 时把左栏定位到该 tab 的工程根,省得每次手动一层层展开找回来。
+  const lastRevealedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!androidProjectRoot) return;
+    if (androidProjectRoot === lastRevealedRef.current) return;
+    lastRevealedRef.current = androidProjectRoot;
+    explorerRef.current?.revealPath(androidProjectRoot);
+  }, [androidProjectRoot]);
+
+  // 产品文件区默认收起 —— 大多数时候左栏的项目树就够用了,展开一次后
+  // 记住选择(localStorage,纯本机偏好)。
+  const [productPaneOpen, setProductPaneOpen] = useState(
+    () => localStorage.getItem("terax.productPaneOpen") === "1",
+  );
+  useEffect(() => {
+    localStorage.setItem("terax.productPaneOpen", productPaneOpen ? "1" : "0");
+  }, [productPaneOpen]);
+  // 收起产品文件区时把侧栏宽度一起收回去 —— 否则那半边只是空着,左边的树
+  // 白白铺开一片空白;展开时再还回来。
+  const toggleProductPane = useCallback(() => {
+    setProductPaneOpen((open) => {
+      const next = !open;
+      const p = sidebarRef.current;
+      const width = p?.getSize().inPixels ?? 0;
+      if (p && width > 0) {
+        p.resize(`${Math.round(next ? width * 2 : width / 2)}px`);
+      }
+      return next;
+    });
+  }, [sidebarRef]);
   // 进产品后在右侧多加一块产品文件区(左侧钉住 Space 全部项目树)。
   const showProductPane =
     androidProjectRoot !== null &&
-    androidProjectRoot !== (activeSpaceRoot ?? explorerRoot);
+    androidProjectRoot !== (activeSpaceRoot ?? explorerRoot) &&
+    productDirSupported;
 
   useWindowTitle(activeTab, explorerRoot);
 
@@ -662,6 +734,56 @@ export default function App() {
       }, 80);
     },
     [newTab],
+  );
+
+  // 当前终端里已经跑着的 agent(Claude/Codex…),用来禁掉快捷启动按钮 ——
+  // 否则命令会直接打进 agent 的输入框里。
+  const agentByPty = useAgentActivityStore((s) => s.agents);
+  const activeTerminalAgent = useMemo(() => {
+    if (activeLeafId === null) return null;
+    const ptyId = ptyIdForLeaf(activeLeafId);
+    return ptyId === null ? null : (agentByPty[ptyId] ?? null);
+  }, [activeLeafId, agentByPty]);
+
+  // 一键起 agent:优先直接用当前终端(你多半已经在这个工程的终端里了,再开一个
+  // 纯属添乱);只有当前 tab 不是终端时才新开一个。
+  const openAgentTerminal = useCallback(
+    (path: string, command: string, agent: QuickAgentId) => {
+      const line = `cd ${quoteShellArg(path)} && ${command}\r`;
+      // Install the OSC 777 notification hook first, same as the built-in
+      // agent launcher does — without it the agent only ever emits `started`
+      // and the status dot stays stuck on 🟡 working forever.
+      const hooksReady = invoke("agent_enable_hooks", { agent }).catch(
+        (error) => {
+          console.warn(
+            `[terax] could not enable ${agent} notifications:`,
+            error,
+          );
+        },
+      );
+      const current =
+        activeLeafId !== null ? terminalRefs.current.get(activeLeafId) : null;
+      if (current) {
+        void hooksReady.then(() => {
+          current.write(line);
+          current.focus();
+        });
+        return;
+      }
+      const tabId = newTab(path);
+      void (async () => {
+        await hooksReady;
+        setTimeout(() => {
+          const tab = tabsRef.current.find((x) => x.id === tabId);
+          if (!tab || tab.kind !== "terminal") return;
+          const t = terminalRefs.current.get(tab.activeLeafId);
+          if (!t) return;
+          t.write(line);
+          t.focus();
+        }, 80);
+      })();
+    },
+    [newTab, activeLeafId],
   );
 
   // 左侧项目树里,已有终端 tab 打开的安卓工程目录用绿字标出来,方便一眼看出
@@ -966,7 +1088,6 @@ export default function App() {
         ),
       "space.next": () => cycleSpace(1),
       "space.prev": () => cycleSpace(-1),
-      "space.overview": () => setSwitcherOpen(true),
       "pane.splitRight": () => splitActivePaneInActiveTab("row"),
       "pane.splitDown": () => splitActivePaneInActiveTab("col"),
       "pane.focusNext": () => focusNextPaneInTab(activeId, 1),
@@ -1240,74 +1361,6 @@ export default function App() {
     return meta.id;
   }, [activeCwd, home, workspaceEnv, newTab, setActiveSpaceForNewTabs]);
 
-  const handleDeleteSpace = useCallback(
-    (id: string) => {
-      const nextSpaceId = useSpaces.getState().remove(id);
-      if (!nextSpaceId) return;
-      const root = useSpaces
-        .getState()
-        .spaces.find((s) => s.id === nextSpaceId)?.root;
-      removeTabsForSpace(id, nextSpaceId, root ?? undefined);
-    },
-    [removeTabsForSpace],
-  );
-
-  const handleMoveTab = useCallback(
-    (tabId: number, targetSpaceId: string) => {
-      if (moveTabToSpace(tabId, targetSpaceId)) {
-        useSpaces.getState().setActive(targetSpaceId);
-      }
-    },
-    [moveTabToSpace],
-  );
-
-  const handleReorderTab = useCallback(
-    (tabId: number, targetTabId: number, edge: "top" | "bottom") => {
-      if (reorderTab(tabId, targetTabId, edge)) {
-        const target = tabsRef.current.find((x) => x.id === targetTabId);
-        if (target) useSpaces.getState().setActive(target.spaceId);
-      }
-    },
-    [reorderTab],
-  );
-
-  const handleNewTabInSpace = useCallback(
-    (spaceId: string) => {
-      const root = useSpaces
-        .getState()
-        .spaces.find((s) => s.id === spaceId)?.root;
-      newTabInSpace(spaceId, root ?? undefined);
-    },
-    [newTabInSpace],
-  );
-
-  const jumpToTab = useCallback(
-    (tabId: number) => {
-      const t = tabsRef.current.find((x) => x.id === tabId);
-      if (!t) return;
-      setActiveId(tabId);
-      useSpaces.getState().setActive(t.spaceId);
-      setSwitcherOpen(false);
-    },
-    [setActiveId],
-  );
-
-  const spaceSwitcher = (
-    <SpaceSwitcher
-      open={switcherOpen}
-      onOpenChange={setSwitcherOpen}
-      tabs={tabs}
-      onNewSpace={() => void handleNewSpace()}
-      onDeleteSpace={handleDeleteSpace}
-      onNewTabInSpace={handleNewTabInSpace}
-      onJumpTab={jumpToTab}
-      onCloseTab={handleClose}
-      onMoveTabToSpace={handleMoveTab}
-      onReorderTab={handleReorderTab}
-      onReorderSpaces={(ids) => useSpaces.getState().reorder(ids)}
-    />
-  );
-
   const commandPaletteItems = useMemo(
     () =>
       commandPaletteOpen
@@ -1334,11 +1387,6 @@ export default function App() {
             askAiSelection: askFromSelection,
             openSettings: () => void openSettingsWindow(),
             openKeyboardShortcuts: () => void openSettingsWindow("shortcuts"),
-            spaces: useSpaces.getState().spaces,
-            activeSpaceId,
-            openSpacesOverview: () => setSwitcherOpen(true),
-            newSpace: () => void handleNewSpace(),
-            switchSpace: (id) => useSpaces.getState().setActive(id),
           })
         : [],
     [
@@ -1473,7 +1521,7 @@ export default function App() {
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
               onOpenSettings={() => void openSettingsWindow()}
-              spaceSwitcher={spaceSwitcher}
+              spaceSwitcher={null}
               searchTarget={searchTarget}
               searchRef={searchInlineRef}
               onOverrideLanguage={setOverrideLanguage}
@@ -1507,12 +1555,15 @@ export default function App() {
               >
                 <div className="h-full min-h-0 pl-2 pr-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
-                    <div
-                      key={sidebarView}
-                      className="min-h-0 flex-1 terax-panel-in"
-                    >
-                      {sidebarView === "explorer" ? (
-                        <div className="flex h-full min-h-0">
+                    <div className="min-h-0 flex-1 terax-panel-in">
+                      {/* explorer 树常驻挂载(不随 sidebarView 切换重新 key),
+                          否则每次切到 git 面板再切回来,虚拟列表滚动位置都会丢。 */}
+                      <div
+                        className={cn(
+                          "flex h-full min-h-0",
+                          sidebarView !== "explorer" && "hidden",
+                        )}
+                      >
                           {/* 左:工作区全部项目树,钉在 Space 根目录(不跟随终端),
                               始终可点别的项目/产品切换。 */}
                           <div className="flex min-w-0 flex-1 flex-col">
@@ -1531,7 +1582,7 @@ export default function App() {
                                 onPathDeleted={handlePathDeleted}
                                 onRevealInTerminal={cdInNewTab}
                                 onOpenNewTerminal={openNewTerminalAt}
-                                classifyProjectDir={isAndroidProjectDir}
+                                classifyProjectDir={classifyProjectKind}
                                 onOpenProject={cdInNewTab}
                                 activeProjectPath={androidProjectRoot}
                                 openedProjectPaths={openedProjectPaths}
@@ -1541,12 +1592,41 @@ export default function App() {
                                 }
                                 onOpenGitHistory={handleOpenGitHistoryForPath}
                                 onAttachToAgent={handleAttachFileToAgent}
+                                onSetAsRoot={handleSetSpaceRoot}
+                                headerExtra={
+                                  showProductPane && androidProjectRoot ? (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleProductPane()
+                                      }
+                                      title={
+                                        productPaneOpen
+                                          ? "收起产品目录文件"
+                                          : "展开产品目录文件"
+                                      }
+                                      className={cn(
+                                        "flex size-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
+                                        productPaneOpen
+                                          ? "text-emerald-500"
+                                          : "text-muted-foreground",
+                                      )}
+                                    >
+                                      <HugeiconsIcon
+                                        icon={SidebarRightIcon}
+                                        size={13}
+                                        strokeWidth={1.75}
+                                      />
+                                    </button>
+                                  ) : null
+                                }
                                 pathDropTarget={terminalPathDropTarget}
                               />
                             </div>
                           </div>
-                          {/* 右:进产品后才多出的当前产品文件区。 */}
-                          {showProductPane && androidProjectRoot && (
+                          {showProductPane &&
+                            androidProjectRoot &&
+                            productPaneOpen && (
                             <div className="flex min-w-0 flex-1 flex-col border-l border-border/60">
                               <div className="min-h-0 flex-1">
                                 <FileExplorer
@@ -1572,8 +1652,8 @@ export default function App() {
                               </div>
                             </div>
                           )}
-                        </div>
-                      ) : (
+                      </div>
+                      {sidebarView !== "explorer" && (
                         <SourceControlPanel
                           open
                           sourceControl={sourceControl}
@@ -1596,25 +1676,37 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
+              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
               <ResizablePanel id="workspace" defaultSize="34%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     {androidProjectRoot && (
-                      <div className="flex shrink-0 items-center justify-center gap-2 border-b border-border px-3 py-1.5 text-[13px]">
-                        <span className="text-muted-foreground">项目</span>
-                        <span className="font-semibold">
+                      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-1.5 text-[15px]">
+                        <HugeiconsIcon
+                          icon={Folder01Icon}
+                          size={14}
+                          strokeWidth={1.75}
+                          className="shrink-0 text-muted-foreground/70"
+                        />
+                        <span className="truncate text-muted-foreground/80">
                           {androidProjectRoot.split("/").slice(-2, -1)[0] ?? ""}
                         </span>
-                        <span className="text-muted-foreground/60">›</span>
-                        <span className="text-muted-foreground">产品</span>
-                        <span className="font-semibold text-emerald-500">
+                        <span className="text-muted-foreground/40">/</span>
+                        <span className="truncate font-semibold text-emerald-500">
                           {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                         </span>
                         <AgentStatusDot
                           projectRoot={androidProjectRoot}
                           projectPtyIds={projectPtyIds}
                         />
+                        <span className="ml-auto flex items-center gap-2">
+                          <AgentQuickLaunch
+                            projectRoot={androidProjectRoot}
+                            busyAgent={activeTerminalAgent}
+                            onLaunch={openAgentTerminal}
+                          />
+                          <OpenInToolMenu projectRoot={androidProjectRoot} />
+                        </span>
                       </div>
                     )}
                     <div className="relative min-h-0 flex-1">
@@ -1638,6 +1730,22 @@ export default function App() {
                         onGitHistorySearchHandle={setGitHistoryHandle}
                         onSetMarkdownView={setMarkdownView}
                       />
+                      {/* 终端空白处的水印:纯装饰,pointer-events-none 保证不挡
+                          选中/点击,也不参与滚动。 */}
+                      {isTerminalTab && androidProjectRoot && (
+                        <div
+                          aria-hidden
+                          className="pointer-events-none absolute inset-0 flex select-none flex-col items-center justify-center gap-2 opacity-[0.12]"
+                        >
+                          <span className="text-[34px] leading-none tracking-[0.18em]">
+                            {androidProjectRoot.split("/").slice(-2, -1)[0] ??
+                              ""}
+                          </span>
+                          <span className="text-[52px] leading-none font-bold tracking-[0.06em]">
+                            {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     <WorkspaceInputBar
@@ -1652,27 +1760,34 @@ export default function App() {
                       onConnect={() => void openSettingsWindow("models")}
                     />
                     {androidProjectRoot && (
-                      <div className="flex shrink-0 items-center justify-start gap-2 border-t border-border px-3 py-1 text-[12px]">
-                        <span className="text-muted-foreground">项目</span>
-                        <span className="font-medium">
+                      <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-1 text-[14px]">
+                        <HugeiconsIcon
+                          icon={Folder01Icon}
+                          size={13}
+                          strokeWidth={1.75}
+                          className="shrink-0 text-muted-foreground/70"
+                        />
+                        <span className="truncate text-muted-foreground/80">
                           {androidProjectRoot.split("/").slice(-2, -1)[0] ?? ""}
                         </span>
-                        <span className="text-muted-foreground/60">›</span>
-                        <span className="text-muted-foreground">产品</span>
-                        <span className="font-medium text-emerald-500">
+                        <span className="text-muted-foreground/40">/</span>
+                        <span className="truncate font-semibold text-emerald-500">
                           {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                         </span>
-                        <AgentStatusDot
-                          projectRoot={androidProjectRoot}
-                          projectPtyIds={projectPtyIds}
-                        />
                       </div>
                     )}
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
-              <ResizablePanel id="device" defaultSize="44%" minSize="20%">
+              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-transparent transition-colors duration-[var(--dur-fast)] after:w-4 hover:bg-border" />
+              <ResizablePanel
+                id="device"
+                panelRef={devicePanelRef}
+                defaultSize="44%"
+                minSize="20%"
+                collapsible
+                collapsedSize={0}
+              >
                 <div className="h-full min-h-0 pl-0.5 pr-2">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     <Suspense fallback={null}>

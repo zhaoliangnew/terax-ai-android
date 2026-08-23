@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import type { ProjectKind } from "@/modules/android-run";
 import {
   type AgentPhaseState,
   useProjectAgentState,
@@ -9,7 +10,7 @@ import { memo } from "react";
 import { InlineInput } from "./InlineInput";
 import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
+import { fileIconUrl, folderIconUrl, namedIconUrl } from "./lib/iconResolver";
 
 const AGENT_STATE_EMOJI: Record<AgentPhaseState, string> = {
   working: "🟡",
@@ -44,8 +45,8 @@ export type EntryRowProps = {
   onSelectPath: (path: string) => void;
   gitStatusCode?: GitStatusCode | null;
   gitignored?: boolean;
-  /** 安卓工程目录:显示机器人图标、不可展开、点击直接开/定位终端。 */
-  isProjectDir?: boolean;
+  /** 工程目录(安卓/Flutter):显示对应图标、不可展开、点击直接开/定位终端。 */
+  projectKind?: ProjectKind | null;
   onOpenProject?: (path: string) => void;
   /** 当前打开的产品:用醒目底色高亮。 */
   isActiveProject?: boolean;
@@ -71,14 +72,14 @@ function EntryRowImpl(props: EntryRowProps) {
     onSelectPath,
     gitStatusCode,
     gitignored = false,
-    isProjectDir = false,
+    projectKind = null,
     onOpenProject,
     isActiveProject = false,
     isOpenedProject = false,
     projectPtyIds,
   } = props;
 
-  const asProject = isProjectDir && !!onOpenProject;
+  const asProject = projectKind !== null && !!onOpenProject;
   const iconUrl = isDir ? folderIconUrl(name, isExpanded) : fileIconUrl(name);
   const paddingLeft = 6 + depth * 12;
   const agentState = useProjectAgentState(
@@ -124,7 +125,7 @@ function EntryRowImpl(props: EntryRowProps) {
       className={cn(
         "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
         isActiveProject
-          ? "bg-emerald-500/20 font-medium text-foreground ring-1 ring-inset ring-emerald-500/50"
+          ? "bg-emerald-500/15 font-semibold text-emerald-400"
           : isSelected
             ? "bg-accent text-foreground"
             : gitignored
@@ -155,6 +156,12 @@ function EntryRowImpl(props: EntryRowProps) {
           >
             {AGENT_STATE_EMOJI[agentState]}
           </span>
+        ) : projectKind === "flutter" ? (
+          <img
+            src={namedIconUrl("flutter") ?? ""}
+            alt=""
+            className="size-4 shrink-0"
+          />
         ) : (
           <HugeiconsIcon
             icon={AndroidIcon}
@@ -168,11 +175,15 @@ function EntryRowImpl(props: EntryRowProps) {
       ) : (
         <span className="size-4 shrink-0" />
       )}
+      {/* 工程目录分三档:当前选中(绿底已经标出来了)、开着但没选中(白)、
+          没开过(灰)。绿色只留给选中态,否则满屏绿字等于没标记。 */}
       <span
         className={cn(
           "min-w-0 flex-1 truncate",
-          isOpenedProject && !isActiveProject
-            ? "text-emerald-500"
+          asProject && !isActiveProject
+            ? isOpenedProject
+              ? "font-semibold text-foreground"
+              : "text-muted-foreground/65"
             : !isSelected &&
                 !gitignored &&
                 gitStatusCode &&
