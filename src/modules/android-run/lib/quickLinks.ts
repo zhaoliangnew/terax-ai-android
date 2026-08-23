@@ -105,12 +105,23 @@ function customOnly(links: QuickLink[]): QuickLink[] {
   return links.filter((l) => !builtinIds.has(l.id));
 }
 
+/**
+ * 只在"自己加的"这一段里挪,内置区不参与;而且只跟**同类**的邻居换位置。
+ *
+ * 界面上应用和网页是分开两块显示的,存储里却是一个数组混着放。要是按存储的
+ * 相邻项换,点一次"上移"可能跟另一类的条目换了位置 —— 看上去什么都没动。
+ */
 export function moveQuickLink(id: string, delta: number): QuickLink[] {
-  // 只在"自己加的"这一段里挪,内置区不参与。
   const custom = customOnly(loadQuickLinks());
   const i = custom.findIndex((l) => l.id === id);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= custom.length) return loadQuickLinks();
+  if (i < 0) return loadQuickLinks();
+  const target = custom[i].target;
+  // 往 delta 的方向找第一个同类的
+  let j = i + delta;
+  while (j >= 0 && j < custom.length && custom[j].target !== target) {
+    j += delta;
+  }
+  if (j < 0 || j >= custom.length) return loadQuickLinks();
   [custom[i], custom[j]] = [custom[j], custom[i]];
   save(custom);
   return loadQuickLinks();

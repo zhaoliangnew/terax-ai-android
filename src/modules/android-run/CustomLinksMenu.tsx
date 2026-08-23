@@ -3,6 +3,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import {
   ArrowDown01Icon,
   ArrowDown02Icon,
@@ -18,7 +19,6 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import {
   MENU_ACTION,
-  MENU_EMPTY,
   MENU_HEAD,
   MENU_ROW,
   MENU_TRIGGER,
@@ -35,12 +35,23 @@ import {
 import { MenuRowIcon } from "./MenuRowIcon";
 import { QuickLinkEditDialog } from "./QuickLinkEditDialog";
 
-/** 自己攒的入口:网址和本机应用都能放,跟内置知识库分开管,可增删改排序。 */
+const SECTION =
+  "px-2.5 pt-2 pb-1 text-[11px] font-medium text-muted-foreground/60";
+
+/**
+ * 自己攒的入口。应用和网页分两块:应用铺成方块(名字短,一眼扫过去),网页排成
+ * 列表(标题长,一行一条才读得下)—— 两种东西的形状本来就不一样。
+ */
 export function CustomLinksMenu() {
   const [links, setLinks] = useState<QuickLink[]>(() => loadQuickLinks());
   const [editing, setEditing] = useState<QuickLink | null>(null);
 
   const custom = links.filter((l) => !l.kind);
+  const apps = custom.filter((l) => l.target === "app");
+  const sites = custom.filter((l) => l.target !== "app");
+
+  const add = (target?: "app") =>
+    setEditing({ id: newLinkId(), title: "", url: "", target });
 
   return (
     <>
@@ -60,70 +71,149 @@ export function CustomLinksMenu() {
         <DropdownMenuContent
           side="top"
           align="start"
-          className="w-80 p-0"
+          collisionPadding={8}
+          className="w-[30rem] p-0"
           onCloseAutoFocus={(e) => e.preventDefault()}
         >
           <div className={MENU_HEAD}>
             收藏夹
-            <button
-              type="button"
-              title="添加收藏"
-              onClick={() =>
-                setEditing({ id: newLinkId(), title: "", url: "" })
-              }
-              className={MENU_ACTION}
-            >
-              <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
-              添加
-            </button>
+            {/* 两个入口而不是一个:加的时候就知道自己在加什么,省掉进去再选一次 */}
+            <span className="flex items-center gap-1">
+              <button
+                type="button"
+                title="收藏一个本机应用"
+                onClick={() => add("app")}
+                className={MENU_ACTION}
+              >
+                <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
+                应用
+              </button>
+              <button
+                type="button"
+                title="收藏一个网址"
+                onClick={() => add()}
+                className={MENU_ACTION}
+              >
+                <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
+                网页
+              </button>
+            </span>
           </div>
-          <div className="max-h-[26rem] overflow-y-auto px-1.5 pb-2">
+
+          <div className="max-h-[28rem] overflow-y-auto pb-2">
             {custom.length === 0 && (
-              <div className={MENU_EMPTY}>还没有,点右上角添加</div>
-            )}
-            {custom.map((l, i) => (
-              <div key={l.id} className="group flex items-center gap-1">
-                <button
-                  type="button"
-                  title={l.target === "app" ? `打开 ${l.url}` : l.url}
-                  onClick={() => openQuickLink(l)}
-                  className={MENU_ROW}
-                >
-                  <HugeiconsIcon
-                    icon={l.target === "app" ? ComputerIcon : Link02Icon}
-                    size={13}
-                    strokeWidth={1.75}
-                    className="shrink-0 text-muted-foreground/50"
-                  />
-                  <span className="min-w-0 flex-1 truncate">{l.title}</span>
-                </button>
-                <span className="flex shrink-0 items-center gap-1 pr-1 opacity-0 transition-opacity group-hover:opacity-100">
-                  <MenuRowIcon
-                    icon={ArrowUp02Icon}
-                    label="上移"
-                    disabled={i === 0}
-                    onClick={() => setLinks(moveQuickLink(l.id, -1))}
-                  />
-                  <MenuRowIcon
-                    icon={ArrowDown02Icon}
-                    label="下移"
-                    disabled={i === custom.length - 1}
-                    onClick={() => setLinks(moveQuickLink(l.id, 1))}
-                  />
-                  <MenuRowIcon
-                    icon={PencilEdit02Icon}
-                    label="编辑"
-                    onClick={() => setEditing(l)}
-                  />
-                  <MenuRowIcon
-                    icon={Delete02Icon}
-                    label="删除"
-                    destructive
-                    onClick={() => setLinks(removeQuickLink(l.id))}
-                  />
-                </span>
+              <div className="px-3 py-8 text-center text-[12.5px] text-muted-foreground/50">
+                还没有收藏 —— 右上角加个应用或网页
               </div>
-            ))}
+            )}
+
+            {apps.length > 0 && (
+              <>
+                <div className={SECTION}>应用</div>
+                <div className="grid grid-cols-4 gap-1.5 px-1.5">
+                  {apps.map((l, i) => (
+                    <div key={l.id} className="group relative">
+                      <button
+                        type="button"
+                        title={`打开 ${l.url}`}
+                        onClick={() => openQuickLink(l)}
+                        className="flex w-full flex-col items-center gap-1.5 rounded-lg border border-border/50 px-2 py-2.5 transition-colors hover:border-ring/60 hover:bg-accent"
+                      >
+                        <HugeiconsIcon
+                          icon={ComputerIcon}
+                          size={20}
+                          strokeWidth={1.5}
+                          className="text-muted-foreground/70"
+                        />
+                        <span className="w-full truncate text-center text-[12px]">
+                          {l.title}
+                        </span>
+                      </button>
+                      <span className="absolute top-0.5 right-0.5 flex items-center gap-0.5 rounded bg-background/85 opacity-0 backdrop-blur-[2px] transition-opacity group-hover:opacity-100">
+                        <MenuRowIcon
+                          icon={ArrowUp02Icon}
+                          label="前移"
+                          disabled={i === 0}
+                          onClick={() => setLinks(moveQuickLink(l.id, -1))}
+                        />
+                        <MenuRowIcon
+                          icon={ArrowDown02Icon}
+                          label="后移"
+                          disabled={i === apps.length - 1}
+                          onClick={() => setLinks(moveQuickLink(l.id, 1))}
+                        />
+                        <MenuRowIcon
+                          icon={PencilEdit02Icon}
+                          label="编辑"
+                          onClick={() => setEditing(l)}
+                        />
+                        <MenuRowIcon
+                          icon={Delete02Icon}
+                          label="删除"
+                          destructive
+                          onClick={() => setLinks(removeQuickLink(l.id))}
+                        />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {sites.length > 0 && (
+              <>
+                <div className={cn(SECTION, apps.length > 0 && "mt-1")}>
+                  网页
+                </div>
+                <div className="px-1.5">
+                  {sites.map((l, i) => (
+                    <div key={l.id} className="group flex items-center gap-1">
+                      <button
+                        type="button"
+                        title={l.url}
+                        onClick={() => openQuickLink(l)}
+                        className={MENU_ROW}
+                      >
+                        <HugeiconsIcon
+                          icon={Link02Icon}
+                          size={13}
+                          strokeWidth={1.75}
+                          className="shrink-0 text-muted-foreground/50"
+                        />
+                        <span className="min-w-0 flex-1 truncate">
+                          {l.title}
+                        </span>
+                      </button>
+                      <span className="flex shrink-0 items-center gap-1 pr-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <MenuRowIcon
+                          icon={ArrowUp02Icon}
+                          label="上移"
+                          disabled={i === 0}
+                          onClick={() => setLinks(moveQuickLink(l.id, -1))}
+                        />
+                        <MenuRowIcon
+                          icon={ArrowDown02Icon}
+                          label="下移"
+                          disabled={i === sites.length - 1}
+                          onClick={() => setLinks(moveQuickLink(l.id, 1))}
+                        />
+                        <MenuRowIcon
+                          icon={PencilEdit02Icon}
+                          label="编辑"
+                          onClick={() => setEditing(l)}
+                        />
+                        <MenuRowIcon
+                          icon={Delete02Icon}
+                          label="删除"
+                          destructive
+                          onClick={() => setLinks(removeQuickLink(l.id))}
+                        />
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
