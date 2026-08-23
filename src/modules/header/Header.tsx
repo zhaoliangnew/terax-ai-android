@@ -5,11 +5,7 @@ import { NotificationBell } from "@/modules/agents";
 import type { AgentLaunchRequest } from "@/modules/agents/lib/launcher";
 import type { Tab } from "@/modules/tabs";
 import { TabBar } from "@/modules/tabs";
-import {
-  CommandIcon,
-  Settings01Icon,
-  SidebarLeftIcon,
-} from "@hugeicons/core-free-icons";
+import { Settings01Icon, SidebarLeftIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type ReactNode,
@@ -48,6 +44,7 @@ type Props = {
   onReorder: (fromId: number, toGapIndex: number) => void;
   onOverrideLanguage?: (id: number, lang: string | null) => void;
   onToggleSidebar: () => void;
+  /** 命令面板入口。标题栏那颗按钮先隐藏了,这里留着,重新显示时不用再接线。 */
   onOpenCommandPalette: () => void;
   onActivateAgent: (tabId: number, leafId: number) => void;
   onActivateLocalAgent: () => void;
@@ -79,7 +76,6 @@ export function Header({
   onReorder,
   onOverrideLanguage,
   onToggleSidebar,
-  onOpenCommandPalette,
   onActivateAgent,
   onActivateLocalAgent,
   onOpenSettings,
@@ -133,15 +129,7 @@ export function Header({
           <HugeiconsIcon icon={SidebarLeftIcon} size={18} strokeWidth={1.75} />
         </Button>
 
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          onClick={onOpenCommandPalette}
-          title="Command palette"
-          className="shrink-0 gap-1.5 rounded-md px-1.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <HugeiconsIcon icon={CommandIcon} size={14} strokeWidth={1.75} />
-        </Button>
+        {/* 命令面板的按钮先收起来 —— 快捷键(⌘K)还在,只是不占标题栏的位置。 */}
 
         {!IS_MAC && (
           <NotificationBell

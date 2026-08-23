@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef } from "react";
+import { setAppZoom } from "@/lib/appZoom";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { setZoomLevel } from "@/modules/settings/store";
+import { useCallback, useEffect, useRef } from "react";
 
 const ZOOM_STEP = 0.1;
 const MIN_ZOOM = 0.5;
@@ -14,6 +15,7 @@ function clampZoom(z: number): number {
 
 function applyToDom(z: number): void {
   document.documentElement.style.setProperty(CSS_VAR, String(z));
+  setAppZoom(z);
 }
 
 export function useZoom() {
