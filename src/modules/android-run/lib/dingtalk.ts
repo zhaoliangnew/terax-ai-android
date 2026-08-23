@@ -1,7 +1,9 @@
+import { IS_MAC } from "@/lib/platform";
 import { native } from "@/modules/ai/lib/native";
+import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import { toast } from "sonner";
+import { findApp, openApp } from "./apps";
 import { DEFAULT_DING_ENTRIES } from "./dingDefaults";
-import { shellQuote } from "./openExternally";
 
 const GROUPS_KEY = "terax.dingtalk.groups";
 
@@ -119,10 +121,15 @@ export function clearCustomGroups(): DingEntry[] {
  * "想群名"和"切窗口"两步,不假装能一键直达。
  */
 export async function revealConversation(name: string): Promise<void> {
-  await native.shellBgSpawn(
-    `printf %s ${shellQuote(name)} | pbcopy; open -a DingTalk`,
-    null,
-  );
+  // 剪贴板走 navigator,唤应用走 opener —— 原来那条 `pbcopy; open -a` 只有
+  // macOS 认。
+  await copyToClipboard(name);
+  if (IS_MAC) {
+    void native.shellBgSpawn("open -a DingTalk", null);
+  } else {
+    const app = await findApp(["钉钉", "DingTalk"]);
+    if (app) openApp(app.path);
+  }
   toast.success("已复制群名", {
     description: `“${name}” —— 在钉钉搜索框粘贴即可`,
   });

@@ -43,7 +43,20 @@ end run`;
  * 只认 Chrome(本机默认浏览器)。Chrome 没开、脚本报错、或者用户拒了
  * "控制 Google Chrome" 的授权,都会落回 `open`,行为跟以前一样,不会打不开。
  */
+/**
+ * 同一个地址短时间内只开一次。
+ *
+ * 有人遇到过点一下弹出两个标签页。单独跑那条 shell 命令只会开一个(实测数过
+ * 标签数),所以是上层被调了两次 —— 可能是双击,也可能是菜单项的事件走了两遍。
+ * 与其猜,不如在这儿兜住:重复的那次直接丢掉,反正没人会在半秒内故意开同一个
+ * 地址两次。
+ */
+const lastOpen = new Map<string, number>();
+
 export function openExternally(url: string): void {
+  const now = Date.now();
+  if (now - (lastOpen.get(url) ?? 0) < 800) return;
+  lastOpen.set(url, now);
   const u = shellQuote(url);
   if (!IS_MAC) {
     // 复用标签页那套是 AppleScript 写的,只有 macOS 有。别的平台交给系统默认

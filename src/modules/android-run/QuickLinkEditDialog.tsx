@@ -9,11 +9,8 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
-import {
-  fallbackTitle,
-  listInstalledApps,
-  type QuickLink,
-} from "./lib/quickLinks";
+import { listInstalledApps } from "./lib/apps";
+import { fallbackTitle, type QuickLink } from "./lib/quickLinks";
 
 type Props = {
   /** 要编辑的入口;null = 关闭。新增就传一个空壳。 */
@@ -145,7 +142,7 @@ export function QuickLinkEditDialog({
               <div className="flex max-h-56 flex-col overflow-y-auto rounded border border-border/60">
                 {shown.length === 0 && (
                   <span className="px-2.5 py-3 text-[12px] text-muted-foreground/60">
-                    {apps.length === 0 ? "读不到 /Applications" : "没有匹配的"}
+                    {apps.length === 0 ? "没读到已安装的应用" : "没有匹配的"}
                   </span>
                 )}
                 {shown.map((a) => (

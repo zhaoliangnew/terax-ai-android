@@ -1,6 +1,6 @@
-import { native } from "@/modules/ai/lib/native";
+import { openApp } from "./apps";
 import { KNOWLEDGE_BASE_LINKS } from "./knowledgeBase";
-import { openExternally, shellQuote } from "./openExternally";
+import { openExternally } from "./openExternally";
 
 const KEY = "terax.quickLinks";
 
@@ -21,31 +21,10 @@ export type QuickLink = {
 /** 点一下该干什么,由 target 决定。 */
 export function openQuickLink(link: QuickLink): void {
   if (link.target === "app") {
-    void native.shellBgSpawn(`open -a ${shellQuote(link.url)}`, null);
+    openApp(link.url);
     return;
   }
   openExternally(link.url);
-}
-
-/**
- * /Applications 里装了什么。给收藏应用时挑用的 —— 手敲路径太容易错,
- * 而这个列表本来就是现成的(.app 就是个目录)。
- */
-export async function listInstalledApps(): Promise<
-  { name: string; path: string }[]
-> {
-  try {
-    const entries = await native.readDir("/Applications");
-    return entries
-      .filter((e) => e.name.endsWith(".app"))
-      .map((e) => ({
-        name: e.name.replace(/\.app$/, ""),
-        path: `/Applications/${e.name}`,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name, "zh"));
-  } catch {
-    return [];
-  }
 }
 
 /**
