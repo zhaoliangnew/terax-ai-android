@@ -2,7 +2,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -13,10 +12,9 @@ import {
   ArrowRight01Icon,
   Copy01Icon,
   Delete02Icon,
-  PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   addEntry,
@@ -35,7 +33,6 @@ import {
   removeEntry,
   saveWeek,
   setDayField,
-  shiftDay,
   shiftWeek,
   type WeekLog,
   weekDayKeys,
@@ -54,60 +51,11 @@ type Props = {
 type Mode = "day" | "week";
 
 const FIELD =
-  "w-full resize-none overflow-y-auto rounded border border-input bg-transparent px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:border-ring max-h-[38vh]";
+  "w-full flex-1 resize-none rounded-md border border-input bg-transparent px-3 py-2.5 text-[13.5px] leading-relaxed outline-none focus:border-ring";
+const LABEL = "text-[13px] font-semibold text-foreground/75";
+const NAV =
+  "flex size-9 shrink-0 items-center justify-center rounded-md border border-border/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 
-/**
- * 跟着内容长的输入框。
- *
- * 固定行数不行:计划写到第四条就被裁掉半行,而且看不出下面还有 —— 写计划本来
- * 就是想到哪写到哪,不该先去猜要几行。长到 38vh 封顶,再多就自己滚。
- */
-function AutoTextarea({
-  value,
-  onChange,
-  placeholder,
-  minRows,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  minRows: number;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  // 光靠 scrollHeight 会让空框缩成一行 —— `rows` 只决定 JS 接手前的初始高度,
-  // 之后就被 style.height 盖掉了。所以自己按行高算一个下限。
-  const fit = useCallback(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.style.height = "auto"; // 先塌回去,不然只涨不缩
-    const cs = getComputedStyle(el);
-    const line = Number.parseFloat(cs.lineHeight) || 21;
-    // box-sizing 是 border-box:height 含 padding 和边框,scrollHeight 只含 padding
-    const chrome =
-      Number.parseFloat(cs.paddingTop) +
-      Number.parseFloat(cs.paddingBottom) +
-      Number.parseFloat(cs.borderTopWidth) +
-      Number.parseFloat(cs.borderBottomWidth);
-    el.style.height = `${Math.max(el.scrollHeight + 2, minRows * line + chrome)}px`;
-  }, [minRows]);
-
-  // value 不参与计算,但它一变就得重新量 —— 换日期、切日/周,内容整个都换了
-  // biome-ignore lint/correctness/useExhaustiveDependencies: value 是重算信号
-  useEffect(fit, [fit, value]);
-
-  return (
-    <textarea
-      ref={ref}
-      rows={minRows}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onKeyDown={(e) => e.stopPropagation()}
-      placeholder={placeholder}
-      className={FIELD}
-    />
-  );
-}
 /** 选中态的配色。类型多了之后,颜色比读字快。 */
 const KIND_TONE: Record<EntryKind, string> = {
   开发任务: "border-emerald-500/40 bg-emerald-500/15 text-emerald-400",
@@ -123,7 +71,7 @@ function KindTag({ kind }: { kind?: EntryKind }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded border px-1 py-px text-[10px] leading-none",
+        "shrink-0 rounded border px-1.5 py-px text-[11px] leading-tight",
         KIND_TONE[kind],
       )}
     >
@@ -132,16 +80,17 @@ function KindTag({ kind }: { kind?: EntryKind }) {
   );
 }
 
-const LABEL =
-  "border-b border-border/50 pb-1 text-[12px] font-semibold text-foreground/70";
-const NAV =
-  "flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
-
 /**
- * 日报:随手记一条,到点了拼成日报/周报复制走。
+ * 日报/周报。
  *
- * 日和周各存各的计划/总结;周视图的"做了什么"不单独记,直接汇总那一周每天的
- * 条目 —— 一件事只记一次,写周报时不用再抄一遍。
+ * 版面按"看什么/写什么/记什么"分三块,而不是一根竖条从上排到下:
+ *  - 顶部一行选日/周和翻页,顺带把当前日期写在标题里,少一行说明文字;
+ *  - 主体左右分栏:左边是攒下来的记录(会越来越长),右边是计划和总结
+ *    (要动笔写,所以给它一个能读的行宽 —— 1400px 通栏的输入框没法写字);
+ *  - 录入固定在最底下,输入框+类型+按钮是一整块,跟聊天框一个位置感。
+ *
+ * 日和周各存各的计划/总结;周的"做了什么"不单独记,直接汇总那一周每天的条目
+ * —— 一件事只记一次,写周报时不用再抄一遍。
  */
 export function JournalDialog({ open, onClose }: Props) {
   const [mode, setMode] = useState<Mode>("day");
@@ -158,8 +107,7 @@ export function JournalDialog({ open, onClose }: Props) {
   // 每次打开都回到今天 —— 上次翻到哪天了不重要,要记的是现在这条。
   useEffect(() => {
     if (!open) return;
-    const today = dayKeyOf(new Date());
-    setDay(today);
+    setDay(dayKeyOf(new Date()));
     setWeek(weekKeyOf(new Date()));
     setDraft("");
     setKind(lastKind());
@@ -169,22 +117,36 @@ export function JournalDialog({ open, onClose }: Props) {
   useEffect(() => setDayLog(loadDay(day)), [day]);
   useEffect(() => setWeekLog(loadWeek(week)), [week]);
 
-  const isToday = day === dayKeyOf(new Date());
-  const isThisWeek = week === weekKeyOf(new Date());
+  const today = dayKeyOf(new Date());
+  const thisWeek = weekKeyOf(new Date());
+  // 按日时上下翻的也是"周" —— 一排星期直接点哪天,箭头只管换周,一套控件说清楚
+  const shownWeek = mode === "day" ? weekOfDay(day) : week;
+  const atNow = mode === "day" ? day === today : week === thisWeek;
+
+  const goWeek = (delta: number) => {
+    const next = shiftWeek(shownWeek, delta);
+    if (mode === "week") {
+      setWeek(next);
+      return;
+    }
+    // 翻到别的周时落在同一个星期几,而不是每次都跳回周一
+    const offset = weekDayKeys(shownWeek).indexOf(day);
+    setDay(weekDayKeys(next)[offset < 0 ? 0 : offset]);
+  };
 
   const submit = useCallback(() => {
     if (!draft.trim()) return;
     // 记到"现在"所在的那天,不是当前翻到的那天 —— 翻着历史顺手记一条,
     // 结果落到上周三去,那就麻烦了。
     const now = new Date();
-    const today = dayKeyOf(now);
-    addEntry(today, draft, now, kind);
+    const key = dayKeyOf(now);
+    addEntry(key, draft, now, kind);
     setDraft("");
-    if (today === day) setDayLog(loadDay(day));
+    if (key === day) setDayLog(loadDay(day));
     else {
       setMode("day");
-      setDay(today);
-      toast.success("已记到今天", { description: dayLabel(today) });
+      setDay(key);
+      toast.success("已记到今天", { description: dayLabel(key) });
     }
   }, [draft, day, kind]);
 
@@ -207,201 +169,159 @@ export function JournalDialog({ open, onClose }: Props) {
     toast.success("已复制", { description: "粘到日报里就行" });
   };
 
+  const plan = mode === "day" ? dayLog.plan : weekLog.plan;
+  const summary = mode === "day" ? dayLog.summary : weekLog.summary;
+  const setPlan = (v: string) => {
+    if (mode === "day") setDayLog(setDayField(day, "plan", v));
+    else setWeekLog(saveWeek(week, { ...weekLog, plan: v }));
+  };
+  const setSummary = (v: string) => {
+    if (mode === "day") setDayLog(setDayField(day, "summary", v));
+    else setWeekLog(saveWeek(week, { ...weekLog, summary: v }));
+  };
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      {/* 铺满大半个窗口:这是个专门用来写东西的弹窗,七列一周、几十条记录都要
-          摆得下。固定高度而不是跟着内容长 —— 记两条和记二十条,布局别乱跳。
-          日/周同宽同高,切模式时不晃。 */}
-      <DialogContent className="flex h-[88vh] w-[92vw] max-w-none flex-col gap-3 sm:max-w-[1400px]">
-        {/* 日/周是这个页面最上层的选择,所以放在标题这一行,标题本身也跟着变 ——
-            埋在下面一排按钮里的话,人得先找一圈才知道现在在看哪个。 */}
-        <DialogHeader className="gap-1">
-          <div className="flex items-center gap-3">
-            <DialogTitle className="text-sm">
+      <DialogContent className="flex h-[88vh] w-[92vw] max-w-none flex-col gap-0 p-0 sm:max-w-[1400px]">
+        {/* 顶栏:是日还是周、看的哪一天、怎么翻 —— 一行说完 */}
+        <DialogHeader className="shrink-0 gap-0 border-b border-border px-5 py-3.5">
+          <div className="flex items-center gap-3 pr-8">
+            <DialogTitle className="shrink-0 text-lg font-semibold">
               {mode === "day" ? "日报" : "周报"}
             </DialogTitle>
-            <div className="flex shrink-0 items-center gap-0.5 rounded-md border border-border p-0.5">
-              {(["day", "week"] as const).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setMode(m)}
-                  className={cn(
-                    "rounded px-2.5 py-0.5 text-[12px] transition-colors",
-                    mode === m
-                      ? "bg-accent font-medium text-foreground"
-                      : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {m === "day" ? "按日" : "按周"}
-                </button>
-              ))}
-            </div>
-          </div>
-          <DialogDescription className="text-xs">
-            {mode === "day"
-              ? "做完一件事随手记一条,写日报时一键复制。"
-              : "对着这一周的记录写计划和总结,一键复制。"}
-          </DialogDescription>
-        </DialogHeader>
+            <span className="min-w-0 truncate text-[15px] text-muted-foreground">
+              {mode === "day" ? `${day} ${weekdayName(day)}` : weekLabel(week)}
+            </span>
 
-        {/* 随手记那一栏钉在最上面:打开就能打字,不用先找位置 */}
-        <div className="flex items-center gap-2">
-          <input
-            // biome-ignore lint/a11y/noAutofocus: 这个弹窗就是为了"立刻记一条"
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") submit();
-            }}
-            placeholder="刚做完什么?回车记到今天"
-            className="h-8 min-w-0 flex-1 rounded border border-input bg-transparent px-2 text-[13px] outline-none focus:border-ring"
-          />
-          <Button size="sm" onClick={submit} className="h-8 shrink-0 text-xs">
-            <HugeiconsIcon icon={PlusSignIcon} size={13} strokeWidth={2} />
-            记一条
-          </Button>
-        </div>
-
-        {/* 类型单选。记完不清空,一天里多半连着记同一类;下次打开也是上次那个。 */}
-        <div className="flex flex-wrap items-center gap-1">
-          {ENTRY_KINDS.map((k) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setKind(k)}
-              className={cn(
-                "rounded-full border px-2.5 py-0.5 text-[12px] transition-colors",
-                kind === k
-                  ? KIND_TONE[k]
-                  : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-              )}
-            >
-              {k}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2 border-t border-border/60 pt-2">
-          <button
-            type="button"
-            className={NAV}
-            title="上一个"
-            onClick={() =>
-              mode === "day"
-                ? setDay(shiftDay(day, -1))
-                : setWeek(shiftWeek(week, -1))
-            }
-          >
-            <HugeiconsIcon icon={ArrowLeft01Icon} size={14} strokeWidth={2} />
-          </button>
-          <span className="min-w-0 flex-1 truncate text-center text-[13px] font-medium">
-            {mode === "day" ? `${day} ${weekdayName(day)}` : weekLabel(week)}
-          </span>
-          <button
-            type="button"
-            className={NAV}
-            title="下一个"
-            onClick={() =>
-              mode === "day"
-                ? setDay(shiftDay(day, 1))
-                : setWeek(shiftWeek(week, 1))
-            }
-          >
-            <HugeiconsIcon icon={ArrowRight01Icon} size={14} strokeWidth={2} />
-          </button>
-          {!(mode === "day" ? isToday : isThisWeek) && (
-            <button
-              type="button"
-              onClick={() =>
-                mode === "day"
-                  ? setDay(dayKeyOf(new Date()))
-                  : setWeek(weekKeyOf(new Date()))
-              }
-              className="shrink-0 rounded px-1.5 py-0.5 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              回到{mode === "day" ? "今天" : "本周"}
-            </button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={copy}
-            title="复制成 Markdown"
-            className="h-7 shrink-0 px-2 text-xs"
-          >
-            <HugeiconsIcon icon={Copy01Icon} size={13} strokeWidth={1.75} />
-            复制
-          </Button>
-        </div>
-
-        {/* 按日时把本周七天摆出来直接点 —— 只有 ‹ › 的话,想回到周三得连点好几下,
-            而且看不出这周还剩几天没写。 */}
-        {mode === "day" && (
-          <div className="grid grid-cols-7 gap-1">
-            {weekDayKeys(weekOfDay(day)).map((d) => {
-              const picked = d === day;
-              const today = d === dayKeyOf(new Date());
-              return (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setDay(d)}
-                  className={cn(
-                    "flex flex-col items-center rounded border py-1 leading-tight transition-colors",
-                    picked
-                      ? "border-ring bg-accent text-foreground"
-                      : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                  )}
-                >
-                  <span
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
+                {(["day", "week"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
                     className={cn(
-                      "text-[12px] font-medium",
-                      today && !picked && "text-emerald-500",
+                      "rounded-md px-3 py-1 text-[13px] transition-colors",
+                      mode === m
+                        ? "bg-accent font-medium text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    {weekdayName(d)}
-                  </span>
-                  <span className="font-mono text-[10px] opacity-60 tabular-nums">
-                    {monthDay(d)}
-                  </span>
-                </button>
-              );
-            })}
+                    {m === "day" ? "按日" : "按周"}
+                  </button>
+                ))}
+              </div>
+              <Button
+                variant="outline"
+                onClick={copy}
+                title="复制成 Markdown,粘到日报里"
+                className="h-9 text-[13px]"
+              >
+                <HugeiconsIcon icon={Copy01Icon} size={15} strokeWidth={1.75} />
+                复制
+              </Button>
+            </div>
           </div>
-        )}
+        </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-          <div className="flex flex-col gap-1">
-            <span className={LABEL}>计划</span>
-            <AutoTextarea
-              minRows={mode === "week" ? 6 : 3}
-              value={mode === "day" ? dayLog.plan : weekLog.plan}
-              onChange={(v) => {
-                if (mode === "day") setDayLog(setDayField(day, "plan", v));
-                else setWeekLog(saveWeek(week, { ...weekLog, plan: v }));
-              }}
-              placeholder={mode === "day" ? "今天打算做什么" : "这周打算做什么"}
-            />
-          </div>
+        {/* 翻页 + 选星期:箭头一律按周翻,日/周两种模式一套操作 */}
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-5 py-2.5">
+          <button
+            type="button"
+            className={NAV}
+            title="上一周"
+            onClick={() => goWeek(-1)}
+          >
+            <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
+          </button>
 
-          <div className="flex flex-col gap-1">
-            <span className={LABEL}>做了什么</span>
+          {mode === "day" ? (
+            <div className="grid min-w-0 flex-1 grid-cols-7 gap-1.5">
+              {weekDayKeys(shownWeek).map((d) => {
+                const picked = d === day;
+                const isTodayCell = d === today;
+                const count = loadDay(d).entries.length;
+                return (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => setDay(d)}
+                    className={cn(
+                      "flex flex-col items-center rounded-md border py-1.5 leading-tight transition-colors",
+                      picked
+                        ? "border-ring bg-accent text-foreground"
+                        : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "text-[13px] font-medium",
+                        isTodayCell && !picked && "text-emerald-500",
+                      )}
+                    >
+                      {weekdayName(d)}
+                    </span>
+                    <span className="flex items-center gap-1 font-mono text-[11px] opacity-60 tabular-nums">
+                      {monthDay(d)}
+                      {/* 记了几条 —— 补日报时一眼看出哪天是空的 */}
+                      {count > 0 && <span>·{count}</span>}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <span className="min-w-0 flex-1 text-center text-[14px] text-muted-foreground">
+              {weekLabel(week)}
+            </span>
+          )}
+
+          <button
+            type="button"
+            className={NAV}
+            title="下一周"
+            onClick={() => goWeek(1)}
+          >
+            <HugeiconsIcon icon={ArrowRight01Icon} size={18} strokeWidth={2} />
+          </button>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setDay(today);
+              setWeek(thisWeek);
+            }}
+            disabled={atNow}
+            className="h-9 shrink-0 text-[13px]"
+          >
+            回到{mode === "day" ? "今天" : "本周"}
+          </Button>
+        </div>
+
+        {/* 主体左右分栏:左边是攒下来的记录,右边是要动笔写的两块 */}
+        <div className="flex min-h-0 flex-1 gap-5 px-5 py-4">
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex shrink-0 items-baseline gap-2">
+              <span className={LABEL}>做了什么</span>
+              <span className="text-[12px] text-muted-foreground/50">
+                {mode === "day"
+                  ? "点一下改,悬停可删"
+                  : "属于某一天,点日期回那天改"}
+              </span>
+            </div>
+
             {mode === "day" ? (
               dayLog.entries.length === 0 ? (
-                <span className="px-1 py-2 text-[12px] text-muted-foreground/60">
-                  还没记过
+                <span className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-[13px] text-muted-foreground/50">
+                  这天还没记过 —— 在最下面那一栏写一条
                 </span>
               ) : (
-                <div className="flex flex-col">
+                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
                   {dayLog.entries.map((e) => (
                     <div
                       key={e.id}
-                      className="group flex items-start gap-2 rounded px-1 py-1 hover:bg-accent/40"
+                      className="group flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-accent/40"
                     >
-                      <span className="shrink-0 pt-px font-mono text-[11px] text-muted-foreground/60 tabular-nums">
+                      <span className="shrink-0 pt-0.5 font-mono text-[12px] text-muted-foreground/60 tabular-nums">
                         {entryTime(e.at)}
                       </span>
                       <span className="shrink-0 pt-0.5">
@@ -426,13 +346,13 @@ export function JournalDialog({ open, onClose }: Props) {
                             setDayLog(editEntry(day, e.id, editing.text));
                             setEditing(null);
                           }}
-                          className="min-w-0 flex-1 rounded border border-input bg-transparent px-1 text-[13px] outline-none focus:border-ring"
+                          className="min-w-0 flex-1 rounded border border-input bg-transparent px-1.5 py-0.5 text-[13.5px] outline-none focus:border-ring"
                         />
                       ) : (
                         <button
                           type="button"
                           onClick={() => setEditing({ id: e.id, text: e.text })}
-                          className="min-w-0 flex-1 text-left text-[13px] leading-relaxed"
+                          className="min-w-0 flex-1 text-left text-[13.5px] leading-relaxed"
                         >
                           {e.text}
                         </button>
@@ -441,11 +361,11 @@ export function JournalDialog({ open, onClose }: Props) {
                         type="button"
                         title="删除"
                         onClick={() => setDayLog(removeEntry(day, e.id))}
-                        className="shrink-0 rounded p-0.5 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+                        className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
                       >
                         <HugeiconsIcon
                           icon={Delete02Icon}
-                          size={12}
+                          size={13}
                           strokeWidth={1.75}
                         />
                       </button>
@@ -454,17 +374,16 @@ export function JournalDialog({ open, onClose }: Props) {
                 </div>
               )
             ) : (
-              // 周视图只读:条目属于某一天,要改回那天改,免得同一条在两处能编辑。
-              // 七天平铺成七列,一眼看完一周 —— 竖着排要滚,还看不出哪天空着。
-              <div className="grid max-h-[32vh] grid-cols-7 gap-1.5">
+              // 七天平铺成七列,一眼看完一周;竖着排要滚,还看不出哪天空着
+              <div className="grid min-h-0 flex-1 grid-cols-7 gap-2">
                 {weekDays.map(({ day: d, log }) => {
-                  const today = d === dayKeyOf(new Date());
+                  const isTodayCol = d === today;
                   return (
                     <div
                       key={d}
                       className={cn(
-                        "flex min-w-0 flex-col gap-1 overflow-y-auto rounded border p-1.5",
-                        today
+                        "flex min-w-0 flex-col gap-2 overflow-y-auto rounded-md border p-2",
+                        isTodayCol
                           ? "border-emerald-500/40 bg-emerald-500/5"
                           : "border-border/60",
                       )}
@@ -477,33 +396,33 @@ export function JournalDialog({ open, onClose }: Props) {
                           setDay(d);
                         }}
                         className={cn(
-                          "flex flex-col items-start leading-tight",
-                          today
+                          "flex shrink-0 flex-col items-start leading-tight",
+                          isTodayCol
                             ? "text-emerald-500"
                             : "text-muted-foreground hover:text-foreground",
                         )}
                       >
-                        <span className="text-[12px] font-medium">
+                        <span className="text-[13px] font-medium">
                           {weekdayName(d)}
                         </span>
-                        <span className="font-mono text-[10px] opacity-60 tabular-nums">
+                        <span className="font-mono text-[11px] opacity-60 tabular-nums">
                           {monthDay(d)}
                         </span>
                       </button>
                       {log.entries.length === 0 ? (
-                        <span className="text-[11px] text-muted-foreground/30">
+                        <span className="text-[12px] text-muted-foreground/30">
                           —
                         </span>
                       ) : (
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-2">
                           {log.entries.map((e) => (
                             <span
                               key={e.id}
                               title={`${entryTime(e.at)} ${e.kind ?? ""} ${e.text}`}
-                              className="flex flex-col items-start gap-0.5"
+                              className="flex flex-col items-start gap-1"
                             >
                               <KindTag kind={e.kind} />
-                              <span className="break-words text-[12px] leading-snug">
+                              <span className="break-words text-[12.5px] leading-snug">
                                 {e.text}
                               </span>
                             </span>
@@ -517,23 +436,82 @@ export function JournalDialog({ open, onClose }: Props) {
             )}
           </div>
 
-          <div className="flex flex-col gap-1">
-            <span className={LABEL}>总结</span>
-            <AutoTextarea
-              minRows={mode === "week" ? 8 : 3}
-              value={mode === "day" ? dayLog.summary : weekLog.summary}
-              onChange={(v) => {
-                if (mode === "day") setDayLog(setDayField(day, "summary", v));
-                else setWeekLog(saveWeek(week, { ...weekLog, summary: v }));
-              }}
-              placeholder={
-                mode === "day"
-                  ? "今天的结论、卡住的地方"
-                  : "这周的结论、下周重点"
-              }
-            />
+          {/* 右栏定宽:输入框要能读,1400px 通栏的一行字扫不过来 */}
+          <div className="flex w-[30rem] shrink-0 flex-col gap-4 border-l border-border/60 pl-5">
+            <div className="flex min-h-0 flex-1 flex-col gap-2">
+              <span className={LABEL}>计划</span>
+              <textarea
+                value={plan}
+                onChange={(e) => setPlan(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                placeholder={
+                  mode === "day" ? "今天打算做什么" : "这周打算做什么"
+                }
+                className={FIELD}
+              />
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col gap-2">
+              <span className={LABEL}>总结</span>
+              <textarea
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+                onKeyDown={(e) => e.stopPropagation()}
+                placeholder={
+                  mode === "day"
+                    ? "今天的结论、卡住的地方"
+                    : "这周的结论、下周重点"
+                }
+                className={FIELD}
+              />
+            </div>
           </div>
         </div>
+
+        {/* 录入固定在最底下,自成一块:上面是"看",这里是"写"。
+            只在按日出现 —— 记的东西天然属于某一天,按周是拿来汇总和写总结的,
+            摆个"记到今天"的输入框在那儿只会让人愣一下。 */}
+        {mode === "day" && (
+          <div className="shrink-0 border-t border-border bg-foreground/[0.03] px-5 py-3">
+            <div className="flex items-center gap-3">
+              <input
+                // biome-ignore lint/a11y/noAutofocus: 这个弹窗就是为了"立刻记一条"
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") submit();
+                }}
+                placeholder={`刚做完什么?回车记到 ${monthDay(today)} ${weekdayName(today)}`}
+                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-[14px] outline-none focus:border-ring"
+              />
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                {ENTRY_KINDS.map((k) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setKind(k)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-[12.5px] transition-colors",
+                      kind === k
+                        ? KIND_TONE[k]
+                        : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                    )}
+                  >
+                    {k}
+                  </button>
+                ))}
+              </div>
+              <Button
+                onClick={submit}
+                disabled={!draft.trim()}
+                className="h-10 shrink-0 px-5 text-[13.5px]"
+              >
+                记一条
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );
