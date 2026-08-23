@@ -125,11 +125,21 @@ export function JournalDialog({ open, onClose }: Props) {
   const [closeAfter, setCloseAfter] = useState(() => closeAfterAdd());
 
   // 每次打开都回到今天 —— 上次翻到哪天了不重要,要记的是现在这条。
+  //
+  // 三份 log 也要重读一遍:下面那几个 effect 只在日期变了才跑,而"记完就关"
+  // 之后再打开,日期还是今天 —— 于是列表停在关窗前的样子,可星期格上的条数是
+  // 现读 localStorage 的,两边就对不上了(格子写着 12 条,列表只有 9 条)。
   useEffect(() => {
     if (!open) return;
-    setDay(dayKeyOf(new Date()));
-    setWeek(weekKeyOf(new Date()));
-    setMonth(monthKeyOf(new Date()));
+    const d = dayKeyOf(new Date());
+    const w = weekKeyOf(new Date());
+    const m = monthKeyOf(new Date());
+    setDay(d);
+    setWeek(w);
+    setMonth(m);
+    setDayLog(loadDay(d));
+    setWeekLog(loadWeek(w));
+    setMonthLog(loadMonth(m));
     setDraft("");
     setKind(lastKind());
     setCloseAfter(closeAfterAdd());
@@ -618,6 +628,10 @@ export function JournalDialog({ open, onClose }: Props) {
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => {
                       e.stopPropagation();
+                      // 中文输入法里回车是"选中候选词",这一下的 keydown 也叫
+                      // Enter。不挡掉的话打拼音打到一半就被提交了,或者候选词被
+                      // 吃掉、看着像"回车没反应"。
+                      if (e.nativeEvent.isComposing) return;
                       if (e.key === "Enter") submit();
                     }}
                     placeholder={`刚做完什么?回车记到 ${monthDay(today)} ${weekdayName(today)}`}
