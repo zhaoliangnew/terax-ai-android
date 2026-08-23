@@ -1,11 +1,11 @@
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  ArrowDown01Icon,
   ArrowDown02Icon,
   ArrowUp02Icon,
   Bookmark02Icon,
@@ -17,12 +17,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import {
-  MENU_ACTION,
-  MENU_HEAD,
-  MENU_ROW,
-  MENU_TRIGGER,
-} from "./lib/menuStyles";
+import { MENU_ACTION, MENU_ROW, MENU_TRIGGER } from "./lib/menuStyles";
 import {
   loadQuickLinks,
   moveQuickLink,
@@ -43,6 +38,7 @@ const SECTION =
  * 列表(标题长,一行一条才读得下)—— 两种东西的形状本来就不一样。
  */
 export function CustomLinksMenu() {
+  const [open, setOpen] = useState(false);
   const [links, setLinks] = useState<QuickLink[]>(() => loadQuickLinks());
   const [editing, setEditing] = useState<QuickLink | null>(null);
 
@@ -54,28 +50,27 @@ export function CustomLinksMenu() {
 
   return (
     <>
-      <DropdownMenu
-        onOpenChange={(open) => {
-          // 弹窗里改过就同步回来。
-          if (open) setLinks(loadQuickLinks());
+      <button
+        type="button"
+        title="收藏夹"
+        onClick={() => {
+          setLinks(loadQuickLinks());
+          setOpen(true);
         }}
+        className={MENU_TRIGGER}
       >
-        <DropdownMenuTrigger asChild>
-          <button type="button" title="收藏夹" className={MENU_TRIGGER}>
-            <HugeiconsIcon icon={Bookmark02Icon} size={13} strokeWidth={1.75} />
-            收藏夹
-            <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          side="top"
-          align="start"
-          collisionPadding={8}
-          className="w-[30rem] p-0"
-          onCloseAutoFocus={(e) => e.preventDefault()}
-        >
-          <div className={MENU_HEAD}>
-            收藏夹
+        <HugeiconsIcon icon={Bookmark02Icon} size={13} strokeWidth={1.75} />
+        收藏夹
+      </button>
+
+      {/* 居中弹窗而不是贴着底栏的下拉:收藏会越攒越多,四列方块加一串网页,
+          挂在角落里既压着终端又只能长这么高。 */}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="flex max-h-[70vh] flex-col gap-0 p-0 sm:max-w-2xl">
+          <DialogHeader className="flex-row items-center justify-between gap-3 space-y-0 border-b border-border px-4 py-3 pr-10">
+            <DialogTitle className="text-[14px] font-semibold">
+              收藏夹
+            </DialogTitle>
             {/* 一个入口就够 —— 弹窗里第一行就是"网址/应用"的开关,
                 在这儿再分一次是重复。 */}
             <button
@@ -87,9 +82,9 @@ export function CustomLinksMenu() {
               <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
               添加
             </button>
-          </div>
+          </DialogHeader>
 
-          <div className="max-h-[28rem] overflow-y-auto pb-2">
+          <div className="min-h-0 flex-1 overflow-y-auto pb-2">
             {custom.length === 0 && (
               <div className="px-3 py-8 text-center text-[12.5px] text-muted-foreground/50">
                 还没有收藏 —— 右上角加个应用或网页
@@ -99,7 +94,7 @@ export function CustomLinksMenu() {
             {apps.length > 0 && (
               <>
                 <div className={SECTION}>应用</div>
-                <div className="grid grid-cols-4 gap-1.5 px-1.5">
+                <div className="grid grid-cols-4 gap-1.5 px-2">
                   {apps.map((l, i) => (
                     <div key={l.id} className="group relative">
                       <button
@@ -154,7 +149,7 @@ export function CustomLinksMenu() {
                 <div className={cn(SECTION, apps.length > 0 && "mt-1")}>
                   网页
                 </div>
-                <div className="px-1.5">
+                <div className="px-2">
                   {sites.map((l, i) => (
                     <div key={l.id} className="group flex items-center gap-1">
                       <button
@@ -204,8 +199,8 @@ export function CustomLinksMenu() {
               </>
             )}
           </div>
-        </DropdownMenuContent>
-      </DropdownMenu>
+        </DialogContent>
+      </Dialog>
 
       <QuickLinkEditDialog
         link={editing}
