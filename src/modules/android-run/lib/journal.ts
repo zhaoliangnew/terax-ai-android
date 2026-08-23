@@ -382,9 +382,9 @@ export function dayMarkdown(day: string, byKind = false): string {
         .join("\n");
   const parts = [
     `## ${day}(${dayLabel(day).split(" ")[1]})`,
-    section("计划", log.plan),
+    section("今日计划", log.plan),
     section("做了什么", entries),
-    section("总结", log.summary),
+    section("今日总结", log.summary),
   ];
   return parts.filter(Boolean).join("\n").trimEnd();
 }
@@ -414,9 +414,9 @@ export function monthMarkdown(month: string, byKind = false): string {
         .join("\n");
   const parts = [
     `## ${monthLabel(month)}`,
-    section("计划", log.plan),
+    section("月计划", log.plan),
     section("做了什么", body),
-    section("总结", log.summary),
+    section("月总结", log.summary),
   ];
   return parts.filter(Boolean).join("\n").trimEnd();
 }
@@ -446,9 +446,9 @@ export function weekMarkdown(week: string, byKind = false): string {
     .join("\n");
   const parts = [
     `## ${weekLabel(week)}`,
-    section("计划", log.plan),
+    section("周计划", log.plan),
     section("做了什么", byKind ? byKindText : days),
-    section("总结", log.summary),
+    section("周总结", log.summary),
   ];
   return parts.filter(Boolean).join("\n").trimEnd();
 }

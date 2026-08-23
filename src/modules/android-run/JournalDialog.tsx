@@ -244,6 +244,8 @@ export function JournalDialog({ open, onClose }: Props) {
       setWeekLog(saveWeek(week, { ...weekLog, plan: v }));
     else setMonthLog(saveMonth(month, { ...monthLog, plan: v }));
   };
+  // 标题跟着周期走:一眼知道自己在写哪一档的计划,不用回头看顶上选的是什么
+  const periodWord = mode === "day" ? "今日" : mode === "week" ? "周" : "月";
   const setSummary = (v: string) => {
     if (mode === "day") setDayLog(setDayField(day, "summary", v));
     else if (mode === "week")
@@ -686,7 +688,7 @@ export function JournalDialog({ open, onClose }: Props) {
           {/* 右栏定宽:输入框要能读,通栏的一行字扫不过来 */}
           <div className="flex w-[22rem] shrink-0 flex-col gap-4 border-l border-border/60 pl-4">
             <div className="flex min-h-0 flex-1 flex-col gap-2">
-              <span className={LABEL}>计划</span>
+              <span className={LABEL}>{periodWord}计划</span>
               <textarea
                 value={plan}
                 onChange={(e) => setPlan(e.target.value)}
@@ -698,7 +700,7 @@ export function JournalDialog({ open, onClose }: Props) {
               />
             </div>
             <div className="flex min-h-0 flex-1 flex-col gap-2">
-              <span className={LABEL}>总结</span>
+              <span className={LABEL}>{periodWord}总结</span>
               <textarea
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
