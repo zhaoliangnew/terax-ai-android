@@ -482,9 +482,11 @@ export function JournalDialog({ open, onClose }: Props) {
         {/* 主体左右分栏:左边是攒下来的记录,右边是要动笔写的两块 */}
         <div className="flex min-h-0 flex-1 gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="flex shrink-0 items-center gap-3">
               <span className={LABEL}>做了什么</span>
-              <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+              {/* 排法是个次要选项,不该跟标题抢 —— 去掉边框和底色,就是两个小字,
+                  选中的亮一点。原来那个描边胶囊比"做了什么"本身还显眼。 */}
+              <div className="flex items-center gap-2 text-[12px]">
                 {(
                   [
                     ["time", mode === "day" ? "按时间" : "按天"],
@@ -496,21 +498,16 @@ export function JournalDialog({ open, onClose }: Props) {
                     type="button"
                     onClick={() => setGroup(g)}
                     className={cn(
-                      "rounded px-2 py-0.5 text-[12px] transition-colors",
+                      "transition-colors",
                       group === g
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
+                        ? "font-medium text-foreground"
+                        : "text-muted-foreground/45 hover:text-muted-foreground",
                     )}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-              <span className="ml-auto text-[12px] text-muted-foreground/50">
-                {mode === "day"
-                  ? "点一下改,悬停可删"
-                  : "属于某一天,点日期回那天改"}
-              </span>
             </div>
 
             {mode === "day" ? (
