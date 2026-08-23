@@ -241,9 +241,9 @@ export function JournalDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex h-[74vh] w-[88vw] max-w-none flex-col gap-0 p-0 sm:max-w-[1120px]">
+      <DialogContent className="flex h-[64vh] max-h-[680px] w-[84vw] max-w-none flex-col gap-0 p-0 sm:max-w-[920px]">
         {/* 顶栏:是日还是周、看的哪一天、怎么翻 —— 一行说完 */}
-        <DialogHeader className="shrink-0 gap-0 border-b border-border px-5 py-3.5">
+        <DialogHeader className="shrink-0 gap-0 border-b border-border px-4 py-3">
           <div className="flex items-center gap-3 pr-8">
             <DialogTitle className="shrink-0 text-lg font-semibold">
               {mode === "day" ? "日报" : "周报"}
@@ -284,7 +284,7 @@ export function JournalDialog({ open, onClose }: Props) {
         </DialogHeader>
 
         {/* 翻页 + 选星期:箭头一律按周翻,日/周两种模式一套操作 */}
-        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-5 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2">
           <button
             type="button"
             className={NAV}
@@ -363,7 +363,7 @@ export function JournalDialog({ open, onClose }: Props) {
         </div>
 
         {/* 主体左右分栏:左边是攒下来的记录,右边是要动笔写的两块 */}
-        <div className="flex min-h-0 flex-1 gap-5 px-5 py-4">
+        <div className="flex min-h-0 flex-1 gap-4 px-4 py-3">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="flex shrink-0 items-center gap-2">
               <span className={LABEL}>做了什么</span>
@@ -582,7 +582,7 @@ export function JournalDialog({ open, onClose }: Props) {
           </div>
 
           {/* 右栏定宽:输入框要能读,通栏的一行字扫不过来 */}
-          <div className="flex w-[26rem] shrink-0 flex-col gap-4 border-l border-border/60 pl-5">
+          <div className="flex w-[22rem] shrink-0 flex-col gap-4 border-l border-border/60 pl-4">
             <div className="flex min-h-0 flex-1 flex-col gap-2">
               <span className={LABEL}>计划</span>
               <textarea
