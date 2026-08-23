@@ -4,19 +4,19 @@ import { useState } from "react";
 import { JournalDialog } from "./JournalDialog";
 import { MENU_TRIGGER } from "./lib/menuStyles";
 
-/** 日报入口:点开就能记一条。 */
+/** 日报入口。按钮上写"记一下"—— 大多数时候点它是为了记,不是为了看报表。 */
 export function JournalButton() {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button
         type="button"
-        title="日报 · 随手记一条,写日报/周报时一键复制"
+        title="记一下 · 随手记一条,写日报/周报时一键复制"
         onClick={() => setOpen(true)}
         className={MENU_TRIGGER}
       >
         <HugeiconsIcon icon={Notebook01Icon} size={13} strokeWidth={1.75} />
-        日报
+        记一下
       </button>
       <JournalDialog open={open} onClose={() => setOpen(false)} />
     </>
