@@ -16,7 +16,7 @@ import {
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   addEntry,
@@ -51,7 +51,50 @@ type Props = {
 type Mode = "day" | "week";
 
 const FIELD =
-  "w-full resize-none rounded border border-input bg-transparent px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:border-ring";
+  "w-full resize-none overflow-y-auto rounded border border-input bg-transparent px-2 py-1.5 text-[13px] leading-relaxed outline-none focus:border-ring max-h-[38vh]";
+
+/**
+ * 跟着内容长的输入框。
+ *
+ * 固定行数不行:计划写到第四条就被裁掉半行,而且看不出下面还有 —— 写计划本来
+ * 就是想到哪写到哪,不该先去猜要几行。长到 38vh 封顶,再多就自己滚。
+ */
+function AutoTextarea({
+  value,
+  onChange,
+  placeholder,
+  minRows,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  minRows: number;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+
+  const fit = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto"; // 先塌回去,不然只涨不缩
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+
+  // value 不参与计算,但它一变就得重新量 —— 换日期、切日/周,内容整个都换了
+  // biome-ignore lint/correctness/useExhaustiveDependencies: value 是重算信号
+  useEffect(fit, [fit, value]);
+
+  return (
+    <textarea
+      ref={ref}
+      rows={minRows}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => e.stopPropagation()}
+      placeholder={placeholder}
+      className={FIELD}
+    />
+  );
+}
 const LABEL = "text-[12px] font-medium text-muted-foreground";
 const NAV =
   "flex size-6 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
@@ -110,13 +153,14 @@ export function JournalDialog({ open, onClose }: Props) {
   const weekDays = useMemo(() => {
     if (mode !== "week") return [];
     return weekDayKeys(week).map((d) => ({ day: d, log: loadDay(d) }));
-    // dayLog 也进依赖:在日视图刚记完一条切回来,这里得是新的
+    // dayLog 同上:在日视图刚记完一条,切回按周这里得是新的
+    // biome-ignore lint/correctness/useExhaustiveDependencies: dayLog 是重算信号
   }, [mode, week, dayLog]);
 
   const copy = () => {
     const text = mode === "day" ? dayMarkdown(day) : weekMarkdown(week);
     if (!text.trim()) {
-      toast.error("这一" + (mode === "day" ? "天" : "周") + "还什么都没有");
+      toast.error(`这一${mode === "day" ? "天" : "周"}还什么都没有`);
       return;
     }
     void copyToClipboard(text);
@@ -272,21 +316,24 @@ export function JournalDialog({ open, onClose }: Props) {
         >
           <div className="flex flex-col gap-1">
             <span className={LABEL}>计划</span>
-            <textarea
-              rows={3}
+            <AutoTextarea
+              minRows={3}
               value={mode === "day" ? dayLog.plan : weekLog.plan}
-              onChange={(e) => {
-                const v = e.target.value;
+              onChange={(v) => {
                 if (mode === "day") setDayLog(setDayField(day, "plan", v));
                 else setWeekLog(saveWeek(week, { ...weekLog, plan: v }));
               }}
-              onKeyDown={(e) => e.stopPropagation()}
               placeholder={mode === "day" ? "今天打算做什么" : "这周打算做什么"}
-              className={FIELD}
             />
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-1">
+          <div
+            className={cn(
+              "flex flex-col gap-1",
+              // 按周那七列要占满剩下的高度;按日是线性内容,撑满只会在中间留一大片空白
+              mode === "week" && "min-h-0 flex-1",
+            )}
+          >
             <span className={LABEL}>做了什么</span>
             {mode === "day" ? (
               dayLog.entries.length === 0 ? (
@@ -412,21 +459,18 @@ export function JournalDialog({ open, onClose }: Props) {
 
           <div className="flex flex-col gap-1">
             <span className={LABEL}>总结</span>
-            <textarea
-              rows={4}
+            <AutoTextarea
+              minRows={3}
               value={mode === "day" ? dayLog.summary : weekLog.summary}
-              onChange={(e) => {
-                const v = e.target.value;
+              onChange={(v) => {
                 if (mode === "day") setDayLog(setDayField(day, "summary", v));
                 else setWeekLog(saveWeek(week, { ...weekLog, summary: v }));
               }}
-              onKeyDown={(e) => e.stopPropagation()}
               placeholder={
                 mode === "day"
                   ? "今天的结论、卡住的地方"
                   : "这周的结论、下周重点"
               }
-              className={FIELD}
             />
           </div>
         </div>
