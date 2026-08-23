@@ -15,7 +15,7 @@ import {
   Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   addEntry,
@@ -80,11 +80,6 @@ const KIND_TONE: Record<EntryKind, string> = {
   其他: "border-border bg-accent text-foreground",
 };
 
-/** 存的时候是往后追加,看的时候要最新的在最上面。 */
-function newestFirst<T>(entries: T[]): T[] {
-  return [...entries].reverse();
-}
-
 function KindTag({ kind }: { kind?: EntryKind }) {
   if (!kind) return null;
   return (
@@ -126,6 +121,7 @@ export function JournalDialog({ open, onClose }: Props) {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
     null,
   );
+  const listRef = useRef<HTMLDivElement>(null);
   // 记录怎么排:按时间是"发生顺序",按分类是"日报要交的样子"
   const [group, setGroup] = useState<"time" | "kind">("time");
   const [closeAfter, setCloseAfter] = useState(() => closeAfterAdd());
@@ -155,6 +151,14 @@ export function JournalDialog({ open, onClose }: Props) {
   useEffect(() => setDayLog(loadDay(day)), [day]);
   useEffect(() => setWeekLog(loadWeek(week)), [week]);
   useEffect(() => setMonthLog(loadMonth(month)), [month]);
+
+  // 条目按时间正序排(读起来是"上午…下午…"),所以最新的在最底下 —— 打开、
+  // 换天、刚记完,都把列表滚到底,不然新记的那条在屏幕外面。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 这几个都是"该重新滚一次"的信号
+  useEffect(() => {
+    const el = listRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [open, day, mode, group, dayLog]);
 
   const today = dayKeyOf(new Date());
   const thisWeek = weekKeyOf(new Date());
@@ -490,10 +494,13 @@ export function JournalDialog({ open, onClose }: Props) {
                   这天还没记过 —— 在最下面那一栏写一条
                 </span>
               ) : (
-                <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
+                <div
+                  ref={listRef}
+                  className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1"
+                >
                   {group === "time"
-                    ? newestFirst(dayLog.entries).map(entryRow)
-                    : groupByKind(newestFirst(dayLog.entries)).map((g) => (
+                    ? dayLog.entries.map(entryRow)
+                    : groupByKind(dayLog.entries).map((g) => (
                         <div
                           key={g.kind ?? "未分类"}
                           className="mb-2 flex flex-col"
@@ -523,7 +530,7 @@ export function JournalDialog({ open, onClose }: Props) {
                     这{mode === "week" ? "周" : "个月"}还没记过
                   </span>
                 ) : (
-                  groupByKind(newestFirst(periodEntries)).map((g) => (
+                  groupByKind(periodEntries).map((g) => (
                     <div key={g.kind ?? "未分类"} className="flex flex-col">
                       <div className="flex items-center gap-2 px-2 py-1">
                         {g.kind ? (
@@ -601,7 +608,7 @@ export function JournalDialog({ open, onClose }: Props) {
                               —
                             </span>
                           ) : (
-                            newestFirst(entries).map((e) => (
+                            entries.map((e) => (
                               <div
                                 key={e.id}
                                 className="flex items-start gap-2.5"
