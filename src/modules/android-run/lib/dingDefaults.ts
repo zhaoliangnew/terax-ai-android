@@ -5,7 +5,7 @@ import type { DingEntry } from "./dingtalk";
  * 菜单还白白变宽;各列高度也尽量拉平。列表里没提到的分组(用户自己加的)另起一列。
  */
 export const DING_COLUMNS: string[][] = [
-  ["群", "运维", "前端", "管理"],
+  ["群", "运维", "前端"],
   ["安卓", "嵌入式"],
   ["测试"],
   ["新产品导入"],
@@ -79,12 +79,6 @@ export const DEFAULT_DING_ENTRIES: DingEntry[] = [
 
   { id: "d-ops-xupeng", name: "许鹏", kind: "person", team: "运维" },
   { id: "d-ops-fangxiao", name: "方潇", kind: "person", team: "运维" },
-
-  { id: "d-mgmt-maxun", name: "马勋", kind: "person", team: "管理" },
-  // 通讯录里是"舒均坤"不是"舒俊坤" —— 名字要跟钉钉搜索得到的一致。
-  { id: "d-mgmt-shujunkun", name: "舒均坤", kind: "person", team: "管理" },
-  // 通讯录挂在运维组(研发架构工程师),按实际职责放管理。
-  { id: "d-mgmt-liulei", name: "刘雷", kind: "person", team: "管理" },
 
   { id: "d-fe-weixiaodong", name: "卫晓栋", kind: "person", team: "前端" },
   { id: "d-fe-huodaokai", name: "霍道凯", kind: "person", team: "前端" },
