@@ -244,7 +244,7 @@ export function DeviceManagerPanel() {
               <div
                 key={d.sn}
                 className={cn(
-                  "group relative flex flex-col gap-1.5 rounded-xl border p-3.5 hover:bg-accent/30",
+                  "group relative flex min-w-0 flex-col gap-1.5 rounded-xl border p-3.5 hover:bg-accent/30",
                   isSelected
                     ? "border-emerald-500 ring-1 ring-emerald-500/50 hover:border-emerald-500"
                     : "border-border hover:border-ring/60",
@@ -262,7 +262,7 @@ export function DeviceManagerPanel() {
                     {isOnline ? "在线" : "离线"}
                   </span>
                 </div>
-                <div className="absolute bottom-2 right-2.5 flex items-center gap-2.5 opacity-0 group-hover:opacity-100">
+                <div className="absolute bottom-2 right-2.5 flex items-center gap-2.5 rounded bg-background/85 px-1.5 py-0.5 opacity-0 backdrop-blur-[2px] group-hover:opacity-100">
                   {isOnline && live && (
                     <button
                       type="button"
@@ -303,22 +303,22 @@ export function DeviceManagerPanel() {
                     !isOnline && "opacity-50",
                   )}
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex w-full min-w-0 items-center gap-1.5 pr-10">
                     <span
                       className={cn(
                         "size-1.5 shrink-0 rounded-full",
                         isOnline ? "bg-emerald-500" : "bg-muted-foreground/40",
                       )}
                     />
-                    <span className="whitespace-nowrap text-[15px] font-semibold">
+                    <span className="truncate text-[15px] font-semibold">
                       {d.vendor ? `${d.vendor} · ` : ""}
                       {d.model}
                     </span>
                   </span>
-                  <span className="whitespace-nowrap text-[12px] text-muted-foreground/70">
+                  <span className="w-full min-w-0 truncate text-[12px] text-muted-foreground/70">
                     SN:{d.sn}
                   </span>
-                  <span className="whitespace-nowrap text-[13px] text-muted-foreground">
+                  <span className="w-full min-w-0 truncate text-[13px] text-muted-foreground">
                     {d.serial} · Android {d.androidVersion} · API{" "}
                     {d.apiLevel}
                     {connectingSn === d.sn && " · 连接中…"}
@@ -359,12 +359,12 @@ export function DeviceManagerPanel() {
                         setNoteInput(deviceNotes[d.sn] ?? "");
                         setEditingNote(d.sn);
                       }}
-                      className="mt-0.5"
+                      className="mt-0.5 min-w-0 max-w-full"
                     >
                       {deviceNotes[d.sn] ? (
                         <span
                           className={cn(
-                            "rounded px-2 py-0.5 text-[12px] font-medium",
+                            "block truncate rounded px-2 py-0.5 text-[12px] font-medium",
                             isOnline
                               ? "bg-emerald-500/20 text-emerald-400"
                               : "bg-emerald-500/10 text-emerald-500/50",
