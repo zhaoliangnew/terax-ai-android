@@ -89,7 +89,7 @@ function KindTag({ kind }: { kind?: EntryKind }) {
  * 版面按"看什么/写什么/记什么"分三块,而不是一根竖条从上排到下:
  *  - 顶部一行选日/周和翻页,顺带把当前日期写在标题里,少一行说明文字;
  *  - 主体左右分栏:左边是攒下来的记录(会越来越长),右边是计划和总结
- *    (要动笔写,所以给它一个能读的行宽 —— 1400px 通栏的输入框没法写字);
+ *    (要动笔写,所以给它一个能读的行宽 —— 通栏的输入框一行字扫不过来);
  *  - 录入贴在左栏记录的下面 —— 它喂的就是那个列表,放一起手不用来回横穿。
  *
  * 日和周各存各的计划/总结;周的"做了什么"不单独记,直接汇总那一周每天的条目
@@ -241,7 +241,7 @@ export function JournalDialog({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex h-[88vh] w-[92vw] max-w-none flex-col gap-0 p-0 sm:max-w-[1400px]">
+      <DialogContent className="flex h-[74vh] w-[88vw] max-w-none flex-col gap-0 p-0 sm:max-w-[1120px]">
         {/* 顶栏:是日还是周、看的哪一天、怎么翻 —— 一行说完 */}
         <DialogHeader className="shrink-0 gap-0 border-b border-border px-5 py-3.5">
           <div className="flex items-center gap-3 pr-8">
@@ -581,8 +581,8 @@ export function JournalDialog({ open, onClose }: Props) {
             )}
           </div>
 
-          {/* 右栏定宽:输入框要能读,1400px 通栏的一行字扫不过来 */}
-          <div className="flex w-[30rem] shrink-0 flex-col gap-4 border-l border-border/60 pl-5">
+          {/* 右栏定宽:输入框要能读,通栏的一行字扫不过来 */}
+          <div className="flex w-[26rem] shrink-0 flex-col gap-4 border-l border-border/60 pl-5">
             <div className="flex min-h-0 flex-1 flex-col gap-2">
               <span className={LABEL}>计划</span>
               <textarea
