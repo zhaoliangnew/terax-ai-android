@@ -12,12 +12,14 @@ import {
   ArrowRight01Icon,
   Copy01Icon,
   Delete02Icon,
+  Tick01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   addEntry,
+  closeAfterAdd,
   type DayLog,
   dayKeyOf,
   dayLabel,
@@ -30,11 +32,21 @@ import {
   type JournalEntry,
   lastKind,
   loadDay,
+  loadMonth,
   loadWeek,
+  type MonthLog,
   monthDay,
+  monthDayKeys,
+  monthEntries,
+  monthKeyOf,
+  monthLabel,
+  monthMarkdown,
   removeEntry,
+  saveMonth,
   saveWeek,
+  setCloseAfterAdd,
   setDayField,
+  shiftMonth,
   shiftWeek,
   type WeekLog,
   weekDayKeys,
@@ -51,7 +63,7 @@ type Props = {
   onClose: () => void;
 };
 
-type Mode = "day" | "week";
+type Mode = "day" | "week" | "month";
 
 const FIELD =
   "w-full flex-1 resize-none rounded-md border border-input bg-transparent px-3 py-2.5 text-[13.5px] leading-relaxed outline-none focus:border-ring";
@@ -99,8 +111,10 @@ export function JournalDialog({ open, onClose }: Props) {
   const [mode, setMode] = useState<Mode>("day");
   const [day, setDay] = useState(() => dayKeyOf(new Date()));
   const [week, setWeek] = useState(() => weekKeyOf(new Date()));
+  const [month, setMonth] = useState(() => monthKeyOf(new Date()));
   const [dayLog, setDayLog] = useState<DayLog>(() => loadDay(day));
   const [weekLog, setWeekLog] = useState<WeekLog>(() => loadWeek(week));
+  const [monthLog, setMonthLog] = useState<MonthLog>(() => loadMonth(month));
   const [draft, setDraft] = useState("");
   const [kind, setKind] = useState<EntryKind>(() => lastKind());
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
@@ -108,27 +122,42 @@ export function JournalDialog({ open, onClose }: Props) {
   );
   // 记录怎么排:按时间是"发生顺序",按分类是"日报要交的样子"
   const [group, setGroup] = useState<"time" | "kind">("time");
+  const [closeAfter, setCloseAfter] = useState(() => closeAfterAdd());
 
   // 每次打开都回到今天 —— 上次翻到哪天了不重要,要记的是现在这条。
   useEffect(() => {
     if (!open) return;
     setDay(dayKeyOf(new Date()));
     setWeek(weekKeyOf(new Date()));
+    setMonth(monthKeyOf(new Date()));
     setDraft("");
     setKind(lastKind());
+    setCloseAfter(closeAfterAdd());
     setEditing(null);
   }, [open]);
 
   useEffect(() => setDayLog(loadDay(day)), [day]);
   useEffect(() => setWeekLog(loadWeek(week)), [week]);
+  useEffect(() => setMonthLog(loadMonth(month)), [month]);
 
   const today = dayKeyOf(new Date());
   const thisWeek = weekKeyOf(new Date());
+  const thisMonth = monthKeyOf(new Date());
   // 按日时上下翻的也是"周" —— 一排星期直接点哪天,箭头只管换周,一套控件说清楚
   const shownWeek = mode === "day" ? weekOfDay(day) : week;
-  const atNow = mode === "day" ? day === today : week === thisWeek;
+  const atNow =
+    mode === "day"
+      ? day === today
+      : mode === "week"
+        ? week === thisWeek
+        : month === thisMonth;
 
-  const goWeek = (delta: number) => {
+  // 翻页:按月翻月,其余翻周
+  const go = (delta: number) => {
+    if (mode === "month") {
+      setMonth(shiftMonth(month, delta));
+      return;
+    }
     const next = shiftWeek(shownWeek, delta);
     if (mode === "week") {
       setWeek(next);
@@ -147,45 +176,79 @@ export function JournalDialog({ open, onClose }: Props) {
     const key = dayKeyOf(now);
     addEntry(key, draft, now, kind);
     setDraft("");
+    // 记完就关:多数时候打开它就是为了记这一条,记完还杵在那儿反而要多点一下
+    if (closeAfter) {
+      onClose();
+      return;
+    }
     if (key === day) setDayLog(loadDay(day));
     else {
       setMode("day");
       setDay(key);
       toast.success("已记到今天", { description: dayLabel(key) });
     }
-  }, [draft, day, kind]);
+  }, [draft, day, kind, closeAfter, onClose]);
 
-  // 周一到周日七天全列出来,空的也留位置 —— 一眼看出哪天没写,
-  // 而不是"这天没记"和"这天不存在"长得一样。
-  const weekDays = useMemo(() => {
-    if (mode !== "week") return [];
-    return weekDayKeys(week).map((d) => ({ day: d, log: loadDay(d) }));
-    // dayLog 同上:在日视图刚记完一条,切回按周这里得是新的
-    // biome-ignore lint/correctness/useExhaustiveDependencies: dayLog 是重算信号
-  }, [mode, week, dayLog]);
+  // 周/月共用一份数据:一行一天。周把七天都列出来(空的留个"—",一眼看出哪天
+  // 漏了);月里空着的日子直接不显示 —— 三十行里二十行是"—"就没法看了。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dayLog 是重算信号
+  const dayRows = useMemo(() => {
+    if (mode === "week") {
+      return weekDayKeys(week).map((d) => ({
+        day: d,
+        entries: loadDay(d).entries,
+      }));
+    }
+    if (mode === "month") {
+      return monthDayKeys(month)
+        .map((d) => ({ day: d, entries: loadDay(d).entries }))
+        .filter((r) => r.entries.length > 0);
+    }
+    // dayLog 是重算信号:在日视图刚记完一条,切回来这里得是新的
+    return [];
+  }, [mode, week, month, dayLog]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dayLog 是重算信号
+  const periodEntries = useMemo(() => {
+    if (mode === "week") return weekEntries(week);
+    if (mode === "month") return monthEntries(month);
+    return [];
+  }, [mode, week, month, dayLog]);
 
   const copy = () => {
     // 复制出来的跟眼前看到的一致 —— 按分类看的时候多半就是要照这个格式交
     const byKind = group === "kind";
     const text =
-      mode === "day" ? dayMarkdown(day, byKind) : weekMarkdown(week, byKind);
+      mode === "day"
+        ? dayMarkdown(day, byKind)
+        : mode === "week"
+          ? weekMarkdown(week, byKind)
+          : monthMarkdown(month, byKind);
     if (!text.trim()) {
-      toast.error(`这一${mode === "day" ? "天" : "周"}还什么都没有`);
+      toast.error(
+        `这一${mode === "day" ? "天" : mode === "week" ? "周" : "个月"}还什么都没有`,
+      );
       return;
     }
     void copyToClipboard(text);
     toast.success("已复制", { description: "粘到日报里就行" });
   };
 
-  const plan = mode === "day" ? dayLog.plan : weekLog.plan;
-  const summary = mode === "day" ? dayLog.summary : weekLog.summary;
+  const periodLog =
+    mode === "day" ? dayLog : mode === "week" ? weekLog : monthLog;
+  const plan = periodLog.plan;
+  const summary = periodLog.summary;
   const setPlan = (v: string) => {
     if (mode === "day") setDayLog(setDayField(day, "plan", v));
-    else setWeekLog(saveWeek(week, { ...weekLog, plan: v }));
+    else if (mode === "week")
+      setWeekLog(saveWeek(week, { ...weekLog, plan: v }));
+    else setMonthLog(saveMonth(month, { ...monthLog, plan: v }));
   };
   const setSummary = (v: string) => {
     if (mode === "day") setDayLog(setDayField(day, "summary", v));
-    else setWeekLog(saveWeek(week, { ...weekLog, summary: v }));
+    else if (mode === "week")
+      setWeekLog(saveWeek(week, { ...weekLog, summary: v }));
+    else setMonthLog(saveMonth(month, { ...monthLog, summary: v }));
   };
 
   // 一条记录长什么样。按时间和按分类两种排法都用它,别写两遍。
@@ -246,15 +309,19 @@ export function JournalDialog({ open, onClose }: Props) {
         <DialogHeader className="shrink-0 gap-0 border-b border-border px-4 py-3">
           <div className="flex items-center gap-3 pr-8">
             <DialogTitle className="shrink-0 text-lg font-semibold">
-              {mode === "day" ? "日报" : "周报"}
+              {mode === "day" ? "日报" : mode === "week" ? "周报" : "月报"}
             </DialogTitle>
             <span className="min-w-0 truncate text-[15px] text-muted-foreground">
-              {mode === "day" ? `${day} ${weekdayName(day)}` : weekLabel(week)}
+              {mode === "day"
+                ? `${day} ${weekdayName(day)}`
+                : mode === "week"
+                  ? weekLabel(week)
+                  : monthLabel(month)}
             </span>
 
             <div className="ml-auto flex shrink-0 items-center gap-2">
               <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5">
-                {(["day", "week"] as const).map((m) => (
+                {(["day", "week", "month"] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
@@ -266,7 +333,7 @@ export function JournalDialog({ open, onClose }: Props) {
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    {m === "day" ? "按日" : "按周"}
+                    {m === "day" ? "按日" : m === "week" ? "按周" : "按月"}
                   </button>
                 ))}
               </div>
@@ -288,8 +355,8 @@ export function JournalDialog({ open, onClose }: Props) {
           <button
             type="button"
             className={NAV}
-            title="上一周"
-            onClick={() => goWeek(-1)}
+            title={mode === "month" ? "上个月" : "上一周"}
+            onClick={() => go(-1)}
           >
             <HugeiconsIcon icon={ArrowLeft01Icon} size={18} strokeWidth={2} />
           </button>
@@ -331,15 +398,15 @@ export function JournalDialog({ open, onClose }: Props) {
             </div>
           ) : (
             <span className="min-w-0 flex-1 text-center text-[14px] text-muted-foreground">
-              {weekLabel(week)}
+              {mode === "week" ? weekLabel(week) : monthLabel(month)}
             </span>
           )}
 
           <button
             type="button"
             className={NAV}
-            title="下一周"
-            onClick={() => goWeek(1)}
+            title={mode === "month" ? "下个月" : "下一周"}
+            onClick={() => go(1)}
           >
             <HugeiconsIcon icon={ArrowRight01Icon} size={18} strokeWidth={2} />
           </button>
@@ -350,6 +417,7 @@ export function JournalDialog({ open, onClose }: Props) {
             onClick={() => {
               setDay(today);
               setWeek(thisWeek);
+              setMonth(thisMonth);
             }}
             disabled={atNow}
             className={cn(
@@ -358,7 +426,7 @@ export function JournalDialog({ open, onClose }: Props) {
                 "border-emerald-500/50 text-emerald-500 hover:bg-emerald-500/10 hover:text-emerald-400",
             )}
           >
-            回到{mode === "day" ? "今天" : "本周"}
+            回到{mode === "day" ? "今天" : mode === "week" ? "本周" : "本月"}
           </Button>
         </div>
 
@@ -428,14 +496,14 @@ export function JournalDialog({ open, onClose }: Props) {
                 </div>
               )
             ) : group === "kind" ? (
-              // 按分类看一整周:跨天汇总,每条前面标是哪天 —— 周报多半就照这个抄
+              // 跨天汇总,每条前面标是哪天 —— 周报/月报多半就照这个抄
               <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-                {weekEntries(week).length === 0 ? (
+                {periodEntries.length === 0 ? (
                   <span className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-[13px] text-muted-foreground/50">
-                    这周还没记过
+                    这{mode === "week" ? "周" : "个月"}还没记过
                   </span>
                 ) : (
-                  groupByKind(weekEntries(week)).map((g) => (
+                  groupByKind(periodEntries).map((g) => (
                     <div key={g.kind ?? "未分类"} className="flex flex-col">
                       <div className="flex items-center gap-2 px-2 py-1">
                         {g.kind ? (
@@ -460,8 +528,8 @@ export function JournalDialog({ open, onClose }: Props) {
                           }}
                           className="flex items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-accent/40"
                         >
-                          <span className="w-16 shrink-0 pt-0.5 text-[12px] text-muted-foreground/60">
-                            {weekdayName(e.day)} {monthDay(e.day)}
+                          <span className="w-20 shrink-0 pt-0.5 font-mono text-[12px] text-muted-foreground/60 tabular-nums">
+                            {monthDay(e.day)} {weekdayName(e.day)}
                           </span>
                           <span className="min-w-0 flex-1 text-[13.5px] leading-relaxed">
                             {e.text}
@@ -473,58 +541,65 @@ export function JournalDialog({ open, onClose }: Props) {
                 )}
               </div>
             ) : (
-              // 一天一段竖着排。原来是七列平铺,那是照 1400px 的弹窗设计的 ——
-              // 弹窗收小之后每列只剩八十来像素,一句话要折四行,反而看不清。
-              // 竖排跟"按分类"结构一致,宽度多少都不变形。
-              <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
-                {weekDays.map(({ day: d, log }) => {
-                  const isTodayRow = d === today;
-                  return (
-                    <div key={d} className="flex flex-col">
-                      <button
-                        type="button"
-                        title={`跳到 ${d}`}
-                        onClick={() => {
-                          setMode("day");
-                          setDay(d);
-                        }}
-                        className={cn(
-                          "flex w-fit items-center gap-2 rounded px-2 py-1 text-[13px] font-medium hover:bg-accent",
-                          isTodayRow
-                            ? "text-emerald-500"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
+              // 一行一天:左边一列写星期和日期,右边一列是那天的记录。日期跟内容
+              // 各占一列对得齐,扫的时候眼睛不用在缩进里找边界。
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
+                {dayRows.length === 0 ? (
+                  <span className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-[13px] text-muted-foreground/50">
+                    这个月还没记过
+                  </span>
+                ) : (
+                  dayRows.map(({ day: d, entries }) => {
+                    const isTodayRow = d === today;
+                    return (
+                      <div
+                        key={d}
+                        className="flex gap-3 border-b border-border/40 py-1.5 last:border-b-0"
                       >
-                        {weekdayName(d)}
-                        <span className="font-mono text-[11px] opacity-60 tabular-nums">
-                          {monthDay(d)}
-                        </span>
-                        {isTodayRow && (
-                          <span className="text-[11px] opacity-70">今天</span>
-                        )}
-                      </button>
-                      {log.entries.length === 0 ? (
-                        <span className="px-2 py-1 text-[12.5px] text-muted-foreground/30">
-                          —
-                        </span>
-                      ) : (
-                        log.entries.map((e) => (
-                          <div
-                            key={e.id}
-                            className="flex items-start gap-2.5 px-2 py-1"
-                          >
-                            <span className="shrink-0 pt-0.5">
-                              <KindTag kind={e.kind} />
+                        <button
+                          type="button"
+                          title={`跳到 ${d}`}
+                          onClick={() => {
+                            setMode("day");
+                            setDay(d);
+                          }}
+                          className={cn(
+                            "w-24 shrink-0 self-start rounded px-2 py-1 text-left text-[13px] font-medium hover:bg-accent",
+                            isTodayRow
+                              ? "text-emerald-500"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {weekdayName(d)}
+                          <span className="ml-1.5 font-mono text-[11px] opacity-60 tabular-nums">
+                            {monthDay(d)}
+                          </span>
+                        </button>
+                        <div className="flex min-w-0 flex-1 flex-col gap-1 py-0.5">
+                          {entries.length === 0 ? (
+                            <span className="text-[12.5px] text-muted-foreground/30">
+                              —
                             </span>
-                            <span className="min-w-0 flex-1 text-[13.5px] leading-relaxed">
-                              {e.text}
-                            </span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  );
-                })}
+                          ) : (
+                            entries.map((e) => (
+                              <div
+                                key={e.id}
+                                className="flex items-start gap-2.5"
+                              >
+                                <span className="shrink-0 pt-0.5">
+                                  <KindTag kind={e.kind} />
+                                </span>
+                                <span className="min-w-0 flex-1 text-[13.5px] leading-relaxed">
+                                  {e.text}
+                                </span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
             )}
 
@@ -570,6 +645,39 @@ export function JournalDialog({ open, onClose }: Props) {
                       {k}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    title="记完这条就把窗口关掉"
+                    onClick={() => {
+                      const next = !closeAfter;
+                      setCloseAfter(next);
+                      setCloseAfterAdd(next);
+                    }}
+                    className={cn(
+                      "ml-auto flex shrink-0 items-center gap-1.5 rounded px-1.5 py-1 text-[12px] transition-colors hover:bg-accent",
+                      closeAfter
+                        ? "text-emerald-500"
+                        : "text-muted-foreground/60 hover:text-foreground",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "flex size-3.5 items-center justify-center rounded border",
+                        closeAfter
+                          ? "border-emerald-500 bg-emerald-500/20"
+                          : "border-border",
+                      )}
+                    >
+                      {closeAfter && (
+                        <HugeiconsIcon
+                          icon={Tick01Icon}
+                          size={10}
+                          strokeWidth={3}
+                        />
+                      )}
+                    </span>
+                    记完就关
+                  </button>
                 </div>
               </div>
             )}

@@ -44,6 +44,18 @@ export function rememberKind(kind: EntryKind): void {
   localStorage.setItem(LAST_KIND_KEY, kind);
 }
 
+const CLOSE_AFTER_KEY = "terax.journal.closeAfterAdd";
+
+/** 记完一条要不要顺手关掉窗口。默认关掉:多数时候打开它就是为了记这一条。 */
+export function closeAfterAdd(): boolean {
+  if (typeof localStorage === "undefined") return true;
+  return localStorage.getItem(CLOSE_AFTER_KEY) !== "0";
+}
+
+export function setCloseAfterAdd(on: boolean): void {
+  localStorage.setItem(CLOSE_AFTER_KEY, on ? "1" : "0");
+}
+
 export type DayLog = {
   plan: string;
   summary: string;
@@ -55,8 +67,12 @@ export type WeekLog = {
   summary: string;
 };
 
+/** 月跟周一样,只存计划和总结;做了什么直接汇总那个月每天的条目。 */
+export type MonthLog = WeekLog;
+
 const DAYS_KEY = "terax.journal.days";
 const WEEKS_KEY = "terax.journal.weeks";
+const MONTHS_KEY = "terax.journal.months";
 
 const EMPTY_DAY: DayLog = { plan: "", summary: "", entries: [] };
 const EMPTY_WEEK: WeekLog = { plan: "", summary: "" };
@@ -113,6 +129,22 @@ export function saveWeek(week: string, log: WeekLog): WeekLog {
   return loadWeek(week);
 }
 
+export function loadMonth(month: string): MonthLog {
+  const all = read<MonthLog>(MONTHS_KEY);
+  const m = all[month];
+  return m
+    ? { plan: m.plan ?? "", summary: m.summary ?? "" }
+    : { ...EMPTY_WEEK };
+}
+
+export function saveMonth(month: string, log: MonthLog): MonthLog {
+  const all = read<MonthLog>(MONTHS_KEY);
+  if (!log.plan && !log.summary) delete all[month];
+  else all[month] = log;
+  write(MONTHS_KEY, all);
+  return loadMonth(month);
+}
+
 export function setDayField(
   day: string,
   field: "plan" | "summary",
@@ -159,6 +191,13 @@ export function removeEntry(day: string, id: string): DayLog {
     ...log,
     entries: log.entries.filter((e) => e.id !== id),
   });
+}
+
+/** 这一个月所有条目,带上是哪天记的。 */
+export function monthEntries(month: string): WeekEntry[] {
+  return monthDayKeys(month).flatMap((d) =>
+    loadDay(d).entries.map((e) => ({ ...e, day: d })),
+  );
 }
 
 /** 这一周所有条目,带上是哪天记的。按分类看周报时要跨天汇总。 */
@@ -261,6 +300,34 @@ export function weekDayKeys(key: string): string[] {
   });
 }
 
+export function monthKeyOf(d: Date): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+}
+
+/** 某一天属于哪个月。 */
+export function monthOfDay(key: string): string {
+  return key.slice(0, 7);
+}
+
+export function shiftMonth(key: string, delta: number): string {
+  const [y, m] = key.split("-").map(Number);
+  return monthKeyOf(new Date(y, m - 1 + delta, 1));
+}
+
+/** 整个月的日期。二月、闰年都交给 Date 去算,别自己数天数。 */
+export function monthDayKeys(key: string): string[] {
+  const [y, m] = key.split("-").map(Number);
+  const days = new Date(y, m, 0).getDate();
+  return Array.from({ length: days }, (_, i) =>
+    dayKeyOf(new Date(y, m - 1, i + 1)),
+  );
+}
+
+export function monthLabel(key: string): string {
+  const [y, m] = key.split("-").map(Number);
+  return `${y} 年 ${m} 月`;
+}
+
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 
 export function dayLabel(key: string): string {
@@ -317,6 +384,38 @@ export function dayMarkdown(day: string, byKind = false): string {
     `## ${day}(${dayLabel(day).split(" ")[1]})`,
     section("计划", log.plan),
     section("做了什么", entries),
+    section("总结", log.summary),
+  ];
+  return parts.filter(Boolean).join("\n").trimEnd();
+}
+
+export function monthMarkdown(month: string, byKind = false): string {
+  const log = loadMonth(month);
+  const all = monthEntries(month);
+  const body = byKind
+    ? groupByKind(all)
+        .map(
+          (g) =>
+            `- ${g.kind ?? "未分类"}\n${g.items
+              .map((e) => `  - ${dayLabel(e.day)} ${e.text}`)
+              .join("\n")}`,
+        )
+        .join("\n")
+    : monthDayKeys(month)
+        .map((d) => {
+          const entries = loadDay(d).entries;
+          if (entries.length === 0) return "";
+          const lines = entries
+            .map((e) => `  - ${e.kind ? `[${e.kind}] ` : ""}${e.text}`)
+            .join("\n");
+          return `- ${dayLabel(d)}\n${lines}`;
+        })
+        .filter(Boolean)
+        .join("\n");
+  const parts = [
+    `## ${monthLabel(month)}`,
+    section("计划", log.plan),
+    section("做了什么", body),
     section("总结", log.summary),
   ];
   return parts.filter(Boolean).join("\n").trimEnd();
