@@ -16,6 +16,7 @@ import {
   JournalButton,
   KnowledgeBaseMenu,
   MyYunxiaoButton,
+  WeChatButton,
 } from "@/modules/android-run";
 import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
@@ -53,6 +54,7 @@ export function StatusBar({
         <MyYunxiaoButton />
         <JournalButton />
         <DingGroupsMenu />
+        <WeChatButton />
         <ApifoxMenu />
         <CustomLinksMenu />
         <LspStatusPill filePath={filePath ?? null} />

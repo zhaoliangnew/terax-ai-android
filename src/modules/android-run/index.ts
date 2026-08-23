@@ -39,4 +39,5 @@ export { OpenInToolMenu } from "./OpenInToolMenu";
 export { ProjectLinksBar } from "./ProjectLinksBar";
 export { useActiveProductConfig, useAndroidRunStore } from "./store";
 export { UrlPromptDialog } from "./UrlPromptDialog";
+export { WeChatButton } from "./WeChatButton";
 export { YunxiaoLinkDialog } from "./YunxiaoLinkDialog";
