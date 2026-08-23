@@ -1,4 +1,6 @@
+import { native } from "@/modules/ai/lib/native";
 import { KNOWLEDGE_BASE_LINKS } from "./knowledgeBase";
+import { openExternally, shellQuote } from "./openExternally";
 
 const KEY = "terax.quickLinks";
 
@@ -9,7 +11,42 @@ export type QuickLink = {
   url: string;
   /** 目录节点显示文件夹图标,文档节点显示文档图标;自定义入口不带。 */
   kind?: "folder" | "doc";
+  /**
+   * "app" = url 里存的是 .app 路径,点了唤应用;不填就是网址,浏览器打开。
+   * 老数据没有这个字段,当网址处理 —— 收藏夹以前只能存网址。
+   */
+  target?: "app";
 };
+
+/** 点一下该干什么,由 target 决定。 */
+export function openQuickLink(link: QuickLink): void {
+  if (link.target === "app") {
+    void native.shellBgSpawn(`open -a ${shellQuote(link.url)}`, null);
+    return;
+  }
+  openExternally(link.url);
+}
+
+/**
+ * /Applications 里装了什么。给收藏应用时挑用的 —— 手敲路径太容易错,
+ * 而这个列表本来就是现成的(.app 就是个目录)。
+ */
+export async function listInstalledApps(): Promise<
+  { name: string; path: string }[]
+> {
+  try {
+    const entries = await native.readDir("/Applications");
+    return entries
+      .filter((e) => e.name.endsWith(".app"))
+      .map((e) => ({
+        name: e.name.replace(/\.app$/, ""),
+        path: `/Applications/${e.name}`,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "zh"));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * 内置知识库目录固定在前,用户自己加的入口跟在后面。内置项不可增删排序 ——

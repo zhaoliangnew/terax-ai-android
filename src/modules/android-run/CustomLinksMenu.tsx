@@ -8,7 +8,9 @@ import {
   ArrowDown02Icon,
   ArrowUp02Icon,
   Bookmark02Icon,
+  ComputerIcon,
   Delete02Icon,
+  Link02Icon,
   PencilEdit02Icon,
   PlusSignIcon,
 } from "@hugeicons/core-free-icons";
@@ -21,11 +23,11 @@ import {
   MENU_ROW,
   MENU_TRIGGER,
 } from "./lib/menuStyles";
-import { openExternally } from "./lib/openExternally";
 import {
   loadQuickLinks,
   moveQuickLink,
   newLinkId,
+  openQuickLink,
   type QuickLink,
   removeQuickLink,
   upsertQuickLink,
@@ -33,7 +35,7 @@ import {
 import { MenuRowIcon } from "./MenuRowIcon";
 import { QuickLinkEditDialog } from "./QuickLinkEditDialog";
 
-/** 自己攒的链接,跟内置知识库分开管,可增删改排序。 */
+/** 自己攒的入口:网址和本机应用都能放,跟内置知识库分开管,可增删改排序。 */
 export function CustomLinksMenu() {
   const [links, setLinks] = useState<QuickLink[]>(() => loadQuickLinks());
   const [editing, setEditing] = useState<QuickLink | null>(null);
@@ -83,10 +85,16 @@ export function CustomLinksMenu() {
               <div key={l.id} className="group flex items-center gap-1">
                 <button
                   type="button"
-                  title={l.url}
-                  onClick={() => openExternally(l.url)}
+                  title={l.target === "app" ? `打开 ${l.url}` : l.url}
+                  onClick={() => openQuickLink(l)}
                   className={MENU_ROW}
                 >
+                  <HugeiconsIcon
+                    icon={l.target === "app" ? ComputerIcon : Link02Icon}
+                    size={13}
+                    strokeWidth={1.75}
+                    className="shrink-0 text-muted-foreground/50"
+                  />
                   <span className="min-w-0 flex-1 truncate">{l.title}</span>
                 </button>
                 <span className="flex shrink-0 items-center gap-1 pr-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -122,6 +130,8 @@ export function CustomLinksMenu() {
 
       <QuickLinkEditDialog
         link={editing}
+        allowApp
+        description="网址用浏览器打开;也可以收藏本机应用,点一下直接唤起来。"
         onClose={() => setEditing(null)}
         onSave={(l) => setLinks(upsertQuickLink(l))}
       />
