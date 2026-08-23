@@ -161,6 +161,32 @@ export function removeEntry(day: string, id: string): DayLog {
   });
 }
 
+/** 这一周所有条目,带上是哪天记的。按分类看周报时要跨天汇总。 */
+export type WeekEntry = JournalEntry & { day: string };
+
+export function weekEntries(week: string): WeekEntry[] {
+  return weekDayKeys(week).flatMap((d) =>
+    loadDay(d).entries.map((e) => ({ ...e, day: d })),
+  );
+}
+
+/**
+ * 按类型分组。顺序跟 ENTRY_KINDS 一致(不是按数量),这样每次看到的排列一样,
+ * 眼睛能记住位置;没类型的老数据兜在最后。
+ */
+export function groupByKind<T extends { kind?: EntryKind }>(
+  entries: T[],
+): { kind?: EntryKind; items: T[] }[] {
+  const groups: { kind?: EntryKind; items: T[] }[] = [];
+  for (const k of ENTRY_KINDS) {
+    const items = entries.filter((e) => e.kind === k);
+    if (items.length) groups.push({ kind: k, items });
+  }
+  const rest = entries.filter((e) => !e.kind);
+  if (rest.length) groups.push({ items: rest });
+  return groups;
+}
+
 // ---- 日期 ----------------------------------------------------------------
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -271,11 +297,22 @@ function section(title: string, body: string): string {
   return body.trim() ? `### ${title}\n${body.trim()}\n` : "";
 }
 
-export function dayMarkdown(day: string): string {
+export function dayMarkdown(day: string, byKind = false): string {
   const log = loadDay(day);
-  const entries = log.entries
-    .map((e) => `- ${entryTime(e.at)}${e.kind ? ` [${e.kind}]` : ""} ${e.text}`)
-    .join("\n");
+  const entries = byKind
+    ? groupByKind(log.entries)
+        .map(
+          (g) =>
+            `- ${g.kind ?? "未分类"}\n${g.items
+              .map((e) => `  - ${entryTime(e.at)} ${e.text}`)
+              .join("\n")}`,
+        )
+        .join("\n")
+    : log.entries
+        .map(
+          (e) => `- ${entryTime(e.at)}${e.kind ? ` [${e.kind}]` : ""} ${e.text}`,
+        )
+        .join("\n");
   const parts = [
     `## ${day}(${dayLabel(day).split(" ")[1]})`,
     section("计划", log.plan),
@@ -285,8 +322,18 @@ export function dayMarkdown(day: string): string {
   return parts.filter(Boolean).join("\n").trimEnd();
 }
 
-export function weekMarkdown(week: string): string {
+export function weekMarkdown(week: string, byKind = false): string {
   const log = loadWeek(week);
+  const byKindText = byKind
+    ? groupByKind(weekEntries(week))
+        .map(
+          (g) =>
+            `- ${g.kind ?? "未分类"}\n${g.items
+              .map((e) => `  - ${dayLabel(e.day)} ${e.text}`)
+              .join("\n")}`,
+        )
+        .join("\n")
+    : "";
   const days = weekDayKeys(week)
     .map((d) => {
       const dayLog = loadDay(d);
@@ -301,7 +348,7 @@ export function weekMarkdown(week: string): string {
   const parts = [
     `## ${weekLabel(week)}`,
     section("计划", log.plan),
-    section("做了什么", days),
+    section("做了什么", byKind ? byKindText : days),
     section("总结", log.summary),
   ];
   return parts.filter(Boolean).join("\n").trimEnd();

@@ -26,6 +26,8 @@ import {
   type EntryKind,
   editEntry,
   entryTime,
+  groupByKind,
+  type JournalEntry,
   lastKind,
   loadDay,
   loadWeek,
@@ -37,6 +39,7 @@ import {
   type WeekLog,
   weekDayKeys,
   weekdayName,
+  weekEntries,
   weekKeyOf,
   weekLabel,
   weekMarkdown,
@@ -103,6 +106,8 @@ export function JournalDialog({ open, onClose }: Props) {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
     null,
   );
+  // 记录怎么排:按时间是"发生顺序",按分类是"日报要交的样子"
+  const [group, setGroup] = useState<"time" | "kind">("time");
 
   // 每次打开都回到今天 —— 上次翻到哪天了不重要,要记的是现在这条。
   useEffect(() => {
@@ -160,7 +165,10 @@ export function JournalDialog({ open, onClose }: Props) {
   }, [mode, week, dayLog]);
 
   const copy = () => {
-    const text = mode === "day" ? dayMarkdown(day) : weekMarkdown(week);
+    // 复制出来的跟眼前看到的一致 —— 按分类看的时候多半就是要照这个格式交
+    const byKind = group === "kind";
+    const text =
+      mode === "day" ? dayMarkdown(day, byKind) : weekMarkdown(week, byKind);
     if (!text.trim()) {
       toast.error(`这一${mode === "day" ? "天" : "周"}还什么都没有`);
       return;
@@ -179,6 +187,57 @@ export function JournalDialog({ open, onClose }: Props) {
     if (mode === "day") setDayLog(setDayField(day, "summary", v));
     else setWeekLog(saveWeek(week, { ...weekLog, summary: v }));
   };
+
+  // 一条记录长什么样。按时间和按分类两种排法都用它,别写两遍。
+  const entryRow = (e: JournalEntry) => (
+    <div
+      key={e.id}
+      className="group flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-accent/40"
+    >
+      <span className="shrink-0 pt-0.5 font-mono text-[12px] text-muted-foreground/60 tabular-nums">
+        {entryTime(e.at)}
+      </span>
+      <span className="shrink-0 pt-0.5">
+        <KindTag kind={e.kind} />
+      </span>
+      {editing?.id === e.id ? (
+        <input
+          // biome-ignore lint/a11y/noAutofocus: 点了才进编辑态
+          autoFocus
+          value={editing.text}
+          onChange={(ev) => setEditing({ id: e.id, text: ev.target.value })}
+          onKeyDown={(ev) => {
+            ev.stopPropagation();
+            if (ev.key === "Enter") {
+              setDayLog(editEntry(day, e.id, editing.text));
+              setEditing(null);
+            } else if (ev.key === "Escape") setEditing(null);
+          }}
+          onBlur={() => {
+            setDayLog(editEntry(day, e.id, editing.text));
+            setEditing(null);
+          }}
+          className="min-w-0 flex-1 rounded border border-input bg-transparent px-1.5 py-0.5 text-[13.5px] outline-none focus:border-ring"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEditing({ id: e.id, text: e.text })}
+          className="min-w-0 flex-1 text-left text-[13.5px] leading-relaxed"
+        >
+          {e.text}
+        </button>
+      )}
+      <button
+        type="button"
+        title="删除"
+        onClick={() => setDayLog(removeEntry(day, e.id))}
+        className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+      >
+        <HugeiconsIcon icon={Delete02Icon} size={13} strokeWidth={1.75} />
+      </button>
+    </div>
+  );
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -300,9 +359,31 @@ export function JournalDialog({ open, onClose }: Props) {
         {/* 主体左右分栏:左边是攒下来的记录,右边是要动笔写的两块 */}
         <div className="flex min-h-0 flex-1 gap-5 px-5 py-4">
           <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="flex shrink-0 items-baseline gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <span className={LABEL}>做了什么</span>
-              <span className="text-[12px] text-muted-foreground/50">
+              <div className="flex items-center gap-0.5 rounded-md border border-border/60 p-0.5">
+                {(
+                  [
+                    ["time", mode === "day" ? "按时间" : "按天"],
+                    ["kind", "按分类"],
+                  ] as const
+                ).map(([g, label]) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => setGroup(g)}
+                    className={cn(
+                      "rounded px-2 py-0.5 text-[12px] transition-colors",
+                      group === g
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <span className="ml-auto text-[12px] text-muted-foreground/50">
                 {mode === "day"
                   ? "点一下改,悬停可删"
                   : "属于某一天,点日期回那天改"}
@@ -316,63 +397,75 @@ export function JournalDialog({ open, onClose }: Props) {
                 </span>
               ) : (
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pr-1">
-                  {dayLog.entries.map((e) => (
-                    <div
-                      key={e.id}
-                      className="group flex items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-accent/40"
-                    >
-                      <span className="shrink-0 pt-0.5 font-mono text-[12px] text-muted-foreground/60 tabular-nums">
-                        {entryTime(e.at)}
-                      </span>
-                      <span className="shrink-0 pt-0.5">
-                        <KindTag kind={e.kind} />
-                      </span>
-                      {editing?.id === e.id ? (
-                        <input
-                          // biome-ignore lint/a11y/noAutofocus: 点了才进编辑态
-                          autoFocus
-                          value={editing.text}
-                          onChange={(ev) =>
-                            setEditing({ id: e.id, text: ev.target.value })
-                          }
-                          onKeyDown={(ev) => {
-                            ev.stopPropagation();
-                            if (ev.key === "Enter") {
-                              setDayLog(editEntry(day, e.id, editing.text));
-                              setEditing(null);
-                            } else if (ev.key === "Escape") setEditing(null);
-                          }}
-                          onBlur={() => {
-                            setDayLog(editEntry(day, e.id, editing.text));
-                            setEditing(null);
-                          }}
-                          className="min-w-0 flex-1 rounded border border-input bg-transparent px-1.5 py-0.5 text-[13.5px] outline-none focus:border-ring"
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setEditing({ id: e.id, text: e.text })}
-                          className="min-w-0 flex-1 text-left text-[13.5px] leading-relaxed"
+                  {group === "time"
+                    ? dayLog.entries.map(entryRow)
+                    : groupByKind(dayLog.entries).map((g) => (
+                        <div
+                          key={g.kind ?? "未分类"}
+                          className="mb-2 flex flex-col"
                         >
-                          {e.text}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        title="删除"
-                        onClick={() => setDayLog(removeEntry(day, e.id))}
-                        className="shrink-0 rounded p-1 text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
-                      >
-                        <HugeiconsIcon
-                          icon={Delete02Icon}
-                          size={13}
-                          strokeWidth={1.75}
-                        />
-                      </button>
-                    </div>
-                  ))}
+                          <div className="flex items-center gap-2 px-2 py-1">
+                            {g.kind ? (
+                              <KindTag kind={g.kind} />
+                            ) : (
+                              <span className="text-[12px] text-muted-foreground/50">
+                                未分类
+                              </span>
+                            )}
+                            <span className="text-[12px] text-muted-foreground/40">
+                              {g.items.length} 条
+                            </span>
+                          </div>
+                          {g.items.map(entryRow)}
+                        </div>
+                      ))}
                 </div>
               )
+            ) : group === "kind" ? (
+              // 按分类看一整周:跨天汇总,每条前面标是哪天 —— 周报多半就照这个抄
+              <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+                {weekEntries(week).length === 0 ? (
+                  <span className="rounded-md border border-dashed border-border/60 px-3 py-6 text-center text-[13px] text-muted-foreground/50">
+                    这周还没记过
+                  </span>
+                ) : (
+                  groupByKind(weekEntries(week)).map((g) => (
+                    <div key={g.kind ?? "未分类"} className="flex flex-col">
+                      <div className="flex items-center gap-2 px-2 py-1">
+                        {g.kind ? (
+                          <KindTag kind={g.kind} />
+                        ) : (
+                          <span className="text-[12px] text-muted-foreground/50">
+                            未分类
+                          </span>
+                        )}
+                        <span className="text-[12px] text-muted-foreground/40">
+                          {g.items.length} 条
+                        </span>
+                      </div>
+                      {g.items.map((e) => (
+                        <button
+                          key={e.id}
+                          type="button"
+                          title={`回到 ${e.day} 改`}
+                          onClick={() => {
+                            setMode("day");
+                            setDay(e.day);
+                          }}
+                          className="flex items-start gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-accent/40"
+                        >
+                          <span className="w-16 shrink-0 pt-0.5 text-[12px] text-muted-foreground/60">
+                            {weekdayName(e.day)} {monthDay(e.day)}
+                          </span>
+                          <span className="min-w-0 flex-1 text-[13.5px] leading-relaxed">
+                            {e.text}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ))
+                )}
+              </div>
             ) : (
               // 七天平铺成七列,一眼看完一周;竖着排要滚,还看不出哪天空着
               <div className="grid min-h-0 flex-1 grid-cols-7 gap-2">
@@ -472,27 +565,38 @@ export function JournalDialog({ open, onClose }: Props) {
             摆个"记到今天"的输入框在那儿只会让人愣一下。 */}
         {mode === "day" && (
           <div className="shrink-0 border-t border-border bg-foreground/[0.03] px-5 py-3">
-            <div className="flex items-center gap-3">
-              <input
-                // biome-ignore lint/a11y/noAutofocus: 这个弹窗就是为了"立刻记一条"
-                autoFocus
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  e.stopPropagation();
-                  if (e.key === "Enter") submit();
-                }}
-                placeholder={`刚做完什么?回车记到 ${monthDay(today)} ${weekdayName(today)}`}
-                className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-[14px] outline-none focus:border-ring"
-              />
-              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+            {/* 收成一小块居中放:输入框、类型、按钮三样贴在一起,记一条手不用
+                横穿整个 1400px。键盘流更省 —— 打开就在输入框里,打完回车。 */}
+            <div className="mx-auto flex w-full max-w-[52rem] flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <input
+                  // biome-ignore lint/a11y/noAutofocus: 这个弹窗就是为了"立刻记一条"
+                  autoFocus
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter") submit();
+                  }}
+                  placeholder={`刚做完什么?回车记到 ${monthDay(today)} ${weekdayName(today)}`}
+                  className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-[14px] outline-none focus:border-ring"
+                />
+                <Button
+                  onClick={submit}
+                  disabled={!draft.trim()}
+                  className="h-10 shrink-0 px-5 text-[13.5px]"
+                >
+                  记一条
+                </Button>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
                 {ENTRY_KINDS.map((k) => (
                   <button
                     key={k}
                     type="button"
                     onClick={() => setKind(k)}
                     className={cn(
-                      "rounded-full border px-3 py-1.5 text-[12.5px] transition-colors",
+                      "rounded-full border px-3 py-1 text-[12.5px] transition-colors",
                       kind === k
                         ? KIND_TONE[k]
                         : "border-border/60 text-muted-foreground hover:bg-accent/50 hover:text-foreground",
@@ -502,13 +606,6 @@ export function JournalDialog({ open, onClose }: Props) {
                   </button>
                 ))}
               </div>
-              <Button
-                onClick={submit}
-                disabled={!draft.trim()}
-                className="h-10 shrink-0 px-5 text-[13.5px]"
-              >
-                记一条
-              </Button>
             </div>
           </div>
         )}
