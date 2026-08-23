@@ -1602,30 +1602,20 @@ export default function App() {
                               onSetAsRoot={handleSetSpaceRoot}
                               onLinkYunxiao={setYunxiaoDir}
                               onLinkYunxiaoTask={setTaskDir}
-                              headerExtra={
-                                showProductPane && androidProjectRoot ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleProductPane()}
-                                    title={
-                                      productPaneOpen
-                                        ? "收起产品目录文件"
-                                        : "展开产品目录文件"
-                                    }
-                                    className={cn(
-                                      "flex size-6 items-center justify-center rounded transition-colors hover:bg-accent hover:text-foreground",
-                                      productPaneOpen
-                                        ? "text-emerald-500"
-                                        : "text-muted-foreground",
-                                    )}
-                                  >
-                                    <HugeiconsIcon
-                                      icon={SidebarRightIcon}
-                                      size={13}
-                                      strokeWidth={1.75}
-                                    />
-                                  </button>
-                                ) : null
+                              headerActions={
+                                showProductPane && androidProjectRoot
+                                  ? [
+                                      {
+                                        id: "product-pane",
+                                        icon: SidebarRightIcon,
+                                        label: productPaneOpen
+                                          ? "收起产品目录文件"
+                                          : "展开产品目录文件",
+                                        active: productPaneOpen,
+                                        onClick: toggleProductPane,
+                                      },
+                                    ]
+                                  : undefined
                               }
                               pathDropTarget={terminalPathDropTarget}
                             />

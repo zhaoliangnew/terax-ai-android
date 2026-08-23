@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -32,7 +31,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   forwardRef,
   memo,
-  type ReactNode,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -40,6 +38,10 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  type ExplorerHeaderAction,
+  ExplorerHeaderActions,
+} from "./ExplorerHeaderActions";
 import { ExplorerSearch, type ExplorerSearchHandle } from "./ExplorerSearch";
 import { InlineInput } from "./InlineInput";
 import {
@@ -90,8 +92,9 @@ type Props = {
   onAttachToAgent?: (path: string) => void;
   /** 把这个目录设为当前 Space 的根目录(左栏"产品目录"专用)。 */
   onSetAsRoot?: (path: string) => void;
-  /** 额外塞进头部按钮行的控件(比如产品文件区的开合开关)。 */
-  headerExtra?: ReactNode;
+  /** 额外塞进头部按钮行的动作(比如产品文件区的开合开关)。排在自带按钮后面,
+   * 也就是宽度不够时比它们更早被收进 ⋯ 菜单。 */
+  headerActions?: ExplorerHeaderAction[];
   /** 给这个目录绑定云效项目(云效项目对应产品线目录,不是单个仓库)。 */
   onLinkYunxiao?: (path: string) => void;
   /** 给这个工程填"当前云效需求"地址(跟着仓库走,不继承)。 */
@@ -255,7 +258,7 @@ export const FileExplorer = memo(
       onOpenGitHistory,
       onAttachToAgent,
       onSetAsRoot,
-      headerExtra,
+      headerActions,
       onLinkYunxiao,
       onLinkYunxiaoTask,
       pathDropTarget,
@@ -276,6 +279,20 @@ export const FileExplorer = memo(
     const searchRef = useRef<ExplorerSearchHandle>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const scrollRef = useRef<HTMLDivElement>(null);
+
+    // 头部按钮行放不放得下,得看这一栏实际多宽 —— 侧栏能拖,还能一分为二。
+    const headerRef = useRef<HTMLDivElement>(null);
+    const [headerWidth, setHeaderWidth] = useState<number | null>(null);
+    useEffect(() => {
+      const el = headerRef.current;
+      if (!el) return;
+      const ro = new ResizeObserver(([e]) => {
+        setHeaderWidth(e.contentRect.width);
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+      // rootPath: 空目录态渲染的是另一棵树,头部这会儿还不存在,拿到根目录才挂得上。
+    }, [rootPath]);
 
     // 产品目录动辄上百个,平时只关心开着 tab 的那几个 —— 这个开关把树收成
     // "只留有打开 tab 的工程 + 它们的父目录"。
@@ -710,6 +727,58 @@ export const FileExplorer = memo(
       }
     };
 
+    // 顺序即优先级:越靠后越先被收进 ⋯ 菜单。窄到只剩一两格时留下的
+    // 应该是每天都点的搜索/筛选/开合,而不是右键菜单里也有的"新建"。
+    const actions: ExplorerHeaderAction[] = [];
+    actions.push({
+      id: "search",
+      icon: Search01Icon,
+      label: "搜索文件",
+      onClick: () => setIsSearchOpen((v) => !v),
+    });
+    if (canFilterOpened) {
+      actions.push({
+        id: "filter",
+        icon: FilterHorizontalIcon,
+        label: onlyOpened ? "显示全部目录" : "只看已打开的工程",
+        active: onlyOpened,
+        onClick: () => setOnlyOpened((v) => !v),
+      });
+    }
+    if (headerActions) actions.push(...headerActions);
+    actions.push({
+      id: "refresh",
+      icon: Refresh01Icon,
+      label: "刷新",
+      iconSize: 12,
+      onClick: () => tree.refresh(rootPath),
+    });
+    // 只有左栏(能设根目录的那个)才需要"上一级",否则设错了就退不回来。
+    if (onSetAsRoot && parentDir(rootPath)) {
+      actions.push({
+        id: "up",
+        icon: ArrowUp01Icon,
+        label: "上一级",
+        tooltip: `上一级 · ${parentDir(rootPath)}`,
+        onClick: () => {
+          const up = parentDir(rootPath);
+          if (up) onSetAsRoot(up);
+        },
+      });
+    }
+    actions.push({
+      id: "new-file",
+      icon: FileAddIcon,
+      label: "新建文件",
+      onClick: () => tree.beginCreate(rootPath, "file"),
+    });
+    actions.push({
+      id: "new-dir",
+      icon: FolderAddIcon,
+      label: "新建文件夹",
+      onClick: () => tree.beginCreate(rootPath, "dir"),
+    });
+
     return (
       <div
         ref={containerRef}
@@ -717,9 +786,14 @@ export const FileExplorer = memo(
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
-        <div className="flex h-8 shrink-0 items-center gap-1 border-b border-border/60 px-2">
+        {/* overflow-hidden 是保险丝:万一算宽度算漏了,按钮宁可被裁掉,
+            也不能溢出到隔壁栏上面 —— 那样看得见却点不着。 */}
+        <div
+          ref={headerRef}
+          className="flex h-8 shrink-0 items-center gap-1 overflow-hidden border-b border-border/60 px-2"
+        >
           <span
-            className="flex flex-1 items-center truncate text-xs font-medium text-foreground/80"
+            className="flex min-w-0 flex-1 items-center truncate text-xs font-medium text-foreground/80"
             title={rootPath}
           >
             <img
@@ -727,87 +801,12 @@ export const FileExplorer = memo(
               alt=""
               height={15}
               width={15}
-              className="mx-1.5"
+              className="mx-1.5 shrink-0"
             />
-            {basename(rootPath)}
+            <span className="truncate">{basename(rootPath)}</span>
           </span>
 
-          {/* 只有左栏(能设根目录的那个)才需要"上一级",否则设错了就退不回来。 */}
-          {onSetAsRoot && parentDir(rootPath) && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="size-6 text-muted-foreground hover:text-foreground"
-              onClick={() => {
-                const up = parentDir(rootPath);
-                if (up) onSetAsRoot(up);
-              }}
-              title={`上一级 · ${parentDir(rootPath)}`}
-              aria-label="Go to parent folder"
-            >
-              <HugeiconsIcon icon={ArrowUp01Icon} size={13} strokeWidth={2} />
-            </Button>
-          )}
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 text-muted-foreground hover:text-foreground"
-            onClick={() => setIsSearchOpen((v) => !v)}
-            title="Search files"
-            aria-label="Search files"
-          >
-            <HugeiconsIcon icon={Search01Icon} size={13} strokeWidth={2} />
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 text-muted-foreground hover:text-foreground"
-            onClick={() => tree.beginCreate(rootPath, "file")}
-            title="New file"
-          >
-            <HugeiconsIcon icon={FileAddIcon} size={13} strokeWidth={2} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 text-muted-foreground hover:text-foreground"
-            onClick={() => tree.beginCreate(rootPath, "dir")}
-            title="New folder"
-          >
-            <HugeiconsIcon icon={FolderAddIcon} size={13} strokeWidth={2} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-6 text-muted-foreground hover:text-foreground"
-            onClick={() => tree.refresh(rootPath)}
-            title="Refresh"
-          >
-            <HugeiconsIcon icon={Refresh01Icon} size={12} strokeWidth={2} />
-          </Button>
-          {canFilterOpened && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={cn(
-                "size-6",
-                onlyOpened
-                  ? "text-emerald-500 hover:text-emerald-400"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={() => setOnlyOpened((v) => !v)}
-              title={onlyOpened ? "显示全部目录" : "只看已打开的工程"}
-            >
-              <HugeiconsIcon
-                icon={FilterHorizontalIcon}
-                size={13}
-                strokeWidth={2}
-              />
-            </Button>
-          )}
-          {headerExtra}
+          <ExplorerHeaderActions actions={actions} width={headerWidth} />
         </div>
 
         <ExplorerSearch
