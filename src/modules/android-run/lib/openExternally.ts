@@ -1,4 +1,6 @@
+import { IS_MAC } from "@/lib/platform";
 import { native } from "@/modules/ai/lib/native";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -43,6 +45,15 @@ end run`;
  */
 export function openExternally(url: string): void {
   const u = shellQuote(url);
+  if (!IS_MAC) {
+    // 复用标签页那套是 AppleScript 写的,只有 macOS 有。别的平台交给系统默认
+    // 浏览器 —— 功能在,只是少了"已开就切过去"。
+    //
+    // 走 opener 插件而不是拼 shell:Windows 那边 shell 可能是 cmd 也可能是
+    // PowerShell,`start` 的写法和引号规则两边都不一样,拼字符串迟早出错。
+    void openUrl(url);
+    return;
+  }
   void native.shellBgSpawn(
     `osascript -e ${shellQuote(FOCUS_TAB)} ${u} 2>/dev/null | grep -q HIT || open ${u}`,
     null,

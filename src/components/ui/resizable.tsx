@@ -1,6 +1,6 @@
 import * as ResizablePrimitive from "react-resizable-panels"
 
-import { getAppZoom } from "@/lib/appZoom"
+import { rectToVisualScale } from "@/lib/appZoom"
 import { cn } from "@/lib/utils"
 
 /**
@@ -18,7 +18,9 @@ import { cn } from "@/lib/utils"
  * 且第二条分隔条比第一条更偏。
  *
  * 修法:给库会去量的那几个元素(group / panel / separator)把
- * `getBoundingClientRect` 包一层,乘上 zoom 换算成视觉坐标,跟 `clientX` 对齐。
+ * `getBoundingClientRect` 包一层,换算成视觉坐标,跟 `clientX` 对齐。倍数由
+ * `rectToVisualScale()` 实测得出 —— Chromium(Windows)本来就返回视觉坐标,
+ * 在那儿乘就是乘重了,反而更拖不动。
  * 只有这三类元素被改,它们的子树(终端、编辑器那些自己量尺寸的)一律不受影响。
  *
  * 顺带说明:比例是缩放无关的,所以库算出来的百分比布局仍然是对的;px 形式的
@@ -31,7 +33,7 @@ function zoomAwareRect(el: HTMLElement | null): void {
   patched.__zoomRectPatched = true
   const original = el.getBoundingClientRect.bind(el)
   el.getBoundingClientRect = () => {
-    const z = getAppZoom()
+    const z = rectToVisualScale()
     const r = original()
     return z === 1
       ? r
