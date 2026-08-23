@@ -143,6 +143,30 @@ fn ensure_utf8_locale(cmd: &mut CommandBuilder) {
     cmd.env("LANG", fallback);
 }
 
+/// 从父进程带进来的"你正跑在某个 agent 会话里"的标记,开终端前一律抹掉。
+///
+/// 这个应用要是从一个 Claude Code / Codex 会话里启动的(开发时的 `pnpm tauri
+/// dev` 就是),这些变量会一路传到应用、再传到应用开出来的每个终端里,于是在
+/// 里面再起一个 Claude 就会被判成"子会话",顶上常驻一条
+/// `Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker`。
+///
+/// 应用里开的终端应该等同于新开一个终端窗口,不该继承这些。
+///
+/// 只列会话标记,不做 `CLAUDE_*` 前缀清扫 —— `ANTHROPIC_API_KEY`、
+/// `CLAUDE_CONFIG_DIR`、`CLAUDE_CODE_MAX_OUTPUT_TOKENS` 这类是用户自己配的,
+/// 本来就该传下去。
+const INHERITED_AGENT_MARKERS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "AI_AGENT",
+];
+
 fn apply_common(
     cmd: &mut CommandBuilder,
     cwd: Option<String>,
@@ -152,6 +176,9 @@ fn apply_common(
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env("TERAX_TERMINAL", "1");
+    for key in INHERITED_AGENT_MARKERS {
+        cmd.env_remove(key);
+    }
     if blocks {
         cmd.env("TERAX_BLOCKS", "1");
     }
@@ -1151,5 +1178,19 @@ mod tests {
                 .and_then(|path| std::env::split_paths(path).next()),
             Some(std::path::PathBuf::from("/app/bin"))
         );
+    }
+
+    /// 从父进程继承来的 agent 会话标记不能漏给终端 —— 漏了的话在应用里再起一个
+    /// Claude 会被当成子会话,顶上常驻一条 transcript-saving-is-off 的警告。
+    #[test]
+    fn common_env_drops_inherited_agent_markers() {
+        let mut command = CommandBuilder::new("shell");
+        for key in super::INHERITED_AGENT_MARKERS {
+            command.env(key, "1");
+        }
+        apply_common(&mut command, None, false, None);
+        for key in super::INHERITED_AGENT_MARKERS {
+            assert_eq!(command.get_env(key), None, "{key} leaked into the pty");
+        }
     }
 }

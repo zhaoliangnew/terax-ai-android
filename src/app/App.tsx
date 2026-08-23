@@ -32,7 +32,7 @@ import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import {
   AgentQuickLaunch,
-  ClaudeSessionActions,
+  AgentSessionActions,
   classifyProjectKind,
   findProjectRoot,
   getTaskLink,
@@ -41,6 +41,7 @@ import {
   ProjectLinksBar,
   type QuickAgentId,
   setTaskLink,
+  supportsSessionActions,
   UrlPromptDialog,
   useAndroidRunStore,
   YunxiaoLinkDialog,
@@ -1808,9 +1809,13 @@ export default function App() {
                             {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                           </span>
                         </span>
-                        {activeTerminalAgent === "claude" && (
-                          <ClaudeSessionActions onRun={runInActiveTerminal} />
-                        )}
+                        {supportsSessionActions(activeTerminalAgent) &&
+                          activeTerminalAgent && (
+                            <AgentSessionActions
+                              agent={activeTerminalAgent}
+                              onRun={runInActiveTerminal}
+                            />
+                          )}
                       </div>
                     )}
                   </div>

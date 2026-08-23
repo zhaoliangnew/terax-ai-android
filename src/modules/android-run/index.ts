@@ -3,9 +3,12 @@ export {
   AgentQuickLaunch,
   type QuickAgentId,
 } from "./AgentQuickLaunch";
+export {
+  AgentSessionActions,
+  supportsSessionActions,
+} from "./AgentSessionActions";
 export { AndroidRunToolbar } from "./AndroidRunToolbar";
 export { ApifoxMenu } from "./ApifoxMenu";
-export { ClaudeSessionActions } from "./ClaudeSessionActions";
 export { CustomLinksMenu } from "./CustomLinksMenu";
 export { DingGroupsMenu } from "./DingGroupsMenu";
 export { KnowledgeBaseMenu } from "./KnowledgeBaseMenu";
