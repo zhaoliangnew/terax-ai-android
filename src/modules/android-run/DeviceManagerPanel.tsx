@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
   Cancel01Icon,
   PlusSignIcon,
@@ -7,6 +8,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { connectDevice, disconnectDevice } from "./lib/adb";
 import { ipSuffix } from "./lib/highlightSerial";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
@@ -315,9 +317,20 @@ export function DeviceManagerPanel() {
                       {d.model}
                     </span>
                   </span>
-                  <span className="w-full min-w-0 truncate text-[12px] text-muted-foreground/70">
+                  <button
+                    type="button"
+                    title={`点击复制 · ${d.sn}`}
+                    onClick={(e) => {
+                      // 卡片本身点一下就选中/连接设备,SN 这行要单独接住点击、
+                      // 别让事件冒上去触发那个。
+                      e.stopPropagation();
+                      void copyToClipboard(d.sn);
+                      toast.success("已复制 SN", { description: d.sn });
+                    }}
+                    className="w-full min-w-0 truncate text-left text-[12px] text-muted-foreground/70 hover:text-foreground hover:underline"
+                  >
                     SN:{d.sn}
-                  </span>
+                  </button>
                   <span className="w-full min-w-0 truncate text-[13px] text-muted-foreground">
                     {d.serial} · Android {d.androidVersion} · API{" "}
                     {d.apiLevel}
