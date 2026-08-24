@@ -33,6 +33,7 @@ import { native } from "@/modules/ai/lib/native";
 import {
   AgentQuickLaunch,
   AgentSessionActions,
+  BranchChip,
   classifyProjectKind,
   findProjectRoot,
   getTaskLink,
@@ -1722,6 +1723,10 @@ export default function App() {
                           <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
                             {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                           </span>
+                          <BranchChip
+                            projectRoot={androidProjectRoot}
+                            className="max-w-40 text-[13px]"
+                          />
                           <AgentStatusDot
                             projectRoot={androidProjectRoot}
                             projectPtyIds={projectPtyIds}
@@ -1778,6 +1783,11 @@ export default function App() {
                           <span className="max-w-full truncate text-[clamp(16px,7cqw,52px)] leading-none font-bold tracking-[0.06em]">
                             {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                           </span>
+                          <BranchChip
+                            projectRoot={androidProjectRoot}
+                            bare
+                            className="max-w-full text-[clamp(10px,3cqw,22px)] tracking-[0.2em]"
+                          />
                         </div>
                       )}
                     </div>
@@ -1814,6 +1824,10 @@ export default function App() {
                           <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
                             {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
                           </span>
+                          <BranchChip
+                            projectRoot={androidProjectRoot}
+                            className="max-w-40 text-[13px]"
+                          />
                         </span>
                         {supportsSessionActions(activeTerminalAgent) &&
                           activeTerminalAgent && (

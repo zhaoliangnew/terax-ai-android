@@ -16,6 +16,7 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
+import { BranchChip } from "./BranchChip";
 import { adbCmd, installCommand } from "./lib/adb";
 import { useLogcatStore } from "./logcatStore";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
@@ -146,6 +147,12 @@ export function AndroidRunToolbar({ compact }: Props) {
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {/* 分支放在"运行"左边:按下去就要装到设备上了,这是最后一眼确认 */}
+      <BranchChip
+        projectRoot={projectRoot}
+        className="max-w-32 text-[12.5px]"
+      />
 
       <Button
         size="sm"
