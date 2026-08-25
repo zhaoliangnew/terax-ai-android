@@ -201,7 +201,7 @@ export function DeviceManagerPanel() {
             {/* biome-ignore lint/a11y/useSemanticElements: contains its own inputs/button, can't be a <button> */}
             <div
               onKeyDown={(e) => e.stopPropagation()}
-              className="col-span-2 flex items-center gap-3 rounded-xl border border-dashed border-border px-3.5 py-2"
+              className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed border-border px-3.5 py-2"
             >
               <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
                 <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
@@ -229,7 +229,7 @@ export function DeviceManagerPanel() {
                 IP 或 IP:端口,默认端口 5555
               </span>
               {connectError && (
-                <span className="shrink-0 text-[10px] text-red-500">
+                <span className="basis-full whitespace-pre-wrap break-all text-[10px] leading-4 text-red-500">
                   {connectError}
                 </span>
               )}
