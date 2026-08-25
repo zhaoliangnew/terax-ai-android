@@ -88,7 +88,10 @@ fn spawn_log_drain<R: Read + Send + 'static>(r: R, tag: &'static str) {
         use std::io::BufRead;
         let reader = std::io::BufReader::new(r);
         for line in reader.lines().map_while(Result::ok) {
-            log::debug!("[{tag}] {line}");
+            // info, not debug: release builds log at Info — the server's output
+            // is exactly what we need from a user's machine when a mirror
+            // misbehaves, and it's only a handful of lines per session.
+            log::info!("[{tag}] {line}");
         }
     });
 }
