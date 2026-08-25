@@ -39,7 +39,6 @@ export function ProductLinkChip({
   useEffect(() => {
     setResolved(resolveProjectLink(dir));
   }, [dir, linkVersion]);
-  const orgId = getCodeupOrgId();
 
   return (
     <button
@@ -54,6 +53,10 @@ export function ProductLinkChip({
           onLink(dir);
           return;
         }
+        // 组织 ID 点击时现读,不在渲染期读:localStorage 是副作用,React
+        // Compiler 会把渲染期读到的值记忆化 —— 组件挂载后才去设置里配的
+        // 组织 ID 就永远读不到,明明配了还提示没配。
+        const orgId = getCodeupOrgId();
         if (!orgId) {
           toast.error("请先在设置里配置云效组织 ID");
           return;
