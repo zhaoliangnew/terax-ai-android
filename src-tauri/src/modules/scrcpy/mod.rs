@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{mpsc, Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use tauri::ipc::{Channel, Response};
@@ -38,7 +38,14 @@ struct Session {
     display_id: u32,
     local_port: u16,
     shell: Arc<Mutex<Child>>,
-    control: Arc<Mutex<TcpStream>>,
+    /// Control messages go through a queue to a dedicated writer thread.
+    /// Touch/key commands are sync (= run on the main thread), so they must
+    /// never write the socket directly: a stalled device would block the write
+    /// and freeze the whole UI. The queue keeps them non-blocking while still
+    /// preserving event order (down/move/up must not be reordered).
+    control_tx: mpsc::Sender<Vec<u8>>,
+    /// Kept only to shutdown() the socket at teardown.
+    control: Arc<TcpStream>,
     stop: Arc<AtomicBool>,
     /// Current video frame size, kept in sync with session packets.
     size: Arc<RwLock<(u16, u16)>>,
@@ -65,8 +72,25 @@ enum VideoEvent {
 
 fn adb(bin: &str, serial: &str) -> Command {
     let mut c = Command::new(bin);
+    // Without CREATE_NO_WINDOW every adb call on Windows flashes a console
+    // window — starting a mirror runs 4-5 adb commands, so 4-5 popups.
+    crate::modules::proc::hide_console(&mut c);
     c.arg("-s").arg(serial);
     c
+}
+
+/// Drain a child's piped output, forwarding lines to the log. The server's
+/// stdout/stderr are piped but were never read: once the pipe buffer fills
+/// (tiny on Windows), the server blocks on a log write, stops reading the
+/// control socket, and the whole mirror — then the UI — freezes.
+fn spawn_log_drain<R: Read + Send + 'static>(r: R, tag: &'static str) {
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        let reader = std::io::BufReader::new(r);
+        for line in reader.lines().map_while(Result::ok) {
+            log::debug!("[{tag}] {line}");
+        }
+    });
 }
 
 fn read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Result<()> {
@@ -169,13 +193,19 @@ pub async fn scrcpy_start(
     if display != 0 {
         server_args.push(format!("display_id={display}"));
     }
-    let shell = adb(&adb_path, &serial)
+    let mut shell = adb(&adb_path, &serial)
         .arg("shell")
         .args(&server_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| format!("spawn server failed: {e}"))?;
+    if let Some(out) = shell.stdout.take() {
+        spawn_log_drain(out, "scrcpy-server");
+    }
+    if let Some(err) = shell.stderr.take() {
+        spawn_log_drain(err, "scrcpy-server");
+    }
 
     // Connect video then control (order fixed by server accept()).
     // The forward-tunnel dummy byte is sent only on the FIRST (video) socket,
@@ -199,13 +229,34 @@ pub async fn scrcpy_start(
     let stop = Arc::new(AtomicBool::new(false));
     let size = Arc::new(RwLock::new((0u16, 0u16)));
 
+    // Control writer thread: owns the write side, drains the queue in order.
+    // Ends when the sender is dropped (session removed) or the socket dies.
+    let control = Arc::new(control);
+    let (control_tx, control_rx) = mpsc::channel::<Vec<u8>>();
+    {
+        let mut w = control
+            .try_clone()
+            .map_err(|e| format!("clone control socket: {e}"))?;
+        std::thread::Builder::new()
+            .name(format!("scrcpy-control-{id}"))
+            .spawn(move || {
+                while let Ok(msg) = control_rx.recv() {
+                    if w.write_all(&msg).is_err() {
+                        break;
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+
     let session = Session {
         serial: serial.clone(),
         adb_path: adb_path.clone(),
         display_id: display,
         local_port,
         shell: Arc::new(Mutex::new(shell)),
-        control: Arc::new(Mutex::new(control)),
+        control_tx,
+        control,
         stop: stop.clone(),
         size: size.clone(),
     };
@@ -410,26 +461,26 @@ pub fn scrcpy_touch(
     };
     msg[22..24].copy_from_slice(&p.to_be_bytes());
     // action_button + buttons = 0 for finger
-    let control = session.control.clone();
-    drop(sessions);
-    let mut guard = control.lock().unwrap();
-    guard.write_all(&msg).map_err(|e| e.to_string())
+    session
+        .control_tx
+        .send(msg.to_vec())
+        .map_err(|_| "control channel closed".to_string())
 }
 
 #[tauri::command]
 pub fn scrcpy_key(state: tauri::State<'_, ScrcpyState>, id: u32, keycode: i32) -> Result<(), String> {
     let sessions = state.sessions.read().unwrap();
     let session = sessions.get(&id).ok_or("session not found")?;
-    let control = session.control.clone();
-    drop(sessions);
-    let mut guard = control.lock().unwrap();
     for action in [0u8, 1u8] {
         let mut msg = [0u8; 14];
         msg[0] = 0x00; // INJECT_KEYCODE
         msg[1] = action;
         msg[2..6].copy_from_slice(&keycode.to_be_bytes());
         // repeat + metaState = 0
-        guard.write_all(&msg).map_err(|e| e.to_string())?;
+        session
+            .control_tx
+            .send(msg.to_vec())
+            .map_err(|_| "control channel closed".to_string())?;
     }
     Ok(())
 }
@@ -449,16 +500,16 @@ pub fn scrcpy_key_event(
 ) -> Result<(), String> {
     let sessions = state.sessions.read().unwrap();
     let session = sessions.get(&id).ok_or("session not found")?;
-    let control = session.control.clone();
-    drop(sessions);
-    let mut guard = control.lock().unwrap();
     let mut msg = [0u8; 14];
     msg[0] = 0x00; // INJECT_KEYCODE
     msg[1] = action;
     msg[2..6].copy_from_slice(&keycode.to_be_bytes());
     // repeat = 0 (bytes 6..10)
     msg[10..14].copy_from_slice(&meta_state.to_be_bytes());
-    guard.write_all(&msg).map_err(|e| e.to_string())
+    session
+        .control_tx
+        .send(msg.to_vec())
+        .map_err(|_| "control channel closed".to_string())
 }
 
 /// Enumerate the device's *actually in-use* display ids (0 = main). Some
@@ -469,8 +520,11 @@ pub fn scrcpy_key_event(
 /// display actually has content drawn to it. Filter on that instead of just
 /// presence of a display id, or every single-screen device with a reserved
 /// HDMI-out would show up as "dual screen" with a permanently black mirror.
+/// Async on purpose: sync commands run on the main thread, and this one shells
+/// out to adb (which can take seconds when its daemon is cold) — blocking there
+/// freezes the whole window.
 #[tauri::command]
-pub fn scrcpy_list_displays(serial: String, adb_path: String) -> Result<Vec<u32>, String> {
+pub async fn scrcpy_list_displays(serial: String, adb_path: String) -> Result<Vec<u32>, String> {
     let out = adb(&adb_path, &serial)
         .args(["shell", "dumpsys", "display"])
         .output()
@@ -480,7 +534,7 @@ pub fn scrcpy_list_displays(serial: String, adb_path: String) -> Result<Vec<u32>
     let mut ids: Vec<u32> = Vec::new();
     let mut current_id: Option<u32> = None;
     let mut current_has_content = false;
-    let mut flush = |id: Option<u32>, has_content: bool, ids: &mut Vec<u32>| {
+    let flush = |id: Option<u32>, has_content: bool, ids: &mut Vec<u32>| {
         if let Some(id) = id {
             if has_content && !ids.contains(&id) {
                 ids.push(id);
@@ -508,9 +562,7 @@ pub fn scrcpy_list_displays(serial: String, adb_path: String) -> Result<Vec<u32>
 
 fn teardown(session: &Session) {
     session.stop.store(true, Ordering::Relaxed);
-    if let Ok(c) = session.control.lock() {
-        let _ = c.shutdown(std::net::Shutdown::Both);
-    }
+    let _ = session.control.shutdown(std::net::Shutdown::Both);
     // Kill the server immediately so the device's video encoder is released
     // before any new session on the same device starts (avoids encoder
     // contention that leaves a second mirror stuck "connecting").
@@ -527,8 +579,10 @@ fn teardown(session: &Session) {
         .output();
 }
 
+/// Async for the same reason as `scrcpy_list_displays`: teardown waits on the
+/// server process and runs `adb forward --remove`.
 #[tauri::command]
-pub fn scrcpy_stop(state: tauri::State<'_, ScrcpyState>, id: u32) -> Result<(), String> {
+pub async fn scrcpy_stop(state: tauri::State<'_, ScrcpyState>, id: u32) -> Result<(), String> {
     let session = state.sessions.write().unwrap().remove(&id);
     if let Some(session) = session {
         teardown(&session);
