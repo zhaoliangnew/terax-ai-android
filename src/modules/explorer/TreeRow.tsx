@@ -59,7 +59,7 @@ export type EntryRowProps = {
   isOpenedProject?: boolean;
   /** 工程根 -> 该工程下所有终端 tab 的 pty id,驱动 Claude Code 状态灯。 */
   projectPtyIds?: Record<string, number[]>;
-  /** 这个目录本身绑了云效项目(不含继承),行尾挂个云图标。 */
+  /** 这个目录本身绑了云效项目,行尾挂个云图标(不含从父目录继承的)。 */
   yunxiaoLinked?: boolean;
 };
 
@@ -204,7 +204,7 @@ function EntryRowImpl(props: EntryRowProps) {
       {asProject && (
         <WorktreeCountBadge projectRoot={path} className="shrink-0" />
       )}
-      {/* 绑过云效项目的目录挂个云 —— 否则绑没绑完全看不出来。 */}
+      {/* 绑过云效项目的产品目录挂个云,否则绑没绑完全看不出来 */}
       {yunxiaoLinked && (
         <HugeiconsIcon
           icon={CloudIcon}

@@ -1,9 +1,5 @@
 import { cn } from "@/lib/utils";
-import {
-  CheckListIcon,
-  FolderGitTwoIcon,
-  FolderTreeIcon,
-} from "@hugeicons/core-free-icons";
+import { FolderGitTwoIcon, FolderTreeIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import type { SidebarViewId } from "./types";
 
@@ -31,7 +27,6 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
       icon: FolderGitTwoIcon,
       badge: changedCount,
     },
-    { id: "yunxiao-projects", label: "云效项目", icon: CheckListIcon },
   ];
 
   return (

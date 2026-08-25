@@ -62,12 +62,17 @@ export function setRootGroupPath(input: string): void {
   localStorage.setItem(ROOT_GROUP_KEY, normalizeRootGroupInput(input));
 }
 
-async function call(
-  method: "GET" | "POST",
+/**
+ * curl 调用的底层实现,顺带能要回 x-total 这个分页总数响应头
+ * (需求/任务列表的数量角标要用)。大多数调用方不关心总数,
+ * 用下面的 call() 薄封装就够了。
+ */
+async function curlCall(
+  method: "GET" | "POST" | "PUT",
   path: string,
   token: string,
   body?: unknown,
-): Promise<unknown> {
+): Promise<{ data: unknown; total: number | null }> {
   const parts = [
     "curl",
     "-sS",
@@ -79,7 +84,7 @@ async function call(
     "-H",
     `x-yunxiao-token: ${token}`,
     "-w",
-    "\n__HTTP_%{http_code}__",
+    "\n__HTTP_%{http_code}__\n__TOTAL_%header{x-total}__",
   ];
   if (body !== undefined) {
     parts.push("--data", JSON.stringify(body));
@@ -95,9 +100,14 @@ async function call(
   if (out.exit_code !== 0) {
     throw new Error(out.stderr || "云效接口请求失败");
   }
-  const m = /\n__HTTP_(\d+)__\s*$/.exec(out.stdout);
+  const totalMatch = /\n__TOTAL_(\d*)__\s*$/.exec(out.stdout);
+  const total = totalMatch?.[1] ? Number(totalMatch[1]) : null;
+  const withoutTotal = totalMatch
+    ? out.stdout.slice(0, totalMatch.index)
+    : out.stdout;
+  const m = /\n__HTTP_(\d+)__\s*$/.exec(withoutTotal);
   const status = m ? Number(m[1]) : 0;
-  const raw = m ? out.stdout.slice(0, m.index) : out.stdout;
+  const raw = m ? withoutTotal.slice(0, m.index) : withoutTotal;
   let parsed: unknown = null;
   try {
     parsed = raw.trim() ? JSON.parse(raw) : null;
@@ -114,7 +124,16 @@ async function call(
       `HTTP ${status}`;
     throw new Error(`云效接口报错(${status}):${String(msg)}`);
   }
-  return parsed;
+  return { data: parsed, total };
+}
+
+async function call(
+  method: "GET" | "POST" | "PUT",
+  path: string,
+  token: string,
+  body?: unknown,
+): Promise<unknown> {
+  return (await curlCall(method, path, token, body)).data;
 }
 
 export type CodeupRepo = {
@@ -453,15 +472,13 @@ export async function getRepositoryInfo(
   }
 }
 
-/**
- * 组织成员 id/userId → 名字 的映射表(一次拉 200 个)。
- * 需要令牌带"组织信息"读权限,权限不够会抛错 —— 调用方接住给用户提示,
- * 不要在这里悄悄吞掉,不然创建人一直显示不出来都不知道为啥。
- */
-export async function listMemberNames(
+/** 组织成员。userId 才是工作项 assignedTo.id / creator.id 里用的那个值。 */
+export type YunxiaoMember = { userId: string; name: string };
+
+async function fetchMembers(
   orgId: string,
   token: string,
-): Promise<Record<string, string>> {
+): Promise<Record<string, unknown>[]> {
   const res = await call(
     "POST",
     `/oapi/v1/platform/organizations/${orgId}/members:search`,
@@ -471,14 +488,45 @@ export async function listMemberNames(
   const arr = Array.isArray(res)
     ? res
     : ((res as { result?: unknown[] } | null)?.result ?? []);
+  return arr as Record<string, unknown>[];
+}
+
+/**
+ * 组织成员 id/userId → 名字 的映射表(一次拉 200 个),只用来"按 ID 查名字"。
+ * 两种 ID 都塞进去是因为不同接口给的 ID 不一样(代码库给 creatorUid,
+ * 对应 userId)。要拿来做下拉选项请用 listMembers,不然会一人出现两次。
+ * 需要令牌带"组织信息"读权限,权限不够会抛错 —— 调用方接住给用户提示,
+ * 不要在这里悄悄吞掉,不然创建人一直显示不出来都不知道为啥。
+ */
+export async function listMemberNames(
+  orgId: string,
+  token: string,
+): Promise<Record<string, string>> {
   const map: Record<string, string> = {};
-  for (const m of arr as Record<string, unknown>[]) {
+  for (const m of await fetchMembers(orgId, token)) {
     const name = String(m.name ?? "");
     if (!name) continue;
     if (m.id != null) map[String(m.id)] = name;
     if (m.userId != null) map[String(m.userId)] = name;
   }
   return map;
+}
+
+/** 成员列表(每人一条,按名字排序),给"改负责人"的选择器用。 */
+export async function listMembers(
+  orgId: string,
+  token: string,
+): Promise<YunxiaoMember[]> {
+  const seen = new Set<string>();
+  const out: YunxiaoMember[] = [];
+  for (const m of await fetchMembers(orgId, token)) {
+    const name = String(m.name ?? "");
+    const userId = m.userId != null ? String(m.userId) : "";
+    if (!name || !userId || seen.has(userId)) continue;
+    seen.add(userId);
+    out.push({ userId, name });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
 }
 
 /** 按关键字搜代码组(ListNamespaces + search,取前 100 条)。 */
@@ -552,24 +600,54 @@ export type YunxiaoProject = {
 };
 
 /**
- * 拉取云效项目管理(Projex)的项目列表。一次拉 200 条按名称排序,
- * 搜索在前端本地过滤 —— 免得跟 conditions 那套 json 串格式较劲。
+ * 拉取云效项目管理(Projex)的项目列表,按名称排序。
+ *
+ * 组织里项目有好几百个,不做全量拉取(翻页翻到底又慢又没意义):
+ * 不带关键字时只取前 perPage 条当默认列表,带关键字时交给服务端做
+ * 模糊匹配。关键字过滤要用 extraConditions 那套 JSON 串,顶层的
+ * name/search/keyword 参数服务端根本不认(实测会被忽略,返回全量)。
  */
 export async function listProjects(
   orgId: string,
   token: string,
+  search = "",
+  perPage = 30,
 ): Promise<YunxiaoProject[]> {
+  const q = search.trim();
+  const body: Record<string, unknown> = {
+    page: 1,
+    perPage,
+    orderBy: "name",
+    sort: "asc",
+  };
+  if (q) {
+    body.extraConditions = JSON.stringify({
+      conditionGroups: [
+        [
+          {
+            className: "string",
+            fieldIdentifier: "name",
+            format: "input",
+            operator: "CONTAINS",
+            value: [q],
+          },
+        ],
+      ],
+    });
+  }
   const res = await call(
     "POST",
     `/oapi/v1/projex/organizations/${orgId}/projects:search`,
     token,
-    { page: 1, perPage: 200, orderBy: "name", sort: "asc" },
+    body,
   );
-  const arr = Array.isArray(res)
-    ? res
-    : ((res as { result?: unknown[] } | null)?.result ?? []);
-  return (arr as Record<string, unknown>[])
-    .filter((r) => typeof r.name === "string" && String(r.name).trim() !== "")
+  const arr = (
+    Array.isArray(res)
+      ? res
+      : ((res as { result?: unknown[] } | null)?.result ?? [])
+  ) as Record<string, unknown>[];
+  return arr
+    .filter((r) => typeof r.name === "string" && r.name.trim() !== "")
     .map((r) => ({
       id: String(r.id ?? ""),
       name: String(r.name),
@@ -578,6 +656,241 @@ export async function listProjects(
         (r.status as Record<string, unknown> | null)?.name ?? "",
       ),
     }));
+}
+
+/** 工作项类别:需求/任务,云效那边叫 categoryId。 */
+export type WorkitemCategory = "Req" | "Task";
+
+export type Workitem = {
+  id: string;
+  /** 显示的标题字段叫 subject,不是 name。 */
+  subject: string;
+  /** 需求 xxx、任务 xxx 那个编号。 */
+  serialNumber: string;
+  statusName: string;
+  /** 改状态时 UpdateWorkitem 要传这个 id,不是显示名。 */
+  statusId: string;
+  assignedTo: string;
+  assignedToId: string;
+  creator: string;
+  creatorId: string;
+  gmtCreate: string;
+  /** 下面四个是自定义字段(customFieldValues),按 fieldName 匹配取的:
+   * "计划开始时间"/"计划完成时间"/"预计工时"/"实际工时"。项目模板不统一,
+   * 没配这几个字段的项目就是空字符串,对应的 xxxFieldId 也是空。
+   * fieldId 是每个项目自己的编号(不是固定值),回写要用它当 key。 */
+  startDate: string;
+  startDateFieldId: string;
+  dueDate: string;
+  dueDateFieldId: string;
+  estimatedHours: string;
+  estimatedHoursFieldId: string;
+  actualHours: string;
+  actualHoursFieldId: string;
+};
+
+function parseWorkitemUserName(u: unknown): string {
+  if (u && typeof u === "object") {
+    const o = u as Record<string, unknown>;
+    if (typeof o.name === "string") return o.name;
+  }
+  return "";
+}
+
+function parseWorkitemUserId(u: unknown): string {
+  if (u && typeof u === "object") {
+    const o = u as Record<string, unknown>;
+    if (o.id != null) return String(o.id);
+  }
+  return "";
+}
+
+/** 自定义字段按中文字段名找,取第一个值的 displayValue + 这个字段的 fieldId。 */
+function customField(
+  customFieldValues: unknown,
+  fieldName: string,
+): { display: string; fieldId: string } {
+  if (!Array.isArray(customFieldValues)) return { display: "", fieldId: "" };
+  for (const f of customFieldValues as Record<string, unknown>[]) {
+    if (f.fieldName !== fieldName) continue;
+    const values = f.values;
+    const display =
+      Array.isArray(values) && values[0]
+        ? String(
+            (values[0] as Record<string, unknown>).displayValue ??
+              (values[0] as Record<string, unknown>).identifier ??
+              "",
+          )
+        : "";
+    return { display, fieldId: String(f.fieldId ?? "") };
+  }
+  return { display: "", fieldId: "" };
+}
+
+function parseWorkitem(r: Record<string, unknown>): Workitem | null {
+  if (r.id == null) return null;
+  const status = r.status as Record<string, unknown> | null;
+  const cfv = r.customFieldValues;
+  const start = customField(cfv, "计划开始时间");
+  const due = customField(cfv, "计划完成时间");
+  // 任务有可直接填的"预计工时/实际工时";需求没有,只有子项累加出来的
+  // "…汇总"(fieldFormat=auto)。汇总只读,所以取汇总时不带 fieldId,
+  // 上层就自动不给编辑了。
+  const est = customField(cfv, "预计工时");
+  const estSum = est.display ? est : customField(cfv, "预计工时汇总");
+  const act = customField(cfv, "实际工时");
+  const actSum = act.display ? act : customField(cfv, "实际工时汇总");
+  return {
+    id: String(r.id),
+    subject: String(r.subject ?? ""),
+    serialNumber: String(r.serialNumber ?? ""),
+    statusName: String(status?.displayName ?? status?.name ?? ""),
+    statusId: status?.id != null ? String(status.id) : "",
+    assignedTo: parseWorkitemUserName(r.assignedTo),
+    assignedToId: parseWorkitemUserId(r.assignedTo),
+    creator: parseWorkitemUserName(r.creator),
+    creatorId: parseWorkitemUserId(r.creator),
+    gmtCreate: String(r.gmtCreate ?? ""),
+    startDate: start.display,
+    startDateFieldId: start.fieldId,
+    dueDate: due.display,
+    dueDateFieldId: due.fieldId,
+    estimatedHours: estSum.display,
+    estimatedHoursFieldId: est.fieldId,
+    actualHours: actSum.display,
+    actualHoursFieldId: act.fieldId,
+  };
+}
+
+/**
+ * 查某个 Projex 项目下的需求/任务列表(SearchWorkitems)。
+ * total 来自响应头 x-total,用来显示 tab 上的数量角标。
+ */
+export async function searchWorkitems(
+  orgId: string,
+  token: string,
+  spaceId: string,
+  category: WorkitemCategory,
+  page = 1,
+  perPage = 100,
+  /** 只看这个人负责的(传云效用户 ID,也就是 assignedTo.id)。 */
+  assignedToUserId?: string,
+): Promise<{ items: Workitem[]; total: number }> {
+  const body: Record<string, unknown> = {
+    spaceId,
+    category,
+    page,
+    perPage,
+    orderBy: "gmtCreate",
+    sort: "desc",
+  };
+  if (assignedToUserId) {
+    body.conditions = JSON.stringify({
+      conditionGroups: [
+        [
+          {
+            className: "user",
+            fieldIdentifier: "assignedTo",
+            format: "list",
+            operator: "CONTAINS",
+            value: [assignedToUserId],
+          },
+        ],
+      ],
+    });
+  }
+  const { data, total } = await curlCall(
+    "POST",
+    `/oapi/v1/projex/organizations/${orgId}/workitems:search`,
+    token,
+    body,
+  );
+  const arr = Array.isArray(data)
+    ? data
+    : ((data as { result?: unknown[] } | null)?.result ?? []);
+  const items = (arr as Record<string, unknown>[])
+    .map(parseWorkitem)
+    .filter((w): w is Workitem => w !== null);
+  return { items, total: total ?? items.length };
+}
+
+/**
+ * 改工作项字段。请求体是**平铺**的 `{字段: 值}`,自定义字段直接用它的
+ * fieldId 当 key 放在顶层 —— 不要套 customFieldValues,那个容器只在
+ * 返回里有,请求里套一层是不认的。内置字段的 key 就是 status /
+ * assignedTo / subject / priority 这些。
+ *
+ * 需要令牌带「项目协作 → 工作项 = 读写」权限,只有只读会 403。
+ */
+export async function updateWorkitem(
+  orgId: string,
+  token: string,
+  workitemId: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  await call(
+    "PUT",
+    `/oapi/v1/projex/organizations/${orgId}/workitems/${workitemId}`,
+    token,
+    patch,
+  );
+}
+
+const VIEWS_KEY = "yunxiao.workitemViews";
+
+/** 自己攒的云效"工作项视图"快捷入口:名字 + 网页地址。 */
+export type WorkitemView = { name: string; url: string };
+
+/**
+ * 云效没有开放跨项目查工作项的接口(spaceId 必填,组织下 200+ 个项目
+ * 逐个查不现实),所以这些视图只能跳网页,做不到在本地重建。
+ * 视图名字和地址都由用户自己加,不写死。
+ */
+export function getWorkitemViews(): WorkitemView[] {
+  try {
+    const raw = localStorage.getItem(VIEWS_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter(
+        (v): v is WorkitemView =>
+          !!v && typeof v.name === "string" && typeof v.url === "string",
+      )
+      .map((v) => ({ name: v.name.trim(), url: v.url.trim() }))
+      .filter((v) => v.name && v.url);
+  } catch {
+    return [];
+  }
+}
+
+export function setWorkitemViews(views: WorkitemView[]): void {
+  localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+}
+
+export type YunxiaoSelf = { id: string; name: string };
+
+/**
+ * 令牌属于谁。返回的 id 就是工作项里 assignedTo.id / creator.id 那个值,
+ * 所以判断"这条是不是我的"直接比 id,不用比姓名(组织里有重名的人)。
+ */
+export async function getSelf(token: string): Promise<YunxiaoSelf | null> {
+  try {
+    const res = await call("GET", "/oapi/v1/platform/user", token);
+    const o = res as Record<string, unknown> | null;
+    if (!o?.id) return null;
+    return { id: String(o.id), name: String(o.name ?? "") };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 工作项在网页端的地址。实测抓的真实地址是
+ * `.../project/{projectId}/task#openWorkitemIdentifier={id}`,
+ * 不带 orgId 查询参数——之前猜的 `/workitem/{id}?orgId=` 路径是错的。
+ */
+export function workitemUrl(projectId: string, workitemId: string): string {
+  return `https://devops.aliyun.com/projex/project/${projectId}/task#openWorkitemIdentifier=${workitemId}`;
 }
 
 /** 云效项目在网页端的地址。 */

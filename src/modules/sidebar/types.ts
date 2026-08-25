@@ -1,1 +1,1 @@
-export type SidebarViewId = "explorer" | "source-control" | "yunxiao-projects";
+export type SidebarViewId = "explorer" | "source-control";

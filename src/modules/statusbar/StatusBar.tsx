@@ -15,13 +15,14 @@ import {
   DingGroupsMenu,
   JournalButton,
   KnowledgeBaseMenu,
-  MyYunxiaoButton,
   WeChatButton,
+  YunxiaoProjectsButton,
 } from "@/modules/android-run";
 import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { Clock } from "./Clock";
 import { DiagnosticsBadge } from "./DiagnosticsBadge";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
 
@@ -51,7 +52,7 @@ export function StatusBar({
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <KnowledgeBaseMenu />
-        <MyYunxiaoButton />
+        <YunxiaoProjectsButton />
         <JournalButton />
         <DingGroupsMenu />
         <WeChatButton />
@@ -84,6 +85,7 @@ export function StatusBar({
         ) : (
           <AiOpenButton onOpen={onOpenAi} />
         )}
+        <Clock />
       </div>
     </footer>
   );

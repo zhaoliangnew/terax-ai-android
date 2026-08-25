@@ -8,13 +8,11 @@ import {
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 import {
-  CloneRepoDialog,
   CopyProjectDialog,
   getProjectLink,
   getTaskLink,
-  openExternally,
+  listProjectLinkDirs,
   type ProjectKind,
-  resolveProjectLink,
 } from "@/modules/android-run";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
@@ -97,10 +95,14 @@ type Props = {
   /** 额外塞进头部按钮行的动作(比如产品文件区的开合开关)。排在自带按钮后面,
    * 也就是宽度不够时比它们更早被收进 ⋯ 菜单。 */
   headerActions?: ExplorerHeaderAction[];
-  /** 给这个目录绑定云效项目(云效项目对应产品线目录,不是单个仓库)。 */
-  onLinkYunxiao?: (path: string) => void;
   /** 给这个工程填"当前云效需求"地址(跟着仓库走,不继承)。 */
   onLinkYunxiaoTask?: (path: string) => void;
+  /** 给这个产品目录绑云效项目(底下的工程继承)。 */
+  onLinkYunxiaoProject?: (path: string) => void;
+  /** 解除这个目录的云效项目绑定。 */
+  onUnlinkYunxiaoProject?: (path: string) => void;
+  /** 云效项目绑定变更信号,变了就重算哪些目录该挂云图标。 */
+  linkVersion?: number;
   pathDropTarget?: TerminalPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
 };
@@ -261,8 +263,10 @@ export const FileExplorer = memo(
       onAttachToAgent,
       onSetAsRoot,
       headerActions,
-      onLinkYunxiao,
       onLinkYunxiaoTask,
+      onLinkYunxiaoProject,
+      onUnlinkYunxiaoProject,
+      linkVersion = 0,
       pathDropTarget,
       gitStatus,
     },
@@ -305,6 +309,14 @@ export const FileExplorer = memo(
     useEffect(() => {
       localStorage.setItem("terax.explorer.onlyOpened", onlyOpened ? "1" : "0");
     }, [onlyOpened]);
+
+    // 绑过云效项目的目录,行尾挂云图标。绑定存在 localStorage 里,
+    // 必须显式挂 linkVersion 才会在绑完之后重算。
+    // biome-ignore lint/correctness/useExhaustiveDependencies: linkVersion 是绑定变更信号
+    const linkedDirs = useMemo(
+      () => new Set(listProjectLinkDirs()),
+      [linkVersion],
+    );
 
     const keepPaths = useMemo(() => {
       if (!onlyOpened || !canFilterOpened || !rootPath) return null;
@@ -410,8 +422,6 @@ export const FileExplorer = memo(
     const [copyProjectSource, setCopyProjectSource] = useState<string | null>(
       null,
     );
-    // 右键"从云效克隆仓库…"选中的目标目录
-    const [cloneTargetDir, setCloneTargetDir] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState(false);
     // Bumped on every right-click so the menu content remounts and the popper
     // re-anchors to the new cursor (floating-ui won't reposition on an anchor
@@ -705,13 +715,13 @@ export const FileExplorer = memo(
               projectKind={
                 row.isDir ? (projectDirs.get(row.path) ?? null) : null
               }
-              yunxiaoLinked={row.isDir && getProjectLink(row.path) !== null}
               onOpenProject={onOpenProject}
               isActiveProject={
                 !!activeProjectPath && row.path === activeProjectPath
               }
               isOpenedProject={!!openedProjectPaths?.has(row.path)}
               projectPtyIds={projectPtyIds}
+              yunxiaoLinked={row.isDir && linkedDirs.has(row.path)}
             />
           );
         }
@@ -964,19 +974,6 @@ export const FileExplorer = memo(
                       新开终端
                     </ContextMenuItem>
                   )}
-                  {/* 绑定在祖先目录上也算数(继承),所以工程行上也能直接打开
-                      产品线的云效项目 —— 否则绑完了没地方点开。 */}
-                  {menuTarget.isDir && resolveProjectLink(menuTarget.path) && (
-                    <ContextMenuItem
-                      className={COMPACT_ITEM}
-                      onSelect={() => {
-                        const link = resolveProjectLink(menuTarget.path);
-                        if (link) openExternally(link.url);
-                      }}
-                    >
-                      打开云效项目
-                    </ContextMenuItem>
-                  )}
                   {/* 常见流程:从标准版工程复制一份到客户产品目录 */}
                   {menuTarget.isDir && projectDirs.has(menuTarget.path) && (
                     <ContextMenuItem
@@ -986,18 +983,31 @@ export const FileExplorer = memo(
                       复制到项目目录…
                     </ContextMenuItem>
                   )}
-                  {/* 非工程目录(产品目录)上:从云效搜索仓库直接克隆进来 */}
-                  {menuTarget.isDir && !projectDirs.has(menuTarget.path) && (
-                    <ContextMenuItem
-                      className={COMPACT_ITEM}
-                      onSelect={() => setCloneTargetDir(menuTarget.path)}
-                    >
-                      从云效克隆仓库…
-                    </ContextMenuItem>
-                  )}
-                  {/* 工程目录挂"当前需求"(跟着这个仓库走),产品线目录才挂
-                      "云效项目"(底下所有工程继承)—— 两个层级两回事,别混在
-                      一个菜单项里。 */}
+                  {/* 产品目录绑云效项目,底下的工程继承 */}
+                  {menuTarget.isDir &&
+                    !projectDirs.has(menuTarget.path) &&
+                    onLinkYunxiaoProject && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => onLinkYunxiaoProject(menuTarget.path)}
+                      >
+                        {getProjectLink(menuTarget.path)
+                          ? "修改云效项目…"
+                          : "关联云效项目…"}
+                      </ContextMenuItem>
+                    )}
+                  {menuTarget.isDir &&
+                    !projectDirs.has(menuTarget.path) &&
+                    onUnlinkYunxiaoProject &&
+                    getProjectLink(menuTarget.path) && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => onUnlinkYunxiaoProject(menuTarget.path)}
+                      >
+                        解除云效项目关联
+                      </ContextMenuItem>
+                    )}
+                  {/* 工程目录挂"当前需求",跟着这个仓库走 */}
                   {menuTarget.isDir &&
                     projectDirs.has(menuTarget.path) &&
                     onLinkYunxiaoTask && (
@@ -1008,19 +1018,6 @@ export const FileExplorer = memo(
                         {getTaskLink(menuTarget.path)
                           ? "修改当前云效需求…"
                           : "关联当前云效需求…"}
-                      </ContextMenuItem>
-                    )}
-                  {menuTarget.isDir &&
-                    !projectDirs.has(menuTarget.path) &&
-                    onLinkYunxiao && (
-                      <ContextMenuItem
-                        className={COMPACT_ITEM}
-                        onSelect={() => onLinkYunxiao(menuTarget.path)}
-                      >
-                        {/* 已经绑过就说"修改",免得以为会再加一个 */}
-                        {getProjectLink(menuTarget.path)
-                          ? "修改云效项目…"
-                          : "关联云效项目…"}
                       </ContextMenuItem>
                     )}
                   {menuTarget.isDir && onSetAsRoot && (
@@ -1190,11 +1187,6 @@ export const FileExplorer = memo(
           sourcePath={copyProjectSource}
           rootDir={rootPath}
           onClose={() => setCopyProjectSource(null)}
-        />
-
-        <CloneRepoDialog
-          targetDir={cloneTargetDir}
-          onClose={() => setCloneTargetDir(null)}
         />
 
         {dnd.dragLabel ? (

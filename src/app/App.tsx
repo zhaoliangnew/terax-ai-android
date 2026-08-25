@@ -37,19 +37,21 @@ import {
   BranchChip,
   classifyProjectKind,
   findProjectRoot,
+  getProjectLink,
   getTaskLink,
   isSupportedProductDir,
   OpenInToolMenu,
+  ProductLinkChip,
   ProjectLinksBar,
   type QuickAgentId,
   QuickCommitButton,
   RepoUrlChip,
+  setProjectLink,
   setTaskLink,
   supportsSessionActions,
   UrlPromptDialog,
   useAndroidRunStore,
-  YunxiaoLinkDialog,
-  YunxiaoProjectsPanel,
+  YunxiaoProjectPickerDialog,
   YunxiaoReposPanel,
 } from "@/modules/android-run";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
@@ -145,6 +147,7 @@ import {
   useState,
 } from "react";
 import type { PanelImperativeHandle } from "react-resizable-panels";
+import { toast as sonnerToast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
 
 const DevicePanel = lazy(() => import("@/modules/android-run/DevicePanel"));
@@ -423,10 +426,10 @@ export default function App() {
     }
   }, [androidProjectRoot]);
 
-  // 右键目录 → 关联云效项目(云效项目对应产品线目录,不是单个仓库)。
-  const [yunxiaoDir, setYunxiaoDir] = useState<string | null>(null);
   // 右键工程 → 填"当前云效需求"。跟目录级的云效项目分开:这个跟着仓库走,不继承。
   const [taskDir, setTaskDir] = useState<string | null>(null);
+  // 右键产品目录 → 绑云效项目(底下工程继承)
+  const [projectLinkDir, setProjectLinkDir] = useState<string | null>(null);
   // 云效需求地址有两个入口(工具栏按钮 / 目录树右键),改完靠这个信号互相同步。
   const [linkVersion, setLinkVersion] = useState(0);
   const bumpLinks = useCallback(() => setLinkVersion((n) => n + 1), []);
@@ -1627,8 +1630,19 @@ export default function App() {
                               onOpenGitHistory={handleOpenGitHistoryForPath}
                               onAttachToAgent={handleAttachFileToAgent}
                               onSetAsRoot={handleSetSpaceRoot}
-                              onLinkYunxiao={setYunxiaoDir}
                               onLinkYunxiaoTask={setTaskDir}
+                              onLinkYunxiaoProject={setProjectLinkDir}
+                              onUnlinkYunxiaoProject={(p) => {
+                                const link = getProjectLink(p);
+                                setProjectLink(p, null);
+                                bumpLinks();
+                                sonnerToast.success(
+                                  link
+                                    ? `已解除关联:${link.name}`
+                                    : "已解除关联",
+                                );
+                              }}
+                              linkVersion={linkVersion}
                               headerActions={
                                 showProductPane && androidProjectRoot
                                   ? [
@@ -1695,11 +1709,7 @@ export default function App() {
                               }
                             />
                           </div>
-                          {sidebarView === "yunxiao-projects" ? (
-                            <YunxiaoProjectsPanel />
-                          ) : (
-                            <YunxiaoReposPanel />
-                          )}
+                          <YunxiaoReposPanel />
                         </>
                       )}
                     </div>
@@ -1729,10 +1739,21 @@ export default function App() {
                             strokeWidth={1.75}
                             className="shrink-0 text-muted-foreground/70"
                           />
-                          <span className="text-muted-foreground/80 @max-[360px]:truncate">
-                            {androidProjectRoot.split("/").slice(-2, -1)[0] ??
-                              ""}
-                          </span>
+                          <ProductLinkChip
+                            dir={
+                              androidProjectRoot
+                                .split("/")
+                                .slice(0, -1)
+                                .join("/") || androidProjectRoot
+                            }
+                            label={
+                              androidProjectRoot.split("/").slice(-2, -1)[0] ??
+                              ""
+                            }
+                            linkVersion={linkVersion}
+                            onLink={setProjectLinkDir}
+                            className="@max-[360px]:truncate"
+                          />
                           <span className="shrink-0 text-muted-foreground/40">
                             /
                           </span>
@@ -1814,10 +1835,21 @@ export default function App() {
                             strokeWidth={1.75}
                             className="shrink-0 text-muted-foreground/70"
                           />
-                          <span className="text-muted-foreground/80 @max-[360px]:truncate">
-                            {androidProjectRoot.split("/").slice(-2, -1)[0] ??
-                              ""}
-                          </span>
+                          <ProductLinkChip
+                            dir={
+                              androidProjectRoot
+                                .split("/")
+                                .slice(0, -1)
+                                .join("/") || androidProjectRoot
+                            }
+                            label={
+                              androidProjectRoot.split("/").slice(-2, -1)[0] ??
+                              ""
+                            }
+                            linkVersion={linkVersion}
+                            onLink={setProjectLinkDir}
+                            className="@max-[360px]:truncate"
+                          />
                           <span className="shrink-0 text-muted-foreground/40">
                             /
                           </span>
@@ -1884,11 +1916,6 @@ export default function App() {
             />
           )}
 
-          <YunxiaoLinkDialog
-            dir={yunxiaoDir}
-            onClose={() => setYunxiaoDir(null)}
-          />
-
           <UrlPromptDialog
             value={taskDir ? (getTaskLink(taskDir) ?? "") : null}
             title="当前云效需求"
@@ -1896,6 +1923,16 @@ export default function App() {
             onClose={() => setTaskDir(null)}
             onSave={(url) => {
               if (taskDir) setTaskLink(taskDir, url);
+              bumpLinks();
+            }}
+          />
+
+          <YunxiaoProjectPickerDialog
+            dir={projectLinkDir}
+            current={projectLinkDir ? getProjectLink(projectLinkDir) : null}
+            onClose={() => setProjectLinkDir(null)}
+            onPick={(link) => {
+              if (projectLinkDir) setProjectLink(projectLinkDir, link);
               bumpLinks();
             }}
           />

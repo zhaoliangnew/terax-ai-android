@@ -15,7 +15,6 @@ export {
   RepoUrlChip,
   WorktreeCountBadge,
 } from "./BranchChip";
-export { CloneRepoDialog } from "./CloneRepoDialog";
 export { CopyProjectDialog } from "./CopyProjectDialog";
 export { CustomLinksMenu } from "./CustomLinksMenu";
 export { DingGroupsMenu } from "./DingGroupsMenu";
@@ -39,15 +38,18 @@ export { openExternally } from "./lib/openExternally";
 export {
   getProjectLink,
   getTaskLink,
+  type LinkedProject,
+  listProjectLinkDirs,
   resolveProjectLink,
+  setProjectLink,
   setTaskLink,
 } from "./lib/yunxiao";
-export { MyYunxiaoButton } from "./MyYunxiaoButton";
 export { OpenInToolMenu } from "./OpenInToolMenu";
+export { ProductLinkChip } from "./ProductLinkChip";
 export { ProjectLinksBar } from "./ProjectLinksBar";
 export { useActiveProductConfig, useAndroidRunStore } from "./store";
 export { UrlPromptDialog } from "./UrlPromptDialog";
 export { WeChatButton } from "./WeChatButton";
-export { YunxiaoLinkDialog } from "./YunxiaoLinkDialog";
-export { YunxiaoProjectsPanel } from "./YunxiaoProjectsPanel";
+export { YunxiaoProjectPickerDialog } from "./YunxiaoProjectPickerDialog";
+export { YunxiaoProjectsButton } from "./YunxiaoProjectsButton";
 export { YunxiaoReposPanel } from "./YunxiaoReposPanel";

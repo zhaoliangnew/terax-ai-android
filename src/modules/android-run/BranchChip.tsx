@@ -32,11 +32,13 @@ import {
   CheckmarkCircle01Icon,
   Download01Icon,
   GitBranchIcon,
+  PencilEdit02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { shellQuote } from "./lib/openExternally";
 
 type RepoInfo = { repoRoot: string; branch: string };
 
@@ -98,8 +100,12 @@ export function useProjectBranch(root: string | null): string | null {
 }
 
 /** origin 的仓库地址;没有 git 仓库或没配 remote 就是 null。 */
-function useRepoRemoteUrl(root: string | null): string | null {
+function useRepoRemoteUrl(
+  root: string | null,
+  refreshSignal = 0,
+): string | null {
   const [url, setUrl] = useState<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshSignal 是改完地址后的重读信号
   useEffect(() => {
     if (!root) {
       setUrl(null);
@@ -118,11 +124,16 @@ function useRepoRemoteUrl(root: string | null): string | null {
     return () => {
       alive = false;
     };
-  }, [root]);
+  }, [root, refreshSignal]);
   return url;
 }
 
-/** 仓库地址一小条,点击复制。没有 remote 就什么都不画。 */
+/**
+ * 仓库地址一小条:点地址复制,后面跟一个小铅笔按钮改 origin 地址。
+ * 不用双击改 —— 双击会先发两次 click,复制提示会抢在弹框前面冒出来。
+ * 改远程地址是高危操作(推错仓库不好收拾),所以弹框里把老地址原样
+ * 摆出来对照,并且要再确认一次才真改。
+ */
 export function RepoUrlChip({
   projectRoot,
   className,
@@ -130,23 +141,134 @@ export function RepoUrlChip({
   projectRoot: string | null;
   className?: string;
 }) {
-  const url = useRepoRemoteUrl(projectRoot);
+  const [rev, setRev] = useState(0);
+  const url = useRepoRemoteUrl(projectRoot, rev);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
   if (!url) return null;
+
+  const next = draft.trim();
+  const changed = next !== "" && next !== url;
+
+  const applyUrl = async () => {
+    if (!projectRoot || !changed || busy) return;
+    setBusy(true);
+    try {
+      const repo = await native.gitResolveRepo(projectRoot);
+      if (!repo) throw new Error("这个目录不是 git 仓库");
+      const out = await native.runCommand(
+        `git -C ${shellQuote(repo.repoRoot)} remote set-url origin ${shellQuote(next)}`,
+        null,
+        30,
+      );
+      if (out.exit_code !== 0) {
+        throw new Error(out.stderr || out.stdout || "修改失败");
+      }
+      toast.success("远程地址已修改");
+      setRev((n) => n + 1);
+      setEditing(false);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <button
-      type="button"
-      title={`${url} · 点击复制`}
-      onClick={() => {
-        void copyToClipboard(url);
-        toast.success("仓库地址已复制");
-      }}
-      className={cn(
-        "min-w-0 cursor-pointer truncate text-left text-muted-foreground/70 transition-colors hover:text-foreground",
-        className,
-      )}
-    >
-      {url}
-    </button>
+    <>
+      <span className={cn("group flex min-w-0 items-center gap-1", className)}>
+        <button
+          type="button"
+          title={`${url} · 点击复制`}
+          onClick={() => {
+            void copyToClipboard(url);
+            toast.success("仓库地址已复制");
+          }}
+          className="min-w-0 cursor-pointer truncate text-left text-muted-foreground/70 transition-colors hover:text-foreground"
+        >
+          {url}
+        </button>
+        <button
+          type="button"
+          title="修改远程仓库地址"
+          onClick={() => {
+            setDraft(url);
+            setEditing(true);
+          }}
+          className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-foreground/10 hover:text-foreground group-hover:opacity-100"
+        >
+          <HugeiconsIcon icon={PencilEdit02Icon} size={11} strokeWidth={1.75} />
+        </button>
+      </span>
+
+      <Dialog
+        open={editing}
+        onOpenChange={(o) => {
+          if (!o && !busy) setEditing(false);
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="text-sm">修改远程仓库地址</DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed text-destructive">
+              高危操作:改完之后这个工程的推送/拉取都会指向新地址,
+              推错仓库不好收拾。确认新地址是你要的再改。
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              当前地址
+            </div>
+            <div className="rounded border border-border/60 bg-foreground/[0.03] px-2 py-1.5 font-mono text-[11px] break-all text-muted-foreground">
+              {url}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <div className="text-[11px] font-medium text-muted-foreground">
+              新地址
+            </div>
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && changed) void applyUrl();
+              }}
+              spellCheck={false}
+              disabled={busy}
+              className="h-8 w-full rounded border border-input bg-transparent px-2 font-mono text-[12px] outline-none focus:border-ring"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => setEditing(false)}
+              className="text-xs"
+            >
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={busy || !changed}
+              onClick={() => void applyUrl()}
+              className="gap-1 text-xs"
+            >
+              {busy && <Spinner className="size-3" />}
+              确认修改
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
