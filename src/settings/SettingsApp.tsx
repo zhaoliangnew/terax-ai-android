@@ -5,6 +5,7 @@ import type { SettingsTab } from "@/modules/settings/openSettingsWindow";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   AiScanIcon,
+  FolderGitTwoIcon,
   InformationCircleIcon,
   KeyboardIcon,
   PaintBoardIcon,
@@ -22,6 +23,7 @@ import { GeneralSection } from "./sections/GeneralSection";
 import { ModelsSection } from "./sections/ModelsSection";
 import { ShortcutsSection } from "./sections/ShortcutsSection";
 import { ThemesSection } from "./sections/ThemesSection";
+import { YunxiaoSection } from "./sections/YunxiaoSection";
 
 const TABS: {
   id: SettingsTab;
@@ -61,6 +63,12 @@ const TABS: {
     component: AgentsSection,
   },
   {
+    id: "yunxiao",
+    label: "云效",
+    icon: FolderGitTwoIcon,
+    component: YunxiaoSection,
+  },
+  {
     id: "about",
     label: "About",
     icon: InformationCircleIcon,
@@ -75,6 +83,7 @@ const VALID_TABS: SettingsTab[] = [
   "shortcuts",
   "models",
   "agents",
+  "yunxiao",
   "about",
 ];
 

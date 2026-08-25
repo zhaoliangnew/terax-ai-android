@@ -1,3 +1,4 @@
+import { ProjectWatermark } from "@/app/components/ProjectWatermark";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -41,11 +42,15 @@ import {
   OpenInToolMenu,
   ProjectLinksBar,
   type QuickAgentId,
+  QuickCommitButton,
+  RepoUrlChip,
   setTaskLink,
   supportsSessionActions,
   UrlPromptDialog,
   useAndroidRunStore,
   YunxiaoLinkDialog,
+  YunxiaoProjectsPanel,
+  YunxiaoReposPanel,
 } from "@/modules/android-run";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
@@ -1673,18 +1678,29 @@ export default function App() {
                           )}
                       </div>
                       {sidebarView !== "explorer" && (
-                        <SourceControlPanel
-                          open
-                          sourceControl={sourceControl}
-                          onOpenDiff={openGitDiffTab}
-                          onOpenGitGraph={openGitGraphFromContext}
-                          onOpenFile={handleOpenFile}
-                          onNavigateToPath={cdInNewTab}
-                          repositoryTarget={sourceControlRepositoryTarget}
-                          onFollowRepositoryContext={
-                            handleFollowRepositoryContext
-                          }
-                        />
+                        <>
+                          {/* 旧的本地 Git 面板先藏起来(保活以便随时恢复),
+                              视图内容换成云效仓库面板 */}
+                          <div className="hidden">
+                            <SourceControlPanel
+                              open
+                              sourceControl={sourceControl}
+                              onOpenDiff={openGitDiffTab}
+                              onOpenGitGraph={openGitGraphFromContext}
+                              onOpenFile={handleOpenFile}
+                              onNavigateToPath={cdInNewTab}
+                              repositoryTarget={sourceControlRepositoryTarget}
+                              onFollowRepositoryContext={
+                                handleFollowRepositoryContext
+                              }
+                            />
+                          </div>
+                          {sidebarView === "yunxiao-projects" ? (
+                            <YunxiaoProjectsPanel />
+                          ) : (
+                            <YunxiaoReposPanel />
+                          )}
+                        </>
                       )}
                     </div>
                     <SidebarRail
@@ -1772,23 +1788,7 @@ export default function App() {
                           选中/点击,也不参与滚动。字号跟着面板宽度走(cqw),
                           写死的话面板一窄工程名就顶出去被裁。 */}
                       {isTerminalTab && androidProjectRoot && (
-                        <div
-                          aria-hidden
-                          className="@container pointer-events-none absolute inset-0 flex select-none flex-col items-center justify-center gap-2 px-6 opacity-[0.12]"
-                        >
-                          <span className="max-w-full truncate text-[clamp(12px,4.5cqw,34px)] leading-none tracking-[0.18em]">
-                            {androidProjectRoot.split("/").slice(-2, -1)[0] ??
-                              ""}
-                          </span>
-                          <span className="max-w-full truncate text-[clamp(16px,7cqw,52px)] leading-none font-bold tracking-[0.06em]">
-                            {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
-                          </span>
-                          <BranchChip
-                            projectRoot={androidProjectRoot}
-                            bare
-                            className="max-w-full text-[clamp(10px,3cqw,22px)] tracking-[0.2em]"
-                          />
-                        </div>
+                        <ProjectWatermark projectRoot={androidProjectRoot} />
                       )}
                     </div>
 
@@ -1836,6 +1836,16 @@ export default function App() {
                               onRun={runInActiveTerminal}
                             />
                           )}
+                        <QuickCommitButton
+                          projectRoot={androidProjectRoot}
+                          className="shrink-0"
+                        />
+                        {/* basis-full 换行:git 地址单独占一行,不跟
+                            面包屑挤在一起 */}
+                        <RepoUrlChip
+                          projectRoot={androidProjectRoot}
+                          className="basis-full font-mono text-[11px]"
+                        />
                       </div>
                     )}
                   </div>
@@ -1897,7 +1907,10 @@ export default function App() {
             activeId={activeId}
             onActivate={onActivateAgent}
           />
-          <Toaster position="bottom-right" />
+          {/* 屏幕正中 + richColors:错误红、成功绿,深色主题下黑底灰字
+              看不清。sonner 没有 center 档位,用 top-center 加 45vh 偏移
+              顶到屏幕竖直中央。 */}
+          <Toaster position="top-center" offset={{ top: "45vh" }} richColors />
 
           {hasComposer ? (
             <>

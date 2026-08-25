@@ -1,5 +1,5 @@
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::modules::git::errors::{GitError, Result};
 use crate::modules::git::parser::parse_porcelain_v2;
@@ -14,7 +14,7 @@ use crate::modules::git::types::{
     NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
-    authorized_repo_root, canonical_dir, resolve_within_repo, split_upstream,
+    authorized_repo_root, canonical_dir, display_path, resolve_within_repo, split_upstream,
     ResolvedGitDirectory,
 };
 use crate::modules::workspace::{WorkspaceEnv, WorkspaceRegistry};
@@ -478,6 +478,7 @@ pub fn log(
     repo_root: &str,
     limit: u32,
     before_sha: Option<&str>,
+    ref_name: Option<&str>,
     workspace: &WorkspaceEnv,
 ) -> Result<Vec<GitLogEntry>> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
@@ -494,6 +495,18 @@ pub fn log(
         }
         _ => None,
     };
+    // 指定分支时以它为起点;翻页 cursor 本身已经钉在该分支的历史里,
+    // 两个都传会变成并集,所以 cursor 优先
+    let rev = match (cursor.as_deref(), ref_name) {
+        (Some(c), _) => Some(c.to_string()),
+        (None, Some(r)) if !r.is_empty() => {
+            if r.starts_with('-') {
+                return Err(GitError::InvalidPath(r.into()));
+            }
+            Some(r.to_string())
+        }
+        _ => None,
+    };
     let mut args: Vec<&OsStr> = vec![
         OsStr::new("log"),
         OsStr::new("--no-color"),
@@ -501,7 +514,7 @@ pub fn log(
         OsStr::new(&count_arg),
         OsStr::new(&format_arg),
     ];
-    if let Some(spec) = cursor.as_deref() {
+    if let Some(spec) = rev.as_deref() {
         args.push(OsStr::new(spec));
     }
     let output = run_git(
@@ -1000,13 +1013,32 @@ pub fn list_branches(
     if let Ok(lines) = git_stdout_lines(
         &repo_root.workspace,
         &repo_root.git_path,
-        ["branch", "--format=%(refname:short)%00%(HEAD)"],
+        ["branch", "--format=%(refname:short)%00%(HEAD)%00%(upstream:track)"],
     ) {
         for line in &lines {
             let mut parts = line.split('\0');
             let name = parts.next().unwrap_or("").to_string();
             let head_marker = parts.next().unwrap_or("");
             let is_head = head_marker == "*";
+            // "[ahead 2, behind 1]" / "[ahead 2]" / "[gone]" / 空
+            // (LC_ALL=C 固定,不会被本地化成中文)
+            let track = parts.next().unwrap_or("");
+            let mut ahead = 0u32;
+            let mut behind = 0u32;
+            if let Some(inner) = track
+                .trim()
+                .strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+            {
+                for piece in inner.split(',') {
+                    let piece = piece.trim();
+                    if let Some(v) = piece.strip_prefix("ahead ") {
+                        ahead = v.parse().unwrap_or(0);
+                    } else if let Some(v) = piece.strip_prefix("behind ") {
+                        behind = v.parse().unwrap_or(0);
+                    }
+                }
+            }
             if !name.is_empty() {
                 branches.push(GitBranchEntry {
                     name,
@@ -1014,8 +1046,33 @@ pub fn list_branches(
                     worktree_path: None,
                     is_head,
                     is_detached: is_head && is_detached_head,
+                    ahead,
+                    behind,
                 });
             }
+        }
+    }
+
+    if let Ok(lines) = git_stdout_lines(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["branch", "-r", "--format=%(refname:short)"],
+    ) {
+        for line in &lines {
+            let name = line.trim();
+            // `origin/HEAD` 缩写后是没有斜杠的 `origin`,它是指针不是分支
+            if name.is_empty() || !name.contains('/') || name.ends_with("/HEAD") {
+                continue;
+            }
+            branches.push(GitBranchEntry {
+                name: name.to_string(),
+                kind: "remote".into(),
+                worktree_path: None,
+                is_head: false,
+                is_detached: false,
+                ahead: 0,
+                behind: 0,
+            });
         }
     }
 
@@ -1078,8 +1135,13 @@ pub fn list_branches(
                 && !existing.is_head;
             if should_replace {
                 let is_head = existing.is_head || b.is_head;
+                // worktree 条目自己不带 ahead/behind,沿用本地条目算好的
+                let ahead = existing.ahead;
+                let behind = existing.behind;
                 deduped[existing_idx] = GitBranchEntry {
                     is_head,
+                    ahead,
+                    behind,
                     ..b
                 };
             } else if b.is_head && !existing.is_head {
@@ -1094,9 +1156,30 @@ pub fn list_branches(
     }
 
     deduped.sort_by(|a, b| {
-        let kind_ord = |k: &str| if k == "local" { 0u8 } else { 1u8 };
+        let kind_ord = |k: &str| match k {
+            "local" => 0u8,
+            "worktree" => 1u8,
+            _ => 2u8,
+        };
+        // 主干分支置顶,其余按字母序;远程分支比名字前先去掉 remote 名
+        let pin_ord = |e: &GitBranchEntry| {
+            let name = if e.kind == "remote" {
+                e.name
+                    .split_once('/')
+                    .map(|(_, rest)| rest)
+                    .unwrap_or(&e.name)
+            } else {
+                e.name.as_str()
+            };
+            match name {
+                "master" | "main" => 0u8,
+                "develop" | "dev" => 1u8,
+                _ => 2u8,
+            }
+        };
         kind_ord(&a.kind)
             .cmp(&kind_ord(&b.kind))
+            .then_with(|| pin_ord(a).cmp(&pin_ord(b)))
             .then_with(|| a.name.cmp(&b.name))
     });
 
@@ -1124,7 +1207,211 @@ fn push_worktree(
         worktree_path: Some(path),
         is_head: false,
         is_detached: branch.is_none(),
+        ahead: 0,
+        behind: 0,
     });
+}
+
+pub fn worktree_add(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    base_ref: &str,
+    new_branch: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<String> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if base_ref.is_empty() || base_ref.starts_with('-') {
+        return Err(GitError::InvalidPath(base_ref.into()));
+    }
+    if new_branch.is_empty() || new_branch.starts_with('-') {
+        return Err(GitError::InvalidPath(new_branch.into()));
+    }
+    // 总是基于 base_ref 新建分支挂进 worktree,而不是把已有分支占走:
+    // 一个分支同时只能被一个工作区 checkout,直接挂会把主工作区堵死。
+    // 新分支名重了就加序号。
+    let mut branch_name = new_branch.to_string();
+    let mut n = 2;
+    while git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        [
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch_name}"),
+        ],
+    )
+    .ok()
+    .flatten()
+    .is_some()
+    {
+        branch_name = format!("{new_branch}-{n}");
+        n += 1;
+    }
+    // 统一收在仓库内的 .worktree/ 下;分支名里的路径分隔符换掉
+    let sanitized: String = branch_name
+        .chars()
+        .map(|c| {
+            if c == '/' || c == '\\' || c == ':' || c.is_whitespace() {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let base = repo_root.local_path.join(".worktree");
+    let mut dir_name = sanitized.clone();
+    let mut n = 2;
+    while base.join(&dir_name).exists() {
+        dir_name = format!("{}-{}", sanitized, n);
+        n += 1;
+    }
+    // worktree 长在工作区里面,整棵目录会被 status 当成未跟踪文件,
+    // 把切分支的脏检查也搅乱 —— 往 git 全局忽略文件里补一条,所有
+    // 仓库一次搞定,也不弄脏任何项目自己的 .gitignore。
+    let global_ignore = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["config", "--global", "--get", "core.excludesFile"],
+    )
+    .ok()
+    .flatten()
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty());
+    if let Some(home) = std::env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        let ignore_path = match global_ignore {
+            // 配置值可能写成 ~/xxx,git 自己会展开,我们写文件得手动展开
+            Some(p) => match p.strip_prefix("~/") {
+                Some(rest) => home.join(rest),
+                None => PathBuf::from(p),
+            },
+            // 没配置时 git 的默认全局忽略文件就是这个位置
+            None => home.join(".config").join("git").join("ignore"),
+        };
+        let existing = std::fs::read_to_string(&ignore_path).unwrap_or_default();
+        let already = existing
+            .lines()
+            .any(|l| matches!(l.trim(), ".worktree" | ".worktree/"));
+        if !already {
+            if let Some(dir) = ignore_path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let sep = if existing.is_empty() || existing.ends_with('\n') {
+                ""
+            } else {
+                "\n"
+            };
+            let _ = std::fs::write(&ignore_path, format!("{existing}{sep}.worktree/\n"));
+        }
+    }
+    // 相对路径交给 git 以仓库为基准解析,WSL 下也不用换算路径
+    let rel = format!(".worktree/{}", dir_name);
+    let args: Vec<OsString> = vec![
+        "worktree".into(),
+        "add".into(),
+        "-b".into(),
+        branch_name.into(),
+        rel.into(),
+        base_ref.into(),
+    ];
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        args,
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git worktree add failed")?;
+    Ok(display_path(&base.join(&dir_name)))
+}
+
+pub fn worktree_remove(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    worktree_path: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if worktree_path.is_empty() || worktree_path.starts_with('-') {
+        return Err(GitError::InvalidPath(worktree_path.into()));
+    }
+    let args: Vec<OsString> = vec![
+        "worktree".into(),
+        "remove".into(),
+        "--".into(),
+        worktree_path.into(),
+    ];
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        args,
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git worktree remove failed")
+}
+
+pub fn create_branch(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    name: &str,
+    start_point: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if name.is_empty() || name.starts_with('-') {
+        return Err(GitError::InvalidPath(name.into()));
+    }
+    if start_point.is_empty() || start_point.starts_with('-') {
+        return Err(GitError::InvalidPath(start_point.into()));
+    }
+    // 只建分支不切换:切换有脏检查那套流程,建分支本身永远是安全的
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["branch", "--", name, start_point],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git branch failed")
+}
+
+pub fn delete_branch(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    branch: &str,
+    remote: Option<&str>,
+    force: bool,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err(GitError::InvalidPath(branch.into()));
+    }
+    let output = match remote {
+        // 远程分支:git push <remote> --delete <branch>,走网络超时
+        Some(r) => {
+            if r.is_empty() || r.starts_with('-') {
+                return Err(GitError::InvalidPath(r.into()));
+            }
+            run_git(
+                &repo_root.workspace,
+                Some(&repo_root.git_path),
+                ["push", r, "--delete", branch],
+                NETWORK_TIMEOUT_SECS,
+            )?
+        }
+        // 本地分支:默认 -d(未合并会拒绝),force 才用 -D
+        None => run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["branch", if force { "-D" } else { "-d" }, "--", branch],
+            DEFAULT_TIMEOUT_SECS,
+        )?,
+    };
+    ensure_success(&output, "git branch delete failed")
 }
 
 pub fn checkout_branch(

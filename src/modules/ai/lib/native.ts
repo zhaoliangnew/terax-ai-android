@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import { currentWorkspaceEnv } from "@/modules/workspace";
+import { invoke } from "@tauri-apps/api/core";
 
 export type ReadResult =
   | { kind: "text"; content: string; size: number }
@@ -126,10 +126,13 @@ export type GitDiscardEntry = {
 
 export type GitBranchEntry = {
   name: string;
-  kind: "local" | "worktree";
+  kind: "local" | "worktree" | "remote";
   worktreePath: string | null;
   isHead: boolean;
   isDetached: boolean;
+  /** 相对上游领先/落后的提交数;没有上游就都是 0。 */
+  ahead: number;
+  behind: number;
 };
 
 export type GitBranchListResult = {
@@ -193,11 +196,7 @@ export const native = {
       maxResults: params.maxResults ?? null,
       workspace: currentWorkspaceEnv(),
     }),
-  runCommand: (
-    command: string,
-    cwd?: string | null,
-    timeoutSecs?: number,
-  ) =>
+  runCommand: (command: string, cwd?: string | null, timeoutSecs?: number) =>
     invoke<CommandOutput>("shell_run_command", {
       command,
       cwd: cwd ?? null,
@@ -332,11 +331,15 @@ export const native = {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
-  gitLog: (repoRoot: string, options?: { limit?: number; beforeSha?: string }) =>
+  gitLog: (
+    repoRoot: string,
+    options?: { limit?: number; beforeSha?: string; refName?: string },
+  ) =>
     invoke<GitLogEntry[]>("git_log", {
       repoRoot,
       limit: options?.limit ?? null,
       beforeSha: options?.beforeSha ?? null,
+      refName: options?.refName ?? null,
       workspace: currentWorkspaceEnv(),
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
@@ -379,6 +382,41 @@ export const native = {
     invoke<void>("git_checkout_branch", {
       repoRoot,
       branch,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** 基于 startPoint 新建分支,不切换。 */
+  gitCreateBranch: (repoRoot: string, name: string, startPoint: string) =>
+    invoke<void>("git_create_branch", {
+      repoRoot,
+      name,
+      startPoint,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** 删本地分支(force=-D);传 remote 则删远程分支(push --delete)。 */
+  gitDeleteBranch: (
+    repoRoot: string,
+    branch: string,
+    options?: { remote?: string; force?: boolean },
+  ) =>
+    invoke<void>("git_delete_branch", {
+      repoRoot,
+      branch,
+      remote: options?.remote ?? null,
+      force: options?.force ?? false,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** 基于 baseRef 新建 newBranch 分支挂进 worktree,返回目录绝对路径。 */
+  gitWorktreeAdd: (repoRoot: string, baseRef: string, newBranch: string) =>
+    invoke<string>("git_worktree_add", {
+      repoRoot,
+      baseRef,
+      newBranch,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitWorktreeRemove: (repoRoot: string, worktreePath: string) =>
+    invoke<void>("git_worktree_remove", {
+      repoRoot,
+      worktreePath,
       workspace: currentWorkspaceEnv(),
     }),
 };

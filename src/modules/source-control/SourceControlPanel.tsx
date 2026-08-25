@@ -27,7 +27,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
-import { toast } from "sonner";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Tooltip,
@@ -38,6 +37,7 @@ import {
 import { IS_MAC } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { type GitBranchEntry, native } from "@/modules/ai/lib/native";
+import { GIT_BRANCH_CHANGED_EVENT } from "@/modules/android-run/BranchChip";
 import {
   copyToClipboard,
   revealInFinder,
@@ -67,24 +67,25 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  type KeyboardEvent,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent,
-  type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import {
   repositoryTargetIsPending,
   type SourceControlRepositoryTarget,
 } from "./repositoryTarget";
 import type { SourceControlSummary } from "./useSourceControl";
 import {
-  useSourceControlPanel,
   type CheckState,
   type SourceControlFileEntry,
+  useSourceControlPanel,
 } from "./useSourceControlPanel";
 
 type Props = {
@@ -229,6 +230,8 @@ function BranchDropdown({
         setBranches([]);
         setOpen(false);
         onRefresh();
+        // 顶栏/底栏/输入栏的分支 chip 各有自己的缓存,不广播要等轮询
+        window.dispatchEvent(new Event(GIT_BRANCH_CHANGED_EVENT));
       } catch (e) {
         toast.error(String(e));
       } finally {

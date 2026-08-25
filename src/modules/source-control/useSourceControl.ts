@@ -1,8 +1,9 @@
 import {
-  native,
   type GitRepoInfo,
   type GitStatusSnapshot,
+  native,
 } from "@/modules/ai/lib/native";
+import { GIT_BRANCH_CHANGED_EVENT } from "@/modules/android-run/BranchChip";
 import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -42,9 +43,7 @@ export type SourceControlSummary = {
   applyStatus: (
     updater: (status: GitStatusSnapshot) => GitStatusSnapshot,
   ) => void;
-  refresh: (options?: {
-    remote?: SourceControlRefreshMode;
-  }) => Promise<void>;
+  refresh: (options?: { remote?: SourceControlRefreshMode }) => Promise<void>;
   runRemoteAction: (
     mode?: SourceControlRemoteActionMode,
   ) => Promise<SourceControlRemoteActionResult>;
@@ -160,7 +159,13 @@ export function getSourceControlRemoteIndicator(
   >,
 ): SourceControlRemoteIndicator {
   if (!summary.hasRepo || !summary.upstream) {
-    return { visible: false, label: "", title: "", disabled: true, action: null };
+    return {
+      visible: false,
+      label: "",
+      title: "",
+      disabled: true,
+      action: null,
+    };
   }
   if (summary.ahead > 0 && summary.behind > 0) {
     return {
@@ -281,10 +286,7 @@ export function useSourceControl(
   const doRefresh = useCallback(
     async (remoteMode: SourceControlRefreshMode): Promise<void> => {
       const refreshContextKey = contextKey;
-      if (
-        !enabledRef.current ||
-        refreshContextKey !== contextKeyRef.current
-      ) {
+      if (!enabledRef.current || refreshContextKey !== contextKeyRef.current) {
         return;
       }
       const requestId = ++requestIdRef.current;
@@ -385,8 +387,7 @@ export function useSourceControl(
           repo.upstream &&
           remoteMode !== "never" &&
           (remoteMode === "always" ||
-            Date.now() -
-              (autoFetchByRepoRef.current.get(repo.repoRoot) ?? 0) >=
+            Date.now() - (autoFetchByRepoRef.current.get(repo.repoRoot) ?? 0) >=
               AUTO_FETCH_THROTTLE_MS);
 
         if (shouldAutoFetch) {
@@ -472,8 +473,7 @@ export function useSourceControl(
 
       setState((current) => ({ ...current, busyAction: action }));
       const actionContextKey = contextKeyRef.current;
-      const isCurrentContext = () =>
-        actionContextKey === contextKeyRef.current;
+      const isCurrentContext = () => actionContextKey === contextKeyRef.current;
 
       try {
         if (action === "fetch") {
@@ -564,9 +564,16 @@ export function useSourceControl(
         void refresh({ remote: "never" });
       }, 400);
     };
+    // BranchChip 里切完分支会广播这个事件;面板顶上挂着分支名和文件
+    // 列表,不立刻刷会和已经切过去的顶栏各说各话。
+    const onBranchChanged = () => {
+      void refresh({ remote: "never" });
+    };
     window.addEventListener("focus", onFocus);
+    window.addEventListener(GIT_BRANCH_CHANGED_EVENT, onBranchChanged);
     return () => {
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener(GIT_BRANCH_CHANGED_EVENT, onBranchChanged);
       if (timer) window.clearTimeout(timer);
     };
   }, [refresh, enabled]);

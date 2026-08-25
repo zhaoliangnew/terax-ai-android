@@ -4,6 +4,7 @@ import {
   useProjectAgentState,
 } from "@/modules/agent-status/AgentStatusDot";
 import type { ProjectKind } from "@/modules/android-run";
+import { WorktreeCountBadge } from "@/modules/android-run/BranchChip";
 import {
   AndroidIcon,
   ArrowRight01Icon,
@@ -199,6 +200,10 @@ function EntryRowImpl(props: EntryRowProps) {
       >
         {name}
       </span>
+      {/* 工程挂着 worktree 就标出来,数量带圆底 */}
+      {asProject && (
+        <WorktreeCountBadge projectRoot={path} className="shrink-0" />
+      )}
       {/* 绑过云效项目的目录挂个云 —— 否则绑没绑完全看不出来。 */}
       {yunxiaoLinked && (
         <HugeiconsIcon

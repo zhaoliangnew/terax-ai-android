@@ -9,7 +9,14 @@ export {
 } from "./AgentSessionActions";
 export { AndroidRunToolbar } from "./AndroidRunToolbar";
 export { ApifoxMenu } from "./ApifoxMenu";
-export { BranchChip } from "./BranchChip";
+export {
+  BranchChip,
+  QuickCommitButton,
+  RepoUrlChip,
+  WorktreeCountBadge,
+} from "./BranchChip";
+export { CloneRepoDialog } from "./CloneRepoDialog";
+export { CopyProjectDialog } from "./CopyProjectDialog";
 export { CustomLinksMenu } from "./CustomLinksMenu";
 export { DingGroupsMenu } from "./DingGroupsMenu";
 export { JournalButton } from "./JournalButton";
@@ -42,3 +49,5 @@ export { useActiveProductConfig, useAndroidRunStore } from "./store";
 export { UrlPromptDialog } from "./UrlPromptDialog";
 export { WeChatButton } from "./WeChatButton";
 export { YunxiaoLinkDialog } from "./YunxiaoLinkDialog";
+export { YunxiaoProjectsPanel } from "./YunxiaoProjectsPanel";
+export { YunxiaoReposPanel } from "./YunxiaoReposPanel";

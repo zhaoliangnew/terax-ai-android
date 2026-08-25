@@ -119,10 +119,13 @@ pub struct GitPushResult {
 #[serde(rename_all = "camelCase")]
 pub struct GitBranchEntry {
     pub name: String,
-    pub kind: String, // "local" | "worktree"
+    pub kind: String, // "local" | "worktree" | "remote"
     pub worktree_path: Option<String>,
     pub is_head: bool,
     pub is_detached: bool,
+    // 相对上游领先/落后的提交数;没有上游就都是 0
+    pub ahead: u32,
+    pub behind: u32,
 }
 
 #[derive(Serialize)]

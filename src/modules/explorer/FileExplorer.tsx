@@ -8,6 +8,8 @@ import {
 import { cn } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 import {
+  CloneRepoDialog,
+  CopyProjectDialog,
   getProjectLink,
   getTaskLink,
   openExternally,
@@ -404,6 +406,12 @@ export const FileExplorer = memo(
       name: string;
       isDir: boolean;
     } | null>(null);
+    // 右键"复制到项目目录…"选中的来源工程
+    const [copyProjectSource, setCopyProjectSource] = useState<string | null>(
+      null,
+    );
+    // 右键"从云效克隆仓库…"选中的目标目录
+    const [cloneTargetDir, setCloneTargetDir] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState(false);
     // Bumped on every right-click so the menu content remounts and the popper
     // re-anchors to the new cursor (floating-ui won't reposition on an anchor
@@ -969,6 +977,24 @@ export const FileExplorer = memo(
                       打开云效项目
                     </ContextMenuItem>
                   )}
+                  {/* 常见流程:从标准版工程复制一份到客户产品目录 */}
+                  {menuTarget.isDir && projectDirs.has(menuTarget.path) && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => setCopyProjectSource(menuTarget.path)}
+                    >
+                      复制到项目目录…
+                    </ContextMenuItem>
+                  )}
+                  {/* 非工程目录(产品目录)上:从云效搜索仓库直接克隆进来 */}
+                  {menuTarget.isDir && !projectDirs.has(menuTarget.path) && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => setCloneTargetDir(menuTarget.path)}
+                    >
+                      从云效克隆仓库…
+                    </ContextMenuItem>
+                  )}
                   {/* 工程目录挂"当前需求"(跟着这个仓库走),产品线目录才挂
                       "云效项目"(底下所有工程继承)—— 两个层级两回事,别混在
                       一个菜单项里。 */}
@@ -1159,6 +1185,17 @@ export const FileExplorer = memo(
             </ContextMenuContent>
           </ContextMenu>
         ) : null}
+
+        <CopyProjectDialog
+          sourcePath={copyProjectSource}
+          rootDir={rootPath}
+          onClose={() => setCopyProjectSource(null)}
+        />
+
+        <CloneRepoDialog
+          targetDir={cloneTargetDir}
+          onClose={() => setCloneTargetDir(null)}
+        />
 
         {dnd.dragLabel ? (
           <div

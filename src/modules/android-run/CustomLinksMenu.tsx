@@ -5,11 +5,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
   ArrowDown02Icon,
   ArrowUp02Icon,
   Bookmark02Icon,
   ComputerIcon,
+  Copy01Icon,
   Delete02Icon,
   Link02Icon,
   PencilEdit02Icon,
@@ -17,7 +19,8 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import { MENU_ACTION, MENU_ROW, MENU_TRIGGER } from "./lib/menuStyles";
+import { toast } from "sonner";
+import { MENU_ACTION, MENU_TRIGGER } from "./lib/menuStyles";
 import {
   loadQuickLinks,
   moveQuickLink,
@@ -66,7 +69,7 @@ export function CustomLinksMenu() {
       {/* 居中弹窗而不是贴着底栏的下拉:收藏会越攒越多,四列方块加一串网页,
           挂在角落里既压着终端又只能长这么高。 */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[70vh] flex-col gap-0 p-0 sm:max-w-2xl">
+        <DialogContent className="flex max-h-[70vh] flex-col gap-0 p-0 sm:max-w-3xl">
           {/* "添加"跟在标题后面,右上角整片留给关闭按钮 —— 它是绝对定位的
               (top-4 right-4),挤在同一行右端必然对不齐。 */}
           <DialogHeader className="flex-row items-center gap-3 space-y-0 border-b border-border px-4 py-3 pr-14">
@@ -151,26 +154,46 @@ export function CustomLinksMenu() {
                 <div className={cn(SECTION, apps.length > 0 && "mt-1")}>
                   网页
                 </div>
-                <div className="px-2">
+                {/* 原来是一行一条的窄列表,标题稍微长一点(比如带部门名的对接
+                    协议)就被截断,只能悬停看 title 提示。改成跟应用一样的卡片:
+                    两列,标题允许换到两行,地址单独一行放在下面,不用猜就能
+                    看全。 */}
+                <div className="grid grid-cols-2 gap-1.5 px-2">
                   {sites.map((l, i) => (
-                    <div key={l.id} className="group flex items-center gap-1">
+                    <div
+                      key={l.id}
+                      className="group relative flex flex-col gap-1 rounded-lg border border-border/50 px-3 py-2.5 transition-colors hover:border-ring/60 hover:bg-accent/40"
+                    >
                       <button
                         type="button"
                         title={l.url}
                         onClick={() => openQuickLink(l)}
-                        className={MENU_ROW}
+                        className="flex min-w-0 items-start gap-1.5 text-left"
                       >
                         <HugeiconsIcon
                           icon={Link02Icon}
                           size={13}
                           strokeWidth={1.75}
-                          className="shrink-0 text-muted-foreground/50"
+                          className="mt-0.5 shrink-0 text-muted-foreground/50"
                         />
-                        <span className="min-w-0 flex-1 truncate">
+                        <span className="line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug">
                           {l.title}
                         </span>
                       </button>
-                      <span className="flex shrink-0 items-center gap-1 pr-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <span className="truncate pl-[1.125rem] font-mono text-[11px] text-muted-foreground/50">
+                        {l.url}
+                      </span>
+                      <span className="absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded bg-background/85 opacity-0 backdrop-blur-[2px] transition-opacity group-hover:opacity-100">
+                        <MenuRowIcon
+                          icon={Copy01Icon}
+                          label="复制链接"
+                          onClick={() => {
+                            void copyToClipboard(l.url);
+                            toast.success("已复制链接", {
+                              description: l.title,
+                            });
+                          }}
+                        />
                         <MenuRowIcon
                           icon={ArrowUp02Icon}
                           label="上移"
