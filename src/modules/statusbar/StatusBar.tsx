@@ -15,6 +15,7 @@ import {
   DingGroupsMenu,
   JournalButton,
   KnowledgeBaseMenu,
+  TestEnvMenu,
   WeChatButton,
   YunxiaoProjectsButton,
 } from "@/modules/android-run";
@@ -53,6 +54,7 @@ export function StatusBar({
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <KnowledgeBaseMenu />
         <YunxiaoProjectsButton />
+        <TestEnvMenu />
         <JournalButton />
         <DingGroupsMenu />
         <WeChatButton />
