@@ -166,6 +166,8 @@ export const native = {
     invoke<void>("fs_create_file", { path, workspace: currentWorkspaceEnv() }),
   createDir: (path: string) =>
     invoke<void>("fs_create_dir", { path, workspace: currentWorkspaceEnv() }),
+  /** Windows 上是 ["C:/", "D:/", …],其他平台空数组。 */
+  listDrives: () => invoke<string[]>("fs_list_drives"),
   // AI tooling never sees dot-prefixed entries regardless of the user's
   // explorer preference — keeps .git / .env / .ssh out of agent context.
   readDir: (path: string) =>

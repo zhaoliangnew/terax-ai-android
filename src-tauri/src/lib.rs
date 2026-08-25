@@ -262,6 +262,7 @@ pub fn run() {
             scrcpy::scrcpy_key_event,
             scrcpy::scrcpy_stop,
             fs::tree::list_subdirs,
+            fs::tree::fs_list_drives,
             fs::tree::fs_read_dir,
             fs::file::fs_read_file,
             fs::file::fs_write_file,

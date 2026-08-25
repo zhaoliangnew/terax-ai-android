@@ -213,6 +213,23 @@ pub fn fs_read_dir(
     Ok(entries)
 }
 
+/// Windows: existing drive roots as `["C:/", "D:/", …]` — the drive letters
+/// are parallel roots with nothing above them, so the explorer needs an
+/// explicit list to offer切盘 (walking "up" can never reach a sibling drive).
+/// Elsewhere: empty; everything lives under `/`.
+#[tauri::command]
+pub fn fs_list_drives() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        (b'A'..=b'Z')
+            .filter(|c| std::fs::metadata(format!("{}:\\", *c as char)).is_ok())
+            .map(|c| format!("{}:/", c as char))
+            .collect()
+    }
+    #[cfg(not(windows))]
+    Vec::new()
+}
+
 /// Lists immediate subdirectories of `path`. Kept for the CwdBreadcrumb.
 ///
 /// Symlinks to directories are included (matches shell `cd` semantics).

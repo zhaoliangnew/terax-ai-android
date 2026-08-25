@@ -5,8 +5,15 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
+import { type GitStatusSnapshot, native } from "@/modules/ai/lib/native";
 import {
   CopyProjectDialog,
   getProjectLink,
@@ -18,6 +25,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
+  ArrowDown01Icon,
   ArrowUp01Icon,
   FileAddIcon,
   FilterHorizontalIcon,
@@ -151,13 +159,20 @@ function parentOf(path: string, fallback: string): string {
   return i > 0 ? path.slice(0, i) : fallback;
 }
 
-/** Parent of a root path, or null at the filesystem root (nothing above "/"). */
+/** Parent of a root path, or null at the filesystem root (nothing above "/",
+ * and nothing above a Windows drive root — "D:" 的上一级不存在,盘符之间
+ * 是并列的根,切盘走头部的盘符菜单)。 */
 function parentDir(path: string | null): string | null {
   if (!path) return null;
   const trimmed = path.replace(/\/+$/, "");
+  if (/^[A-Za-z]:$/.test(trimmed)) return null; // Windows 盘符根
   const i = trimmed.lastIndexOf("/");
   if (i < 0) return null;
-  return i === 0 ? "/" : trimmed.slice(0, i);
+  if (i === 0) return "/";
+  const parent = trimmed.slice(0, i);
+  // "D:/sub" 的上一级要带斜杠:裸 "D:" 在 Windows 是"盘相对路径",
+  // 指向进程在 D 盘的当前目录,不是盘根。
+  return /^[A-Za-z]:$/.test(parent) ? `${parent}/` : parent;
 }
 
 function buildRows(
@@ -299,6 +314,18 @@ export const FileExplorer = memo(
       return () => ro.disconnect();
       // rootPath: 空目录态渲染的是另一棵树,头部这会儿还不存在,拿到根目录才挂得上。
     }, [rootPath]);
+
+    // Windows 的盘符是并列的根,「上一级」永远爬不到隔壁盘 —— 根标签做成
+    // 盘符菜单才能切过去。只有能设根目录的左栏需要;别的平台列表为空。
+    const canSwitchDrive = IS_WINDOWS && !!onSetAsRoot;
+    const [drives, setDrives] = useState<string[]>([]);
+    useEffect(() => {
+      if (!canSwitchDrive) return;
+      native
+        .listDrives()
+        .then(setDrives)
+        .catch(() => {});
+    }, [canSwitchDrive]);
 
     // 产品目录动辄上百个,平时只关心开着 tab 的那几个 —— 这个开关把树收成
     // "只留有打开 tab 的工程 + 它们的父目录"。
@@ -810,19 +837,65 @@ export const FileExplorer = memo(
           ref={headerRef}
           className="flex h-8 shrink-0 items-center gap-1 overflow-hidden border-b border-border/60 px-2"
         >
-          <span
-            className="flex min-w-0 flex-1 items-center truncate text-xs font-medium text-foreground/80"
-            title={rootPath}
-          >
-            <img
-              src={folderIconUrl(basename(rootPath), false)}
-              alt=""
-              height={15}
-              width={15}
-              className="mx-1.5 shrink-0"
-            />
-            <span className="truncate">{basename(rootPath)}</span>
-          </span>
+          {drives.length > 1 && onSetAsRoot ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  title={`${rootPath} · 点击切换盘符`}
+                  className="flex min-w-0 flex-1 cursor-pointer items-center truncate rounded text-left text-xs font-medium text-foreground/80 hover:bg-accent/60"
+                >
+                  <img
+                    src={folderIconUrl(basename(rootPath), false)}
+                    alt=""
+                    height={15}
+                    width={15}
+                    className="mx-1.5 shrink-0"
+                  />
+                  <span className="truncate">{basename(rootPath)}</span>
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    size={11}
+                    strokeWidth={2}
+                    className="ml-0.5 shrink-0 text-muted-foreground/70"
+                  />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-24">
+                {drives.map((d) => {
+                  const current =
+                    rootPath.slice(0, 2).toUpperCase() ===
+                    d.slice(0, 2).toUpperCase();
+                  return (
+                    <DropdownMenuItem
+                      key={d}
+                      onSelect={() => onSetAsRoot(d)}
+                      className={cn(
+                        COMPACT_ITEM,
+                        current && "font-semibold text-foreground",
+                      )}
+                    >
+                      {d.slice(0, 2)}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <span
+              className="flex min-w-0 flex-1 items-center truncate text-xs font-medium text-foreground/80"
+              title={rootPath}
+            >
+              <img
+                src={folderIconUrl(basename(rootPath), false)}
+                alt=""
+                height={15}
+                width={15}
+                className="mx-1.5 shrink-0"
+              />
+              <span className="truncate">{basename(rootPath)}</span>
+            </span>
+          )}
 
           <ExplorerHeaderActions actions={actions} width={headerWidth} />
         </div>
