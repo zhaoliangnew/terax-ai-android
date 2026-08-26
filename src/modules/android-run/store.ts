@@ -40,6 +40,8 @@ export type KnownDevice = {
   model: string;
   androidVersion: string;
   apiLevel: string;
+  /** /sdcard/key.txt 里的激活 key;设备在线时刷新,离线显示最后读到的。 */
+  key?: string;
   lastSeen: number;
 };
 
@@ -176,6 +178,8 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
             model: d.model,
             androidVersion: d.androidVersion,
             apiLevel: d.apiLevel,
+            // 这次没读到(文件被删/超时)就保留上次的,别闪没
+            key: d.key || existing?.key || "",
             lastSeen: existing?.lastSeen ?? Date.now(),
           };
         }

@@ -323,20 +323,37 @@ export function DeviceManagerPanel() {
                         {d.model}
                       </span>
                     </span>
-                    <button
-                      type="button"
-                      title={`点击复制 · ${d.sn}`}
-                      onClick={(e) => {
-                        // 卡片本身点一下就选中/连接设备,SN 这行要单独接住点击、
-                        // 别让事件冒上去触发那个。
-                        e.stopPropagation();
-                        void copyToClipboard(d.sn);
-                        toast.success("已复制 SN", { description: d.sn });
-                      }}
-                      className="w-full min-w-0 truncate text-left text-[12px] text-muted-foreground/70 hover:text-foreground hover:underline"
-                    >
-                      SN:{d.sn}
-                    </button>
+                    <span className="flex w-full min-w-0 items-center gap-2 text-[12px] text-muted-foreground/70">
+                      <button
+                        type="button"
+                        title={`点击复制 · ${d.sn}`}
+                        onClick={(e) => {
+                          // 卡片本身点一下就选中/连接设备,SN 这行要单独接住点击、
+                          // 别让事件冒上去触发那个。
+                          e.stopPropagation();
+                          void copyToClipboard(d.sn);
+                          toast.success("已复制 SN", { description: d.sn });
+                        }}
+                        className="min-w-0 shrink-0 truncate text-left hover:text-foreground hover:underline"
+                      >
+                        SN:{d.sn}
+                      </button>
+                      {/* /sdcard/key.txt 的激活 key:在线时刷新,离线显示最后读到的 */}
+                      {d.key && (
+                        <button
+                          type="button"
+                          title={`点击复制 key · ${d.key}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void copyToClipboard(d.key ?? "");
+                            toast.success("已复制 key", { description: d.key });
+                          }}
+                          className="min-w-0 truncate text-left hover:text-foreground hover:underline"
+                        >
+                          key:{d.key}
+                        </button>
+                      )}
+                    </span>
                     <span className="w-full min-w-0 truncate text-[13px] text-muted-foreground">
                       {d.serial} · Android {d.androidVersion} · API {d.apiLevel}
                       {connectingSn === d.sn && " · 连接中…"}

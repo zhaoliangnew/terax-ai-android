@@ -1,10 +1,10 @@
 import { IS_WINDOWS } from "@/lib/platform";
+import { native } from "@/modules/ai/lib/native";
 import {
+  type AdbShellPlatform,
   buildAdbCommand,
   buildAdbDiscoveryCommand,
-  type AdbShellPlatform,
 } from "@/modules/android-run/lib/adbShell";
-import { native } from "@/modules/ai/lib/native";
 
 export type AdbDevice = {
   serial: string;
@@ -17,6 +17,8 @@ export type AdbDevice = {
   /** Hardware serial number (ro.serialno) — distinct from `serial`, which for
    * a network device is its "ip:port" adb connection address, not the SN. */
   sn: string;
+  /** 设备上 /sdcard/key.txt 的内容(激活 key);没有该文件为空串。 */
+  key: string;
 };
 
 const ADB_TIMEOUT_SECS = 5;
@@ -85,6 +87,18 @@ async function getprop(serial: string, prop: string): Promise<string> {
   }
 }
 
+/** 设备激活 key(/sdcard/key/key.txt,key 是个目录)的第一行。
+ * 没有文件/读不到返回空串。 */
+async function readDeviceKey(serial: string): Promise<string> {
+  try {
+    const out = await adb("shell cat /sdcard/key/key.txt", serial);
+    if (/no such file/i.test(out)) return "";
+    return out.trim().split(/\r?\n/)[0]?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
 /** `adb connect <host[:port]>` — port defaults to 5555 (adb's TCP/IP default). */
 export async function connectDevice(hostPort: string): Promise<void> {
   const target = hostPort.includes(":") ? hostPort : `${hostPort}:5555`;
@@ -127,15 +141,18 @@ export async function listDevices(): Promise<AdbDevice[]> {
           androidVersion: "",
           apiLevel: "",
           sn: "",
+          key: "",
         };
       }
-      const [vendor, model, androidVersion, apiLevel, sn] = await Promise.all([
-        getprop(row.serial, "ro.product.manufacturer"),
-        getprop(row.serial, "ro.product.model"),
-        getprop(row.serial, "ro.build.version.release"),
-        getprop(row.serial, "ro.build.version.sdk"),
-        getprop(row.serial, "ro.serialno"),
-      ]);
+      const [vendor, model, androidVersion, apiLevel, sn, key] =
+        await Promise.all([
+          getprop(row.serial, "ro.product.manufacturer"),
+          getprop(row.serial, "ro.product.model"),
+          getprop(row.serial, "ro.build.version.release"),
+          getprop(row.serial, "ro.build.version.sdk"),
+          getprop(row.serial, "ro.serialno"),
+          readDeviceKey(row.serial),
+        ]);
       return {
         ...row,
         vendor,
@@ -143,6 +160,7 @@ export async function listDevices(): Promise<AdbDevice[]> {
         androidVersion,
         apiLevel,
         sn,
+        key,
       };
     }),
   );
