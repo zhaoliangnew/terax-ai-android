@@ -9,8 +9,8 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AndroidRunToolbar } from "./AndroidRunToolbar";
 import { DeviceManagerPanel } from "./DeviceManagerPanel";
 import { DeviceMirror } from "./DeviceMirror";
-import { highlightSerial } from "./lib/highlightSerial";
 import LogcatPanel from "./LogcatDock";
+import { highlightSerial } from "./lib/highlightSerial";
 import {
   useActiveProductConfig,
   useAndroidRunStore,
@@ -21,9 +21,13 @@ import {
 export default function DevicePanel() {
   const devices = useAndroidRunStore((s) => s.devices);
   const setMirroring = useAndroidRunStore((s) => s.setMirroring);
+  const setDeviceManagerOpen = useAndroidRunStore(
+    (s) => s.setDeviceManagerOpen,
+  );
   const { serial: selectedSerial, mirroring } = useActiveProductConfig();
   const device = devices.find((d) => d.serial === selectedSerial) ?? null;
   const online = device?.state === "device";
+  const anyOnline = devices.some((d) => d.state === "device");
 
   // Every device any product wants mirrored — kept alive across tab switches.
   const mirroringSerials = useMirroringSerials();
@@ -93,12 +97,16 @@ export default function DevicePanel() {
               />
             ))}
             {!(mirroring && selectedSerial) && (
-              // 整块空白就是"开始投屏"的按钮 —— 比让人去右上角找那颗小按钮
-              // 顺手得多。没有在线设备时退化成纯提示。
+              // 整块空白就是动作按钮 —— 比让人去右上角找那颗小按钮顺手得多。
+              // 选中了在线设备:点击开始投屏;有在线设备但没选中(比如刚断开
+              // 了上一台):点击打开设备列表去选,别谎报"没有在线设备"。
               <button
                 type="button"
-                disabled={!online}
-                onClick={() => setMirroring(true)}
+                disabled={!online && !anyOnline}
+                onClick={() => {
+                  if (online) setMirroring(true);
+                  else if (anyOnline) setDeviceManagerOpen(true);
+                }}
                 className="absolute inset-0 flex items-center justify-center enabled:cursor-pointer enabled:hover:bg-accent/20"
               >
                 <span className="flex flex-col items-center gap-2 text-muted-foreground">
@@ -108,7 +116,11 @@ export default function DevicePanel() {
                     strokeWidth={1}
                   />
                   <span className="text-[12px]">
-                    {online ? "点击开始投屏" : "没有在线设备"}
+                    {online
+                      ? "点击开始投屏"
+                      : anyOnline
+                        ? "未选择设备 · 点击选择"
+                        : "没有在线设备"}
                   </span>
                 </span>
               </button>

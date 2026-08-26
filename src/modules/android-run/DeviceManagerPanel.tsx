@@ -60,16 +60,23 @@ export function DeviceManagerPanel() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, setOpen]);
 
+  // 隐藏离线设备的开关,记住上次的选择
+  const [hideOffline, setHideOffline] = useState(
+    () => localStorage.getItem("terax.android.hideOfflineDevices") === "1",
+  );
+  useEffect(() => {
+    localStorage.setItem(
+      "terax.android.hideOfflineDevices",
+      hideOffline ? "1" : "0",
+    );
+  }, [hideOffline]);
+
   const isSnOnline = (sn: string) =>
     liveDevices.some((x) => x.sn === sn && x.state === "device");
 
-  // Online devices first (so the ones you can actually act on right now
-  // aren't buried below a pile of history); within each group, sort by IP
-  // numerically (so .9 sorts before .71) — that's what people actually
-  // scan by on a subnet with dozens of look-alike devices.
+  // 只按 IP 数值排(.9 排在 .71 前面),不做"在线优先"分组 —— 分组会让
+  // 卡片随着设备上下线来回挪,固定的 IP 顺序才是肌肉记忆能记住的。
   const list = Object.values(knownDevices).sort((a, b) => {
-    const onlineDiff = Number(isSnOnline(b.sn)) - Number(isSnOnline(a.sn));
-    if (onlineDiff !== 0) return onlineDiff;
     const ipA = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(a.serial);
     const ipB = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(b.serial);
     if (ipA && ipB) {
@@ -83,6 +90,7 @@ export function DeviceManagerPanel() {
     if (ipB) return 1;
     return a.serial.localeCompare(b.serial);
   });
+  const shown = hideOffline ? list.filter((d) => isSnOnline(d.sn)) : list;
 
   const onPick = async (sn: string, serial: string) => {
     const live = liveDevices.find((d) => d.sn === sn && d.state === "device");
@@ -175,6 +183,18 @@ export function DeviceManagerPanel() {
             <Button
               variant="outline"
               size="sm"
+              title={hideOffline ? "当前只显示在线设备" : "隐藏离线设备"}
+              onClick={() => setHideOffline((v) => !v)}
+              className={cn(
+                "h-7 gap-1.5 px-2 text-[12px]",
+                hideOffline && "border-emerald-500/50 text-emerald-500",
+              )}
+            >
+              只看在线
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
               className="h-7 gap-1.5 px-2 text-[12px]"
               onClick={() => void refreshDevices()}
             >
@@ -234,12 +254,14 @@ export function DeviceManagerPanel() {
                 </span>
               )}
             </div>
-            {list.length === 0 && (
+            {shown.length === 0 && (
               <div className="col-span-2 px-3 py-6 text-center text-sm text-muted-foreground">
-                还没有连接过的设备
+                {list.length === 0
+                  ? "还没有连接过的设备"
+                  : "没有在线设备(右上角开关关掉可看离线记录)"}
               </div>
             )}
-            {list.map((d) => {
+            {shown.map((d) => {
               const live = liveDevices.find(
                 (x) => x.sn === d.sn && x.state === "device",
               );

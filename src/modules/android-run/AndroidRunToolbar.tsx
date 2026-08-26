@@ -109,11 +109,15 @@ export function AndroidRunToolbar({ compact }: Props) {
         />
         <HugeiconsIcon icon={SmartPhone01Icon} size={13} strokeWidth={1.75} />
         <span className="truncate">
+          {/* 有在线设备只是没选中,说"未选择"并引导去选 —— 写"无设备"
+              是睁眼说瞎话 */}
           {selectedDevice
             ? `${selectedDevice.vendor ? `${selectedDevice.vendor} ` : ""}${selectedDevice.model}`
             : devicesLoading
               ? "扫描设备…"
-              : "无设备"}
+              : devices.some((d) => d.state === "device")
+                ? "选择设备"
+                : "无设备"}
         </span>
       </Button>
 

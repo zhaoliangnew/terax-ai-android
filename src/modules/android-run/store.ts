@@ -149,15 +149,17 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
     try {
       const devices = await listDevices();
       set((s) => {
-        // Fix up any product whose chosen device went offline.
-        const firstOnline = devices.find((d) => d.state === "device");
+        // 选中的设备断开:回到未选择并停掉投屏,由用户自己挑下一台。
+        // 原来这里自动跳到第一台在线设备,镜像跟着切到别人的机器上,
+        // 吓一跳。初始默认设备在 selectProject 建配置时给,这里不再自动填。
         const byProduct = { ...s.byProduct };
         for (const [root, cfg] of Object.entries(byProduct)) {
+          if (cfg.serial === null) continue;
           const stillValid = devices.some(
             (d) => d.serial === cfg.serial && d.state === "device",
           );
           if (!stillValid) {
-            byProduct[root] = { ...cfg, serial: firstOnline?.serial ?? null };
+            byProduct[root] = { ...cfg, serial: null, mirroring: false };
           }
         }
         // Remember every device we've actually talked to, for the "历史设备"
