@@ -67,6 +67,8 @@ export type EntryRowProps = {
   projectPtyIds?: Record<string, number[]>;
   /** 这个目录本身绑了云效项目,行尾挂个云图标(不含从父目录继承的)。 */
   yunxiaoLinked?: boolean;
+  /** 工程当前所在分支(只有开着 tab 的工程才有),灰字跟在名字后面。 */
+  branch?: string | null;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -91,6 +93,7 @@ function EntryRowImpl(props: EntryRowProps) {
     isOpenedProject = false,
     projectPtyIds,
     yunxiaoLinked = false,
+    branch = null,
   } = props;
 
   const asProject = projectKind !== null && !!onOpenProject;
@@ -193,7 +196,9 @@ function EntryRowImpl(props: EntryRowProps) {
           没开过(灰)。绿色只留给选中态,否则满屏绿字等于没标记。 */}
       <span
         className={cn(
-          "min-w-0 flex-1 truncate",
+          "min-w-0 truncate",
+          // 有分支要显示时名字不再撑满,分支紧跟在名字后面而不是被推到最右
+          asProject && branch ? "max-w-[60%] shrink-0" : "flex-1",
           asProject && !isActiveProject
             ? isOpenedProject
               ? "font-semibold text-foreground"
@@ -206,6 +211,13 @@ function EntryRowImpl(props: EntryRowProps) {
       >
         {name}
       </span>
+      {/* 开着 tab 的工程把当前分支亮出来:多工程并行时"哪个在哪个分支"
+          是最常核对的事,不用挨个点进去看底栏 */}
+      {asProject && branch && (
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/60">
+          {branch}
+        </span>
+      )}
       {/* 工程挂着 worktree 就标出来,数量带圆底 */}
       {asProject && (
         <WorktreeCountBadge projectRoot={path} className="shrink-0" />
@@ -239,6 +251,81 @@ function EntryRowImpl(props: EntryRowProps) {
 }
 
 export const EntryRow = memo(EntryRowImpl);
+
+/**
+ * 工程下挂的 worktree 子行:同一个仓库临时切出来修 bug 的平行工作区。
+ * 点击当独立工程打开 —— 它有自己的终端 tab、设备选择和投屏,和主工程
+ * 互不干扰,两边可以各连一台设备同时开发。
+ */
+function WorktreeRowImpl({
+  path,
+  name,
+  branch,
+  depth,
+  onOpen,
+  isActive,
+  isOpened,
+  projectPtyIds,
+}: {
+  path: string;
+  name: string;
+  branch: string;
+  depth: number;
+  onOpen?: (path: string) => void;
+  isActive: boolean;
+  isOpened: boolean;
+  projectPtyIds?: Record<string, number[]>;
+}) {
+  const agentState = useProjectAgentState(path, projectPtyIds ?? {});
+  return (
+    <button
+      type="button"
+      data-fs-path={path}
+      title={`worktree · ${path}\n分支 ${branch} · 点击打开(独立终端/投屏)`}
+      onClick={() => onOpen?.(path)}
+      className={cn(
+        "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
+        isActive
+          ? "bg-emerald-500/15 font-semibold text-emerald-400"
+          : "text-foreground/85",
+      )}
+      style={{ paddingLeft: 6 + depth * 12 }}
+    >
+      <span className="size-3.5 shrink-0" />
+      {agentState ? (
+        <span
+          title={AGENT_STATE_LABEL[agentState]}
+          className={cn(
+            "inline-block size-4 shrink-0 text-center text-[13px] leading-4",
+            agentState === "attention" && "animate-pulse",
+          )}
+        >
+          {AGENT_STATE_EMOJI[agentState]}
+        </span>
+      ) : (
+        <span className="shrink-0 rounded bg-foreground/10 px-1 text-[9.5px] leading-4 text-muted-foreground">
+          tree
+        </span>
+      )}
+      <span
+        className={cn(
+          "min-w-0 shrink-0 truncate",
+          !isActive &&
+            (isOpened ? "font-semibold text-foreground" : "text-foreground/70"),
+        )}
+      >
+        {name}
+      </span>
+      {/* 分支名灰字跟在后面,一眼知道这个 worktree 在干什么。
+          同名也照样显示 —— "分支到底是啥"不该让人猜 */}
+      <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground/60">
+        {branch}
+      </span>
+    </button>
+  );
+}
+
+export const WorktreeRow = memo(WorktreeRowImpl);
 
 export type PendingRowProps = {
   depth: number;

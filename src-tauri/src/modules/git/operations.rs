@@ -1114,10 +1114,14 @@ pub fn list_branches(
         let mut worktree_branch: Option<String> = None;
         let mut worktree_bare = false;
         let mut head_sha: Option<String> = None;
+        // porcelain 的第一条永远是主检出(bare 仓库时是 bare 本身),它不是
+        // "挂出来的 worktree"。不跳过的话,从 linked worktree 里查时主检出
+        // 会被当成 worktree 列出来,面板上还带着"删除"按钮。
+        let mut is_main = true;
         for line in &lines {
             if let Some(rest) = line.strip_prefix("worktree ") {
                 if let Some(wt_path) = current_worktree.take() {
-                    if !worktree_bare {
+                    if !is_main && !worktree_bare {
                         push_worktree(
                             &mut branches,
                             wt_path,
@@ -1125,6 +1129,7 @@ pub fn list_branches(
                             head_sha.take(),
                         );
                     }
+                    is_main = false;
                 }
                 current_worktree = Some(rest.trim().to_string());
                 worktree_branch = None;
@@ -1140,7 +1145,7 @@ pub fn list_branches(
             }
         }
         if let Some(wt_path) = current_worktree.take() {
-            if !worktree_bare {
+            if !is_main && !worktree_bare {
                 push_worktree(
                     &mut branches,
                     wt_path,
@@ -1151,8 +1156,10 @@ pub fn list_branches(
         }
     }
 
-    // Prefer a branch's worktree entry over its local one, except for the current
-    // branch: the main worktree is always listed, so !is_head keeps it local.
+    // Prefer a branch's worktree entry over its local one. 当前分支也一样:
+    // 从 linked worktree 里打开面板时,当前分支本身就挂在 worktree 上,
+    // 得保留 worktree 身份(徽章/底部 WORKTREE 区),✓ 和领先/落后数
+    // 从本地条目并过来。主检出已在解析时跳过,不会走到这里。
     let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut deduped: Vec<GitBranchEntry> = Vec::with_capacity(branches.len());
     for b in branches {
@@ -1160,8 +1167,7 @@ pub fn list_branches(
             let existing = &deduped[existing_idx];
             let should_replace = b.kind == "worktree"
                 && existing.kind == "local"
-                && existing.worktree_path.is_none()
-                && !existing.is_head;
+                && existing.worktree_path.is_none();
             if should_replace {
                 let is_head = existing.is_head || b.is_head;
                 // worktree 条目自己不带 ahead/behind,沿用本地条目算好的
@@ -1250,6 +1256,14 @@ pub fn worktree_add(
 ) -> Result<String> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
+    // 在 worktree 里再建 worktree 会套娃出 <主工程>/.worktree/A/.worktree/B,
+    // 树和面包屑全乱套。要建去主工程建。
+    if repo_root.git_path.replace('\\', "/").contains("/.worktree/") {
+        return Err(GitError::command(
+            "git worktree add",
+            "当前已在 worktree 里,请回主工程创建 worktree",
+        ));
+    }
     if base_ref.is_empty() || base_ref.starts_with('-') {
         return Err(GitError::InvalidPath(base_ref.into()));
     }

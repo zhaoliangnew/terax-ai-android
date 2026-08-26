@@ -51,6 +51,7 @@ import {
   supportsSessionActions,
   UrlPromptDialog,
   useAndroidRunStore,
+  useProjectGitInfo,
   YunxiaoProjectPickerDialog,
   YunxiaoReposPanel,
 } from "@/modules/android-run";
@@ -395,6 +396,14 @@ export default function App() {
 
   // 当前产品(gradle 工程根),由 android-run 从活动终端 cwd 发现。
   const androidProjectRoot = useAndroidRunStore((s) => s.projectRoot);
+  // worktree 目录藏在主工程的 .worktree 里,面包屑按原样切段会显示成
+  // ".worktree / worktree_xxx",认不出是谁的 —— 展示一律换算成主工程,
+  // worktree 名单独作为一段接在后面。
+  const worktreeMatch = androidProjectRoot
+    ? /^(.*)\/\.worktree\/([^/]+)$/.exec(androidProjectRoot)
+    : null;
+  const displayProjectRoot = worktreeMatch?.[1] ?? androidProjectRoot;
+  const activeWorktreeName = worktreeMatch?.[2] ?? null;
   // 只有真正的 Android/Flutter 工程才值得多开一块产品文件区,普通 gradle
   // 工程(没有 AndroidManifest,也不是 Flutter)不算,避免误判。
   const [productDirSupported, setProductDirSupported] = useState(false);
@@ -440,7 +449,11 @@ export default function App() {
     if (!androidProjectRoot) return;
     if (androidProjectRoot === lastRevealedRef.current) return;
     lastRevealedRef.current = androidProjectRoot;
-    explorerRef.current?.revealPath(androidProjectRoot);
+    // worktree 目录不能直接 reveal:它藏在工程目录里面,展开祖先会把
+    // 工程内部(.git/.worktree/…)整个翻出来。树里它有自己的合成子行,
+    // 定位到所属的主工程行就够了。
+    const wt = /^(.*)\/\.worktree\/[^/]+$/.exec(androidProjectRoot);
+    explorerRef.current?.revealPath(wt ? wt[1] : androidProjectRoot);
   }, [androidProjectRoot]);
 
   // 产品文件区默认收起 —— 大多数时候左栏的项目树就够用了,展开一次后
@@ -831,6 +844,8 @@ export default function App() {
   const [openedProjectPaths, setOpenedProjectPaths] = useState<Set<string>>(
     () => new Set(),
   );
+  // 已打开工程的 git 概况:树行尾显示当前分支,工程下挂 worktree 子行
+  const projectGitByPath = useProjectGitInfo(openedProjectPaths);
   const [projectPtyIds, setProjectPtyIds] = useState<Record<string, number[]>>(
     {},
   );
@@ -1624,6 +1639,7 @@ export default function App() {
                               activeProjectPath={androidProjectRoot}
                               openedProjectPaths={openedProjectPaths}
                               projectPtyIds={projectPtyIds}
+                              projectGitByPath={projectGitByPath}
                               onOpenInSourceControl={
                                 handleOpenRepositoryInSourceControl
                               }
@@ -1740,14 +1756,15 @@ export default function App() {
                           />
                           <ProductLinkChip
                             dir={
-                              androidProjectRoot
+                              (displayProjectRoot ?? androidProjectRoot)
                                 .split("/")
                                 .slice(0, -1)
                                 .join("/") || androidProjectRoot
                             }
                             label={
-                              androidProjectRoot.split("/").slice(-2, -1)[0] ??
-                              ""
+                              (displayProjectRoot ?? androidProjectRoot)
+                                .split("/")
+                                .slice(-2, -1)[0] ?? ""
                             }
                             linkVersion={linkVersion}
                             onLink={setProjectLinkDir}
@@ -1757,8 +1774,20 @@ export default function App() {
                             /
                           </span>
                           <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
-                            {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
+                            {(displayProjectRoot ?? androidProjectRoot)
+                              .split("/")
+                              .slice(-1)[0] ?? ""}
                           </span>
+                          {activeWorktreeName && (
+                            <>
+                              <span className="shrink-0 text-muted-foreground/40">
+                                /
+                              </span>
+                              <span className="shrink-0 text-foreground/80">
+                                {activeWorktreeName}
+                              </span>
+                            </>
+                          )}
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             className="max-w-40 text-[13px]"
@@ -1836,14 +1865,15 @@ export default function App() {
                           />
                           <ProductLinkChip
                             dir={
-                              androidProjectRoot
+                              (displayProjectRoot ?? androidProjectRoot)
                                 .split("/")
                                 .slice(0, -1)
                                 .join("/") || androidProjectRoot
                             }
                             label={
-                              androidProjectRoot.split("/").slice(-2, -1)[0] ??
-                              ""
+                              (displayProjectRoot ?? androidProjectRoot)
+                                .split("/")
+                                .slice(-2, -1)[0] ?? ""
                             }
                             linkVersion={linkVersion}
                             onLink={setProjectLinkDir}
@@ -1853,8 +1883,20 @@ export default function App() {
                             /
                           </span>
                           <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
-                            {androidProjectRoot.split("/").slice(-1)[0] ?? ""}
+                            {(displayProjectRoot ?? androidProjectRoot)
+                              .split("/")
+                              .slice(-1)[0] ?? ""}
                           </span>
+                          {activeWorktreeName && (
+                            <>
+                              <span className="shrink-0 text-muted-foreground/40">
+                                /
+                              </span>
+                              <span className="shrink-0 text-foreground/80">
+                                {activeWorktreeName}
+                              </span>
+                            </>
+                          )}
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             className="max-w-40 text-[13px]"

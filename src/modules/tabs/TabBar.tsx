@@ -45,6 +45,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -79,7 +80,7 @@ type Props = {
 };
 
 export function TabBar({
-  tabs,
+  tabs: allTabs,
   activeId,
   onSelect,
   onNew,
@@ -98,6 +99,17 @@ export function TabBar({
   onOverrideLanguage,
   compact,
 }: Props) {
+  // worktree 的终端 tab 不占 tab 条:它的入口/切换在左侧项目树的子行上,
+  // 再挂到条上就是同一个东西占两处。tab 本身还活着(pty/投屏/Claude 会话
+  // 都在),只是不画;cmd+W 关的仍是真正的活动 tab。
+  const tabs = useMemo<Tab[]>(
+    () =>
+      allTabs.filter(
+        (t) =>
+          !(t.kind === "terminal" && (t.cwd ?? "").includes("/.worktree/")),
+      ),
+    [allTabs],
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -311,7 +323,14 @@ export function TabBar({
                   onPointerUp={(e) => {
                     const st = drag.current;
                     if (st?.active && dropGap !== null) {
-                      onReorder(st.fromId, dropGap);
+                      // gap 是可见列表的下标;藏起来的 worktree tab 仍在
+                      // 完整列表里,得换算回完整列表的插入位置
+                      onReorder(
+                        st.fromId,
+                        dropGap >= tabs.length
+                          ? allTabs.length
+                          : allTabs.findIndex((x) => x.id === tabs[dropGap].id),
+                      );
                     } else if (st && !st.active) {
                       onSelect(t.id);
                     }

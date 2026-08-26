@@ -22,8 +22,18 @@ function fitFont(
 /** 终端空白处的水印:产品名 / 工程名 / 分支名,纯装饰。 */
 export function ProjectWatermark({ projectRoot }: { projectRoot: string }) {
   const branch = useProjectBranch(projectRoot);
-  const product = projectRoot.split("/").slice(-2, -1)[0] ?? "";
-  const project = projectRoot.split("/").slice(-1)[0] ?? "";
+  // worktree 藏在主工程的 .worktree 里,按原样切段会显示 ".worktree /
+  // worktree_xxx",认不出是谁的 —— 前两行显示主工程的产品/工程名,
+  // worktree 名并进分支那行。
+  const wt = /^(.*)\/\.worktree\/([^/]+)$/.exec(projectRoot);
+  const baseRoot = wt?.[1] ?? projectRoot;
+  const product = baseRoot.split("/").slice(-2, -1)[0] ?? "";
+  const project = baseRoot.split("/").slice(-1)[0] ?? "";
+  const line3 = wt
+    ? branch && branch !== wt[2]
+      ? `${wt[2]} · ${branch}`
+      : wt[2]
+    : branch;
   return (
     <div
       aria-hidden
@@ -41,12 +51,12 @@ export function ProjectWatermark({ projectRoot }: { projectRoot: string }) {
       >
         {project}
       </span>
-      {branch && (
+      {line3 && (
         <span
           className="max-w-full whitespace-nowrap leading-none tracking-[0.2em]"
-          style={{ fontSize: fitFont(branch, 0.2, 64, 54) }}
+          style={{ fontSize: fitFont(line3, 0.2, 64, 54) }}
         >
-          {branch}
+          {line3}
         </span>
       )}
     </div>

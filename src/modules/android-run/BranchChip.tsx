@@ -321,6 +321,7 @@ export function WorktreeCountBadge({
 
   if (count <= 0) return null;
   return (
+    // 写全 "worktree" 一行里太占地方,试过图标又都像分支 —— 缩写成 tree
     <span
       className={cn(
         "flex shrink-0 items-stretch overflow-hidden rounded",
@@ -328,9 +329,8 @@ export function WorktreeCountBadge({
       )}
       title={`${count} 个 worktree`}
     >
-      {/* 一体两段:文字浅底,数字深一档,拼成一枚徽标;字号行高一致 */}
       <span className="bg-foreground/10 px-1 py-px text-[10.5px] leading-4 text-muted-foreground">
-        worktree
+        tree
       </span>
       <span className="bg-foreground/20 px-1 py-px text-[10.5px] leading-4 font-semibold text-foreground/85 tabular-nums">
         {count}
@@ -498,6 +498,9 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
   const [checkingOut, setCheckingOut] = useState(false);
   const checkoutInFlight = useRef(false);
   const repoRoot = repo?.repoRoot ?? null;
+  // 当前面板开在一个 worktree 上:不给再建 worktree(会套娃出
+  // A/.worktree/B),Rust 侧也有同样的拦截兜底
+  const inWorktree = !!repoRoot && /\/\.worktree\/[^/]+$/.test(repoRoot);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: listVersion 是 worktree 增删后"重新拉一次列表"的信号
   useEffect(() => {
@@ -1090,7 +1093,10 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
                           {b.name}
                         </span>
                         {b.kind === "worktree" && (
-                          <span className="shrink-0 rounded bg-foreground/10 px-1 text-[9.5px] text-muted-foreground">
+                          <span
+                            title={`这个分支检出在平行工作目录里${b.worktreePath ? `:\n${b.worktreePath}\n` : ","}一个分支同时只能被一个工作区检出,这里切不了 —— 去左侧项目树点对应的 worktree 子行使用`}
+                            className="shrink-0 rounded bg-foreground/10 px-1 text-[9.5px] text-muted-foreground"
+                          >
                             worktree
                           </span>
                         )}
@@ -1132,18 +1138,20 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
                       >
                         基于此分支新建分支…
                       </ContextMenuItem>
-                      <ContextMenuItem
-                        className="text-[12px]"
-                        onSelect={() =>
-                          setPendingWorktree({
-                            baseRef: b.name,
-                            shortName: b.name,
-                            label: `分支 ${b.name}`,
-                          })
-                        }
-                      >
-                        为此分支创建 worktree…
-                      </ContextMenuItem>
+                      {!inWorktree && (
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() =>
+                            setPendingWorktree({
+                              baseRef: b.name,
+                              shortName: b.name,
+                              label: `分支 ${b.name}`,
+                            })
+                          }
+                        >
+                          为此分支创建 worktree…
+                        </ContextMenuItem>
+                      )}
                       {/* 当前分支和被 worktree 占用的分支 git 都不让删 */}
                       {b.kind === "local" && !b.isHead && (
                         <>
@@ -1225,18 +1233,20 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
                           >
                             基于此分支新建分支…
                           </ContextMenuItem>
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() =>
-                              setPendingWorktree({
-                                baseRef: b.name,
-                                shortName: remoteShortName(b.name),
-                                label: `远程分支 ${b.name}`,
-                              })
-                            }
-                          >
-                            为此分支创建 worktree…
-                          </ContextMenuItem>
+                          {!inWorktree && (
+                            <ContextMenuItem
+                              className="text-[12px]"
+                              onSelect={() =>
+                                setPendingWorktree({
+                                  baseRef: b.name,
+                                  shortName: remoteShortName(b.name),
+                                  label: `远程分支 ${b.name}`,
+                                })
+                              }
+                            >
+                              为此分支创建 worktree…
+                            </ContextMenuItem>
+                          )}
                           <ContextMenuSeparator />
                           <ContextMenuItem
                             className="text-[12px] text-destructive focus:text-destructive"

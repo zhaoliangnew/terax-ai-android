@@ -19,7 +19,9 @@ import {
   getProjectLink,
   getTaskLink,
   listProjectLinkDirs,
+  type ProjectGitInfo,
   type ProjectKind,
+  type ProjectWorktree,
 } from "@/modules/android-run";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
@@ -64,7 +66,13 @@ import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { useFileTree } from "./lib/useFileTree";
 import { useGitStatus } from "./lib/useGitStatus";
-import { EntryRow, PendingRow, type RowActions, StatusRow } from "./TreeRow";
+import {
+  EntryRow,
+  PendingRow,
+  type RowActions,
+  StatusRow,
+  WorktreeRow,
+} from "./TreeRow";
 
 export type FileExplorerHandle = {
   focus: () => void;
@@ -95,6 +103,8 @@ type Props = {
   openedProjectPaths?: Set<string>;
   /** 工程根 -> 该工程下所有终端 tab 的 pty id,驱动 Claude Code 状态灯。 */
   projectPtyIds?: Record<string, number[]>;
+  /** 工程根 -> git 概况:行尾显示当前分支,worktree 画成工程的子行。 */
+  projectGitByPath?: Record<string, ProjectGitInfo>;
   onOpenInSourceControl?: (path: string) => void;
   onOpenGitHistory?: (path: string) => void;
   onAttachToAgent?: (path: string) => void;
@@ -144,6 +154,15 @@ type Row =
       depth: number;
       tone: "muted" | "error";
       message: string;
+    }
+  | {
+      /** 工程下挂的 worktree,点击当独立工程打开(自己的终端/投屏)。 */
+      kind: "worktree";
+      key: string;
+      path: string;
+      name: string;
+      branch: string;
+      depth: number;
     };
 
 const ROW_HEIGHT = 24;
@@ -181,6 +200,8 @@ function buildRows(
   lookup: (path: string) => GitStatusCode | null,
   /** 非空 = 只保留这些路径(以及它们的父目录),其余整棵子树都不画。 */
   keep: Set<string> | null,
+  /** 目录下挂的 worktree(只有已打开的工程才有),画成子行。 */
+  worktreesFor: ((dirPath: string) => ProjectWorktree[] | undefined) | null,
 ): { rows: Row[]; entryIndexByPath: Map<string, number> } {
   const rows: Row[] = [];
   const entryIndexByPath = new Map<string, number>();
@@ -220,6 +241,20 @@ function buildRows(
           gitignored,
           gitStatusCode,
         });
+      }
+      // 工程挂着 worktree 就直接铺出来(不做展开:临时修 bug 要的就是
+      // 一眼看到、一点就切,而且数量通常就一两个)
+      if (isDir && worktreesFor) {
+        for (const wt of worktreesFor(path) ?? []) {
+          rows.push({
+            kind: "worktree",
+            key: `wt:${wt.path}`,
+            path: wt.path,
+            name: wt.name,
+            branch: wt.branch,
+            depth: depth + 1,
+          });
+        }
       }
       if (isDir && expanded) {
         const child = tree.nodes[path];
@@ -270,6 +305,7 @@ export const FileExplorer = memo(
       onOpenNewTerminal,
       classifyProjectDir,
       onOpenProject,
+      projectGitByPath,
       activeProjectPath,
       openedProjectPaths,
       projectPtyIds,
@@ -377,7 +413,13 @@ export const FileExplorer = memo(
           rows: [] as Row[],
           entryIndexByPath: new Map<string, number>(),
         };
-      return buildRows(rootPath, tree, lookupGitStatus, keepPaths);
+      return buildRows(
+        rootPath,
+        tree,
+        lookupGitStatus,
+        keepPaths,
+        projectGitByPath ? (dir) => projectGitByPath[dir]?.worktrees : null,
+      );
       // `tree` is intentionally omitted: its identity changes every render, but
       // the listed fields are the only inputs buildRows actually reads.
       // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -389,6 +431,7 @@ export const FileExplorer = memo(
       tree.pendingCreate,
       lookupGitStatus,
       keepPaths,
+      projectGitByPath,
     ]);
 
     // Classify visible directories as gradle projects (async, cached). Project
@@ -427,6 +470,14 @@ export const FileExplorer = memo(
         cancelled = true;
       };
     }, [rows, classifyProjectDir, tree.expanded, tree.toggle]);
+
+    // 工程目录任何时候都不该处于展开态:reveal 到工程内部路径之类的操作
+    // 会把它撑开,.git/.worktree 全翻出来。发现就收起,顺带自愈历史状态。
+    useEffect(() => {
+      for (const p of projectDirs.keys()) {
+        if (tree.expanded.has(p)) tree.toggle(p);
+      }
+    }, [projectDirs, tree.expanded, tree.toggle]);
 
     const rowActions = useMemo<RowActions>(
       () => ({
@@ -749,6 +800,11 @@ export const FileExplorer = memo(
               isOpenedProject={!!openedProjectPaths?.has(row.path)}
               projectPtyIds={projectPtyIds}
               yunxiaoLinked={row.isDir && linkedDirs.has(row.path)}
+              branch={
+                row.isDir
+                  ? (projectGitByPath?.[row.path]?.branch ?? null)
+                  : null
+              }
             />
           );
         }
@@ -767,6 +823,19 @@ export const FileExplorer = memo(
               depth={row.depth}
               message={row.message}
               tone={row.tone}
+            />
+          );
+        case "worktree":
+          return (
+            <WorktreeRow
+              path={row.path}
+              name={row.name}
+              branch={row.branch}
+              depth={row.depth}
+              onOpen={onOpenProject}
+              isActive={!!activeProjectPath && row.path === activeProjectPath}
+              isOpened={!!openedProjectPaths?.has(row.path)}
+              projectPtyIds={projectPtyIds}
             />
           );
       }

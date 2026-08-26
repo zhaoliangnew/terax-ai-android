@@ -37,6 +37,11 @@ export {
 export { getCodeupOrgId, projexUrl } from "./lib/codeupApi";
 export { openExternally } from "./lib/openExternally";
 export {
+  type ProjectGitInfo,
+  type ProjectWorktree,
+  useProjectGitInfo,
+} from "./lib/useProjectWorktrees";
+export {
   getProjectLink,
   getTaskLink,
   type LinkedProject,
