@@ -8,17 +8,20 @@ import { MENU_TRIGGER } from "./lib/menuStyles";
 export function JournalButton() {
   const [open, setOpen] = useState(false);
   return (
-    <>
-      <button
-        type="button"
-        title="记一下 · 随手记一条,写日报/周报时一键复制"
-        onClick={() => setOpen(true)}
-        className={MENU_TRIGGER}
-      >
-        <HugeiconsIcon icon={Notebook01Icon} size={13} strokeWidth={1.75} />
-        记一下
-      </button>
-      <JournalDialog open={open} onClose={() => setOpen(false)} />
-    </>
+    <JournalDialog
+      open={open}
+      onOpenChange={setOpen}
+      anchor={
+        <button
+          type="button"
+          title="记一下 · 随手记一条,写日报/周报时一键复制"
+          onClick={() => setOpen((v) => !v)}
+          className={MENU_TRIGGER}
+        >
+          <HugeiconsIcon icon={Notebook01Icon} size={13} strokeWidth={1.75} />
+          记一下
+        </button>
+      }
+    />
   );
 }

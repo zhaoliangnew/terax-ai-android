@@ -45,7 +45,7 @@ export function TestEnvMenu() {
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" title="测试环境直达" className={MENU_TRIGGER}>
           <HugeiconsIcon

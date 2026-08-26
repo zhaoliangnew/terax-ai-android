@@ -1,9 +1,8 @@
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
@@ -20,7 +19,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { MENU_ACTION, MENU_TRIGGER } from "./lib/menuStyles";
+import { MENU_ACTION, MENU_HEAD, MENU_TRIGGER } from "./lib/menuStyles";
 import {
   loadQuickLinks,
   moveQuickLink,
@@ -53,46 +52,56 @@ export function CustomLinksMenu() {
 
   return (
     <>
-      <button
-        type="button"
-        title="收藏夹"
-        onClick={() => {
-          setLinks(loadQuickLinks());
-          setOpen(true);
-        }}
-        className={MENU_TRIGGER}
-      >
-        <HugeiconsIcon icon={Bookmark02Icon} size={13} strokeWidth={1.75} />
-        收藏夹
-      </button>
-
-      {/* 居中弹窗而不是贴着底栏的下拉:收藏会越攒越多,四列方块加一串网页,
-          挂在角落里既压着终端又只能长这么高。 */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[70vh] flex-col gap-0 p-0 sm:max-w-3xl">
-          {/* "添加"跟在标题后面,右上角整片留给关闭按钮 —— 它是绝对定位的
-              (top-4 right-4),挤在同一行右端必然对不齐。 */}
-          <DialogHeader className="flex-row items-center gap-3 space-y-0 border-b border-border px-4 py-3 pr-14">
-            <DialogTitle className="text-[14px] font-semibold">
+      {/* 贴着底栏往上弹,跟测试环境/钉钉直达一个样式 —— 居中大弹窗配上
+          两三条收藏,全屏遮罩顶着一小块内容,看着很怪。内容多了往上长,
+          到上限内部滚动。 */}
+      <Popover modal open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            title="收藏夹"
+            onClick={() => setLinks(loadQuickLinks())}
+            className={MENU_TRIGGER}
+          >
+            <HugeiconsIcon icon={Bookmark02Icon} size={13} strokeWidth={1.75} />
+            收藏夹
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="start"
+          collisionPadding={8}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+          // 编辑收藏是个套在里面的 Dialog,渲染在 portal 里,点它会被当成
+          // "点了外面"把浮层关掉 —— 编辑期间不让关
+          onInteractOutside={(e) => {
+            if (editing !== null) e.preventDefault();
+          }}
+          // 高度固定而不是跟着内容走:收藏少的时候一条贴一条也显小气,
+          // 固定一块稳定的面积,内容多了内部滚动。
+          className="flex h-[30rem] max-h-[calc(100vh-5rem)] w-[38rem] max-w-[calc(100vw-2rem)] flex-col p-0"
+        >
+          <div className={MENU_HEAD}>
+            <span className="flex items-center gap-3">
               收藏夹
-            </DialogTitle>
-            {/* 一个入口就够 —— 弹窗里第一行就是"网址/应用"的开关,
-                在这儿再分一次是重复。 */}
-            <button
-              type="button"
-              title="添加收藏"
-              onClick={() => add()}
-              className={MENU_ACTION}
-            >
-              <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
-              添加
-            </button>
-          </DialogHeader>
+              {/* 一个入口就够 —— 弹窗里第一行就是"网址/应用"的开关,
+                  在这儿再分一次是重复。 */}
+              <button
+                type="button"
+                title="添加收藏"
+                onClick={() => add()}
+                className={MENU_ACTION}
+              >
+                <HugeiconsIcon icon={PlusSignIcon} size={12} strokeWidth={2} />
+                添加
+              </button>
+            </span>
+          </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto pb-2">
             {custom.length === 0 && (
               <div className="px-3 py-8 text-center text-[12.5px] text-muted-foreground/50">
-                还没有收藏 —— 右上角加个应用或网页
+                还没有收藏 —— 点上面「添加」收个应用或网页
               </div>
             )}
 
@@ -105,7 +114,11 @@ export function CustomLinksMenu() {
                       <button
                         type="button"
                         title={`打开 ${l.url}`}
-                        onClick={() => openQuickLink(l)}
+                        // 跳过去就顺手关掉:打开收藏就是为了去那儿,浮层留着反而挡事
+                        onClick={() => {
+                          openQuickLink(l);
+                          setOpen(false);
+                        }}
                         className="flex w-full flex-col items-center gap-1.5 rounded-lg border border-border/50 px-2 py-2.5 transition-colors hover:border-ring/60 hover:bg-accent"
                       >
                         <HugeiconsIcon
@@ -167,7 +180,10 @@ export function CustomLinksMenu() {
                       <button
                         type="button"
                         title={l.url}
-                        onClick={() => openQuickLink(l)}
+                        onClick={() => {
+                          openQuickLink(l);
+                          setOpen(false);
+                        }}
                         className="flex min-w-0 items-start gap-1.5 text-left"
                       >
                         <HugeiconsIcon
@@ -224,8 +240,8 @@ export function CustomLinksMenu() {
               </>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
+        </PopoverContent>
+      </Popover>
 
       <QuickLinkEditDialog
         link={editing}

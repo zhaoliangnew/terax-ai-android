@@ -1,10 +1,15 @@
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
@@ -45,6 +50,7 @@ import {
   saveWeek,
   setCloseAfterAdd,
   setDayField,
+  setEntryKind,
   shiftMonth,
   shiftWeek,
   type WeekLog,
@@ -59,7 +65,9 @@ import {
 
 type Props = {
   open: boolean;
-  onClose: () => void;
+  onOpenChange: (open: boolean) => void;
+  /** 浮层挂在哪个元素上(底栏那个"记一下"按钮)。 */
+  anchor: React.ReactNode;
 };
 
 type Mode = "day" | "week" | "month";
@@ -106,7 +114,7 @@ function KindTag({ kind }: { kind?: EntryKind }) {
  * 日和周各存各的计划/总结;周的"做了什么"不单独记,直接汇总那一周每天的条目
  * —— 一件事只记一次,写周报时不用再抄一遍。
  */
-export function JournalDialog({ open, onClose }: Props) {
+export function JournalDialog({ open, onOpenChange, anchor }: Props) {
   const [mode, setMode] = useState<Mode>("day");
   const [day, setDay] = useState(() => dayKeyOf(new Date()));
   const [week, setWeek] = useState(() => weekKeyOf(new Date()));
@@ -121,6 +129,9 @@ export function JournalDialog({ open, onClose }: Props) {
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(
     null,
   );
+  // 哪条记录的类型菜单开着。菜单渲染在 portal 里,点它会被浮层当成
+  // "点了外面"直接关掉 —— 开着的时候要挡住 onInteractOutside。
+  const [kindMenuOpen, setKindMenuOpen] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const scrollListToBottom = useCallback(() => {
@@ -213,25 +224,28 @@ export function JournalDialog({ open, onClose }: Props) {
   const submit = useCallback(
     (withKind: EntryKind = kind) => {
       if (!draft.trim()) return;
-      // 记到"现在"所在的那天,不是当前翻到的那天 —— 翻着历史顺手记一条,
-      // 结果落到上周三去,那就麻烦了。
+      // 记到当前翻到的那天。打开时总是重置到今天,所以平时就是记到今天;
+      // 特意翻到昨天再记,那就是在补昨天的账 —— 强行落到今天反而没法补记。
+      // 补记的时刻用现在的钟点:显示只用到时:分,没有更好的值可填。
       const now = new Date();
-      const key = dayKeyOf(now);
-      addEntry(key, draft, now, withKind);
+      const at = (() => {
+        if (day === dayKeyOf(now)) return now;
+        const [y, m, d] = day.split("-").map(Number);
+        return new Date(y, m - 1, d, now.getHours(), now.getMinutes());
+      })();
+      addEntry(day, draft, at, withKind);
       setDraft("");
+      // 补记到别的天时明确说一声,免得以为记到今天了
+      if (day !== dayKeyOf(now))
+        toast.success("已补记", { description: dayLabel(day) });
       // 记完就关:多数时候打开它就是为了记这一条,记完还杵在那儿反而要多点一下
       if (closeAfter) {
-        onClose();
+        onOpenChange(false);
         return;
       }
-      if (key === day) setDayLog(loadDay(day));
-      else {
-        setMode("day");
-        setDay(key);
-        toast.success("已记到今天", { description: dayLabel(key) });
-      }
+      setDayLog(loadDay(day));
     },
-    [draft, day, kind, closeAfter, onClose],
+    [draft, day, kind, closeAfter, onOpenChange],
   );
 
   // 周/月共用一份数据:一行一天。周把七天都列出来(空的留个"—",一眼看出哪天
@@ -309,8 +323,35 @@ export function JournalDialog({ open, onClose }: Props) {
       <span className="shrink-0 pt-0.5 font-mono text-[12px] text-muted-foreground/60 tabular-nums">
         {entryTime(e.at)}
       </span>
+      {/* 类型点了能改:记的时候手快选错,或者老数据压根没有类型 */}
       <span className="shrink-0 pt-0.5">
-        <KindTag kind={e.kind} />
+        <DropdownMenu onOpenChange={(o) => setKindMenuOpen(o ? e.id : null)}>
+          <DropdownMenuTrigger asChild>
+            <button type="button" title="改类型" className="cursor-pointer">
+              {e.kind ? (
+                <KindTag kind={e.kind} />
+              ) : (
+                <span className="shrink-0 rounded border border-dashed border-border/70 px-1.5 py-px text-[11px] leading-tight text-muted-foreground/50">
+                  未分类
+                </span>
+              )}
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-24">
+            {ENTRY_KINDS.map((k) => (
+              <DropdownMenuItem
+                key={k}
+                onSelect={() => setDayLog(setEntryKind(day, e.id, k))}
+                className={cn(
+                  "text-xs",
+                  e.kind === k && "font-semibold text-foreground",
+                )}
+              >
+                <KindTag kind={k} />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </span>
       {editing?.id === e.id ? (
         <input
@@ -352,16 +393,32 @@ export function JournalDialog({ open, onClose }: Props) {
   );
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="flex h-[64vh] max-h-[680px] w-[84vw] max-w-none flex-col gap-0 p-0 sm:max-w-[920px]">
+    // 从底栏"记一下"往上弹(跟测试环境/收藏夹一路风格):点完按钮内容就在
+    // 手边,不用把视线挪到屏幕正中间去。
+    // modal:点外部只负责关浮层,不能穿透到下面的控件上 —— 非模态时
+    // 关浮层那一下会顺手点到终端/按钮,纯属误伤。
+    <Popover modal open={open} onOpenChange={onOpenChange}>
+      <PopoverAnchor asChild>{anchor}</PopoverAnchor>
+      <PopoverContent
+        side="top"
+        align="start"
+        collisionPadding={8}
+        // Radix 默认把焦点给内容里第一个可聚焦元素(顶栏按钮),
+        // 挡掉它,让"记一条"输入框自己的 autoFocus 生效
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        onInteractOutside={(e) => {
+          if (kindMenuOpen !== null) e.preventDefault();
+        }}
+        className="flex h-[42rem] max-h-[calc(100vh-5rem)] w-[58rem] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0"
+      >
         {/* 顶栏:是日还是周、看的哪一天、怎么翻 —— 一行说完 */}
-        <DialogHeader className="shrink-0 gap-0 border-b border-border px-4 py-3">
-          <div className="flex items-center gap-3 pr-8">
+        <div className="shrink-0 border-b border-border px-4 py-3">
+          <div className="flex items-center gap-3">
             {/* 跟右边那个开关叫一个名字。原来这里写"日报"、开关写"按日",
                 同一件事两种叫法,读起来要在脑子里对一次。 */}
-            <DialogTitle className="shrink-0 text-lg font-semibold">
+            <span className="shrink-0 text-lg font-semibold">
               {mode === "day" ? "按日" : mode === "week" ? "按周" : "按月"}
-            </DialogTitle>
+            </span>
             <span className="min-w-0 truncate text-[15px] text-muted-foreground">
               {mode === "day"
                 ? `${day} ${weekdayName(day)}`
@@ -399,7 +456,7 @@ export function JournalDialog({ open, onClose }: Props) {
               </Button>
             </div>
           </div>
-        </DialogHeader>
+        </div>
 
         {/* 翻页 + 选星期:箭头一律按周翻,日/周两种模式一套操作 */}
         <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-4 py-2">
@@ -674,7 +731,7 @@ export function JournalDialog({ open, onClose }: Props) {
                       if (e.nativeEvent.isComposing) return;
                       if (e.key === "Enter") submit();
                     }}
-                    placeholder={`刚做完什么?回车记到 ${monthDay(today)} ${weekdayName(today)}`}
+                    placeholder={`刚做完什么?回车记到 ${monthDay(day)} ${weekdayName(day)}`}
                     className="h-10 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-[14px] outline-none focus:border-ring"
                   />
                   <Button
@@ -777,7 +834,7 @@ export function JournalDialog({ open, onClose }: Props) {
             </div>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -169,6 +169,15 @@ export function editEntry(day: string, id: string, text: string): DayLog {
   });
 }
 
+/** 记的时候手快选错类型,或者老数据没有类型 —— 事后点标签改。 */
+export function setEntryKind(day: string, id: string, kind: EntryKind): DayLog {
+  const log = loadDay(day);
+  return saveDay(day, {
+    ...log,
+    entries: log.entries.map((e) => (e.id === id ? { ...e, kind } : e)),
+  });
+}
+
 export function removeEntry(day: string, id: string): DayLog {
   const log = loadDay(day);
   return saveDay(day, {

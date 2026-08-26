@@ -1716,7 +1716,6 @@ export default function App() {
                     <SidebarRail
                       activeView={sidebarView}
                       onSelectView={persistSidebarView}
-                      changedCount={sourceControl.changedCount}
                     />
                   </div>
                 </div>
@@ -1870,6 +1869,7 @@ export default function App() {
                           )}
                         <QuickCommitButton
                           projectRoot={androidProjectRoot}
+                          changedCount={sourceControl.changedCount}
                           className="shrink-0"
                         />
                         {/* basis-full 换行:git 地址单独占一行,不跟

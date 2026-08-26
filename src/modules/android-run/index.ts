@@ -34,6 +34,7 @@ export {
   pidOf,
   readApplicationId,
 } from "./lib/adb";
+export { getCodeupOrgId, projexUrl } from "./lib/codeupApi";
 export { openExternally } from "./lib/openExternally";
 export {
   getProjectLink,

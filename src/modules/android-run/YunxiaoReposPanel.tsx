@@ -560,7 +560,7 @@ export function YunxiaoReposPanel() {
             strokeWidth={1.75}
             className="shrink-0 text-muted-foreground"
           />
-          云效 Git 仓库
+          云效代码库
         </div>
         <div className="flex shrink-0 items-center gap-0.5">
           <Button

@@ -14,6 +14,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -363,7 +368,9 @@ function ChangedFilesPreview({
   }, [active, repoRoot]);
   if (!active) return null;
   return (
-    <div className="text-xs text-muted-foreground">
+    // min-w-0:在 Dialog 的 grid 里长路径会把整个弹窗撑宽,列表里的
+    // truncate 也就永远轮不到生效
+    <div className="min-w-0 text-xs text-muted-foreground">
       {files == null ? (
         <span className="flex items-center gap-2">
           <Spinner className="size-3" />
@@ -383,10 +390,11 @@ function ChangedFilesPreview({
           <div className="mt-1 max-h-36 overflow-y-auto rounded border border-border/60 p-1.5 font-mono text-[11px] leading-relaxed">
             {files.map((f) => (
               <div key={f.path} className="flex items-center gap-2">
-                <span className="w-10 shrink-0 text-muted-foreground/70">
+                {/* w-16 才装得下 "Untracked";再窄就溢出和路径粘成一串 */}
+                <span className="w-16 shrink-0 truncate text-muted-foreground/70">
                   {f.statusLabel}
                 </span>
-                <span className="min-w-0 truncate" title={f.path}>
+                <span className="min-w-0 flex-1 truncate" title={f.path}>
                   {f.path}
                 </span>
               </div>
@@ -1650,9 +1658,12 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
  */
 export function QuickCommitButton({
   projectRoot,
+  changedCount = 0,
   className,
 }: {
   projectRoot: string | null;
+  /** 未提交的变更文件数,>0 时在按钮上挂个角标 —— 一眼知道有没有账没结。 */
+  changedCount?: number;
   className?: string;
 }) {
   const repo = useProjectRepo(projectRoot);
@@ -1694,80 +1705,101 @@ export function QuickCommitButton({
 
   if (!repo) return null;
   return (
-    <>
-      <Button
-        variant="ghost"
-        size="sm"
-        title="暂存并提交当前分支的全部改动"
-        onClick={() => {
-          setMsg("");
-          setOpen(true);
-        }}
-        className={cn("h-7 gap-1 px-2 text-xs", className)}
-      >
-        <HugeiconsIcon
-          icon={CheckmarkCircle01Icon}
-          size={13}
-          strokeWidth={1.75}
-        />
-        提交
-      </Button>
-      <Dialog
-        open={open}
-        onOpenChange={(o) => {
-          if (!o && busy === null) setOpen(false);
-        }}
-      >
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-sm">提交更改</DialogTitle>
-            <DialogDescription className="text-xs leading-relaxed">
-              将暂存并提交当前分支「{repo.branch}」的全部改动,输入提交信息:
-            </DialogDescription>
-          </DialogHeader>
-          <ChangedFilesPreview repoRoot={repo.repoRoot} active={open} />
-          <Textarea
-            autoFocus
-            value={msg}
-            onChange={(e) => setMsg(e.target.value)}
-            onKeyDown={(e) => e.stopPropagation()}
-            placeholder="提交信息"
-            rows={3}
-            disabled={busy !== null}
-            className="text-[12px]"
+    // 挂在"提交"按钮上往上弹,跟底栏其他浮层一路风格 —— 居中大弹窗离
+    // 按钮太远,视线要跳一大段。modal:点外部只关浮层,不穿透误点。
+    <Popover
+      modal
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && busy !== null) return; // 提交跑一半不许关
+        setOpen(o);
+      }}
+    >
+      <PopoverAnchor asChild>
+        <Button
+          variant="ghost"
+          size="sm"
+          title={
+            changedCount > 0
+              ? `${changedCount} 个文件有未提交的改动`
+              : "暂存并提交当前分支的全部改动"
+          }
+          onClick={() => {
+            setMsg("");
+            setOpen((v) => !v);
+          }}
+          className={cn("h-7 gap-1 px-2 text-xs", className)}
+        >
+          <HugeiconsIcon
+            icon={CheckmarkCircle01Icon}
+            size={13}
+            strokeWidth={1.75}
           />
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy !== null}
-              onClick={() => setOpen(false)}
-              className="text-xs"
-            >
-              取消
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!msg.trim() || busy !== null}
-              onClick={() => void commit(true)}
-              className="gap-1 text-xs"
-            >
-              {busy === "push" && <Spinner className="size-3" />}
-              提交并推送
-            </Button>
-            <Button
-              size="sm"
-              disabled={!msg.trim() || busy !== null}
-              onClick={() => void commit(false)}
-              className="gap-1 text-xs"
-            >
-              {busy === "local" && <Spinner className="size-3" />}
-              提交本地
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
+          提交
+          {changedCount > 0 && (
+            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 bg-card px-1 text-[9px] font-semibold leading-none tabular-nums text-muted-foreground/95">
+              {changedCount > 99 ? "99+" : changedCount}
+            </span>
+          )}
+        </Button>
+      </PopoverAnchor>
+      <PopoverContent
+        side="top"
+        align="end"
+        collisionPadding={8}
+        // 焦点直接给提交信息输入框(Textarea 自己带 autoFocus)
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        className="flex w-[32rem] max-w-[calc(100vw-2rem)] flex-col gap-3"
+      >
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold">提交更改</span>
+          <span className="text-xs leading-relaxed text-muted-foreground">
+            将暂存并提交当前分支「{repo.branch}」的全部改动,输入提交信息:
+          </span>
+        </div>
+        <ChangedFilesPreview repoRoot={repo.repoRoot} active={open} />
+        <Textarea
+          // biome-ignore lint/a11y/noAutofocus: 打开就是为了输提交信息
+          autoFocus
+          value={msg}
+          onChange={(e) => setMsg(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
+          placeholder="提交信息"
+          rows={3}
+          disabled={busy !== null}
+          className="text-[12px]"
+        />
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy !== null}
+            onClick={() => setOpen(false)}
+            className="text-xs"
+          >
+            取消
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!msg.trim() || busy !== null}
+            onClick={() => void commit(true)}
+            className="gap-1 text-xs"
+          >
+            {busy === "push" && <Spinner className="size-3" />}
+            提交并推送
+          </Button>
+          <Button
+            size="sm"
+            disabled={!msg.trim() || busy !== null}
+            onClick={() => void commit(false)}
+            className="gap-1 text-xs"
+          >
+            {busy === "local" && <Spinner className="size-3" />}
+            提交本地
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

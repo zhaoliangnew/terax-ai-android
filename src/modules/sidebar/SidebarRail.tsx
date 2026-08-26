@@ -10,22 +10,25 @@ type RailItem = {
   label: string;
   icon: Parameters<typeof HugeiconsIcon>[0]["icon"];
   badge?: number;
+  /** 悬停提示,解释角标数字是什么 —— 光一个数没人猜得出来。 */
+  hint?: string;
 };
 
 type Props = {
   activeView: SidebarViewId;
   onSelectView: (view: SidebarViewId) => void;
-  changedCount: number;
 };
 
-export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
+export function SidebarRail({ activeView, onSelectView }: Props) {
   const items: RailItem[] = [
     { id: "explorer", label: "Files", icon: FolderTreeIcon },
     {
       id: "source-control",
-      label: "云效Git",
+      label: "云效代码库",
       icon: FolderGitTwoIcon,
-      badge: changedCount,
+      // 变更数角标挂在底栏"提交"按钮上,不在这儿 —— 数字紧挨着能对它
+      // 做动作的按钮才有意义。
+      hint: "源码管理",
     },
   ];
 
@@ -42,6 +45,7 @@ export function SidebarRail({ activeView, onSelectView, changedCount }: Props) {
             key={item.id}
             type="button"
             aria-label={item.label}
+            title={item.hint}
             aria-pressed={isActive}
             onClick={() => onSelectView(item.id)}
             className={cn(

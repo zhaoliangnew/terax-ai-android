@@ -3,7 +3,13 @@ import {
   type AgentPhaseState,
   useProjectAgentState,
 } from "@/modules/agent-status/AgentStatusDot";
-import type { ProjectKind } from "@/modules/android-run";
+import {
+  getCodeupOrgId,
+  getProjectLink,
+  openExternally,
+  type ProjectKind,
+  projexUrl,
+} from "@/modules/android-run";
 import { WorktreeCountBadge } from "@/modules/android-run/BranchChip";
 import {
   AndroidIcon,
@@ -204,14 +210,29 @@ function EntryRowImpl(props: EntryRowProps) {
       {asProject && (
         <WorktreeCountBadge projectRoot={path} className="shrink-0" />
       )}
-      {/* 绑过云效项目的产品目录挂个云,否则绑没绑完全看不出来 */}
+      {/* 绑过云效项目的产品目录挂个云:标记绑定关系,点一下直达项目网页。
+          行本身是个 button,里面不能再套 button —— 用 span 接住点击,
+          stopPropagation 免得顺带选中/展开这一行。 */}
       {yunxiaoLinked && (
-        <HugeiconsIcon
-          icon={CloudIcon}
-          size={13}
-          strokeWidth={1.75}
-          className="mr-1 size-3.5 shrink-0 text-muted-foreground/50"
-        />
+        // biome-ignore lint/a11y/useKeyWithClickEvents: 键盘用户走右键菜单的"关联云效项目"
+        // biome-ignore lint/a11y/noStaticElementInteractions: 见上,button 里套不了 button
+        <span
+          title="打开云效项目"
+          onClick={(e) => {
+            e.stopPropagation();
+            const link = getProjectLink(path);
+            const orgId = getCodeupOrgId();
+            if (link && orgId) openExternally(projexUrl(orgId, link.id));
+          }}
+          className="mr-0.5 flex shrink-0 items-center rounded p-0.5 text-muted-foreground/50 transition-colors hover:bg-foreground/10 hover:text-foreground"
+        >
+          <HugeiconsIcon
+            icon={CloudIcon}
+            size={13}
+            strokeWidth={1.75}
+            className="size-3.5"
+          />
+        </span>
       )}
     </button>
   );

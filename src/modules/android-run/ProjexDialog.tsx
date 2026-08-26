@@ -416,7 +416,7 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
   };
 
   return (
-    <Popover open={open} onOpenChange={onOpenChange}>
+    <Popover modal open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor asChild>{anchor}</PopoverAnchor>
       <PopoverContent
         side="top"
