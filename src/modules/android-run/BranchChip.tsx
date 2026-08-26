@@ -467,6 +467,13 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
   } | null>(null);
   const [nbName, setNbName] = useState("");
   const [nbBusy, setNbBusy] = useState(false);
+  // 待确认的合并:把 ref 合并进当前分支
+  const [pendingMerge, setPendingMerge] = useState<{
+    ref: string;
+    display: string;
+  } | null>(null);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
   // 待确认删除的分支;remote 非空表示删的是远程分支
   const [pendingDelete, setPendingDelete] = useState<{
     branch: string;
@@ -568,6 +575,34 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
   useEffect(() => {
     setDeleteError(null);
   }, [pendingDelete]);
+
+  // 合并确认框换目标时同样清掉上次的报错
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingMerge 是"确认框换了目标"的重置信号
+  useEffect(() => {
+    setMergeError(null);
+  }, [pendingMerge]);
+
+  const mergeBranch = useCallback(async () => {
+    const target = pendingMerge;
+    if (!repoRoot || !target || mergeBusy) return;
+    setMergeBusy(true);
+    setMergeError(null);
+    try {
+      await native.gitMerge(repoRoot, target.ref);
+      toast.success(
+        `已把 ${target.display} 合并到 ${repo?.branch ?? "当前分支"}`,
+      );
+      setPendingMerge(null);
+      // 分支列表和右侧提交记录都重拉(log 的 effect 也挂着 listVersion)
+      setListVersion((v) => v + 1);
+      window.dispatchEvent(new Event(GIT_BRANCH_CHANGED_EVENT));
+    } catch (e) {
+      // 冲突等失败留在确认框里,现场(可能已进入冲突状态)交给用户处理
+      setMergeError(String(e));
+    } finally {
+      setMergeBusy(false);
+    }
+  }, [repoRoot, repo, pendingMerge, mergeBusy]);
 
   const runSync = useCallback(
     async (action: "pull" | "push") => {
@@ -692,7 +727,8 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
     return () => {
       alive = false;
     };
-  }, [open, repoRoot, selectedRef]);
+    // biome-ignore lint/correctness/useExhaustiveDependencies: listVersion 是拉取/合并等改了提交记录后的重读信号
+  }, [open, repoRoot, selectedRef, listVersion]);
 
   // 同一分支重复单击不重建选中对象,避免无谓的重渲染
   const selectBranch = useCallback(
@@ -1068,7 +1104,23 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
                         )}
                       </button>
                     </ContextMenuTrigger>
-                    <ContextMenuContent className="min-w-52">
+                    <ContextMenuContent className="min-w-52 max-w-96">
+                      {/* 合并方向最容易搞反,菜单上把两个分支名都写全 */}
+                      {!b.isHead && currentBranch && (
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() =>
+                            setPendingMerge({
+                              ref: b.name,
+                              display: `分支 ${b.name}`,
+                            })
+                          }
+                        >
+                          <span className="min-w-0 truncate">
+                            合并 {b.name} 到 {currentBranch}…
+                          </span>
+                        </ContextMenuItem>
+                      )}
                       <ContextMenuItem
                         className="text-[12px]"
                         onSelect={() =>
@@ -1146,7 +1198,22 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
                             <span className="min-w-0 truncate">{b.name}</span>
                           </button>
                         </ContextMenuTrigger>
-                        <ContextMenuContent className="min-w-52">
+                        <ContextMenuContent className="min-w-52 max-w-96">
+                          {currentBranch && (
+                            <ContextMenuItem
+                              className="text-[12px]"
+                              onSelect={() =>
+                                setPendingMerge({
+                                  ref: b.name,
+                                  display: `远程分支 ${b.name}`,
+                                })
+                              }
+                            >
+                              <span className="min-w-0 truncate">
+                                合并 {b.name} 到 {currentBranch}…
+                              </span>
+                            </ContextMenuItem>
+                          )}
                           <ContextMenuItem
                             className="text-[12px]"
                             onSelect={() =>
@@ -1586,6 +1653,54 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
             >
               {deleteBusy && <Spinner className="size-3" />}
               删除
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={pendingMerge !== null}
+        onOpenChange={(o) => {
+          if (!o && !mergeBusy) setPendingMerge(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm">合并分支</DialogTitle>
+            <DialogDescription className="text-xs leading-relaxed">
+              将把{pendingMerge?.display} 合并到当前分支「{repo?.branch ?? ""}
+              」(git merge --no-edit)。
+            </DialogDescription>
+          </DialogHeader>
+          {mergeError && (
+            <div className="flex flex-col gap-1.5">
+              <div className="break-all text-[11px] leading-snug text-destructive">
+                {mergeError}
+              </div>
+              <div className="text-[11px] leading-snug text-muted-foreground">
+                如果是冲突:去终端解决冲突后提交,或执行 git merge --abort
+                放弃这次合并。
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={mergeBusy}
+              onClick={() => setPendingMerge(null)}
+              className="text-xs"
+            >
+              取消
+            </Button>
+            <Button
+              size="sm"
+              disabled={mergeBusy || !!mergeError}
+              onClick={() => void mergeBranch()}
+              className="gap-1 text-xs"
+            >
+              {mergeBusy && <Spinner className="size-3" />}
+              合并
             </Button>
           </DialogFooter>
         </DialogContent>

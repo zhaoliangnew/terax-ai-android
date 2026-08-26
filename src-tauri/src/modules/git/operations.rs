@@ -449,23 +449,52 @@ pub fn push(
         &repo_root.git_path,
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     )?;
-    if upstream.is_none() {
-        return Err(GitError::NoUpstream);
+
+    if let Some(upstream) = upstream {
+        let output = run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["push"],
+            NETWORK_TIMEOUT_SECS,
+        )?;
+        ensure_success(&output, "git push failed")?;
+        let (remote, branch) = split_upstream(&upstream);
+        return Ok(GitPushResult {
+            remote,
+            branch,
+            pushed: true,
+        });
     }
 
+    // 没有上游 = 服务器上还没有这个分支。以前直接报错让人去敲
+    // `git push -u`,现在替他做:创建同名远程分支并建立跟踪。
+    let head = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "--abbrev-ref", "HEAD"],
+    )?
+    .ok_or(GitError::NoUpstream)?;
+    if head == "HEAD" {
+        // detached:没有分支名,推不出个同名分支来
+        return Err(GitError::NoUpstream);
+    }
+    let remotes = git_stdout_lines(&repo_root.workspace, &repo_root.git_path, ["remote"])?;
+    let remote = if remotes.iter().any(|r| r == "origin") {
+        "origin".to_string()
+    } else {
+        // 没配 remote 才真的没地方推
+        remotes.first().cloned().ok_or(GitError::NoUpstream)?
+    };
     let output = run_git(
         &repo_root.workspace,
         Some(&repo_root.git_path),
-        ["push"],
+        ["push", "--set-upstream", &remote, &head],
         NETWORK_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git push failed")?;
-
-    let upstream = upstream.unwrap();
-    let (remote, branch) = split_upstream(&upstream);
     Ok(GitPushResult {
-        remote,
-        branch,
+        remote: Some(remote),
+        branch: Some(head),
         pushed: true,
     })
 }
@@ -1375,6 +1404,29 @@ pub fn create_branch(
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git branch failed")
+}
+
+/// `git merge --no-edit <ref>`:把 `ref_name` 合并进当前分支。
+/// 冲突时 git 返回非零,输出原样带回去 —— 是解决冲突还是 `git merge --abort`
+/// 由用户在终端决定,这里不自作主张收拾现场。
+pub fn merge(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    ref_name: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if ref_name.is_empty() || ref_name.starts_with('-') {
+        return Err(GitError::InvalidPath(ref_name.into()));
+    }
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        ["merge", "--no-edit", "--", ref_name],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git merge failed")
 }
 
 pub fn delete_branch(

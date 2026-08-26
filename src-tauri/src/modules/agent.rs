@@ -25,6 +25,10 @@ const AGENTS: &[AgentSpec] = &[
         agent: "claude",
         dir: ".claude",
         file: "settings.json",
+        // 试过加 SessionStart hook 让空会话一启动就被认出来 —— 没用:
+        // Claude 对 SessionStart 的输出按"注入上下文"处理,不认
+        // terminalSequence 回写,OSC 根本到不了终端。维持现状:靠 shell 的
+        // 133;C 前置标记,逮不住时等第一次交互(UserPromptSubmit)兜底。
         events: &[
             ("UserPromptSubmit", "working"),
             ("Notification", "attention"),

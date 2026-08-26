@@ -315,6 +315,20 @@ pub async fn git_create_branch(
 }
 
 #[tauri::command]
+pub async fn git_merge(
+    repo_root: String,
+    ref_name: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::merge(r, &repo_root, &ref_name, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_delete_branch(
     repo_root: String,
     branch: String,

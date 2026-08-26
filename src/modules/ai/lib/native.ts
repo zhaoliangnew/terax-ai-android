@@ -394,6 +394,13 @@ export const native = {
       startPoint,
       workspace: currentWorkspaceEnv(),
     }),
+  /** git merge --no-edit <ref>:把 ref 合并进当前分支。冲突时抛错,现场留给用户处理。 */
+  gitMerge: (repoRoot: string, refName: string) =>
+    invoke<void>("git_merge", {
+      repoRoot,
+      refName,
+      workspace: currentWorkspaceEnv(),
+    }),
   /** 删本地分支(force=-D);传 remote 则删远程分支(push --delete)。 */
   gitDeleteBranch: (
     repoRoot: string,
