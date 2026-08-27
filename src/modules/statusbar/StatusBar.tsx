@@ -18,6 +18,7 @@ import {
   TestEnvMenu,
   WeChatButton,
   YunxiaoProjectsButton,
+  YunxiaoReposButton,
 } from "@/modules/android-run";
 import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
@@ -54,11 +55,14 @@ export function StatusBar({
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
         <KnowledgeBaseMenu />
         <YunxiaoProjectsButton />
+        {/* 云效代码库:和云效项目挨着才是一组事,而且跟知识库一样往上弹,
+            不占左边的文件树视图。 */}
+        <YunxiaoReposButton />
+        <ApifoxMenu />
         <TestEnvMenu />
         <JournalButton />
         <DingGroupsMenu />
         <WeChatButton />
-        <ApifoxMenu />
         <CustomLinksMenu />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />

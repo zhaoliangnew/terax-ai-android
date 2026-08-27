@@ -64,6 +64,7 @@ export function ApifoxMenu() {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
+          backdrop
           side="top"
           align="start"
           collisionPadding={8}

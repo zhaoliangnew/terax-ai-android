@@ -1719,6 +1719,44 @@ pub fn delete_branch(
     ensure_success(&output, "git branch delete failed")
 }
 
+/// 删标签。`remote` 为 None 时只删本地,给了就 push --delete 删远端那一个。
+pub fn delete_tag(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    tag: &str,
+    remote: Option<&str>,
+    workspace: &WorkspaceEnv,
+) -> Result<()> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if tag.is_empty() || tag.starts_with('-') {
+        return Err(GitError::InvalidPath(tag.into()));
+    }
+    let output = match remote {
+        Some(r) => {
+            if r.is_empty() || r.starts_with('-') {
+                return Err(GitError::InvalidPath(r.into()));
+            }
+            // 远端写全 refs/tags/<name>:同名的分支和标签都存在时,
+            // 光给个名字 git 会拒绝("dst refspec matches more than one")
+            let refspec = format!("refs/tags/{tag}");
+            run_git(
+                &repo_root.workspace,
+                Some(&repo_root.git_path),
+                ["push", r, "--delete", &refspec],
+                NETWORK_TIMEOUT_SECS,
+            )?
+        }
+        None => run_git(
+            &repo_root.workspace,
+            Some(&repo_root.git_path),
+            ["tag", "-d", "--", tag],
+            DEFAULT_TIMEOUT_SECS,
+        )?,
+    };
+    ensure_success(&output, "git tag delete failed")
+}
+
 pub fn checkout_branch(
     registry: &WorkspaceRegistry,
     repo_root: &str,

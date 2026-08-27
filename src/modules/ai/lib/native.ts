@@ -466,6 +466,14 @@ export const native = {
       force: options?.force ?? false,
       workspace: currentWorkspaceEnv(),
     }),
+  /** 删标签:只给 tag 是删本地,带 remote 是删远端那一个(push --delete)。 */
+  gitDeleteTag: (repoRoot: string, tag: string, options?: { remote?: string }) =>
+    invoke<void>("git_delete_tag", {
+      repoRoot,
+      tag,
+      remote: options?.remote ?? null,
+      workspace: currentWorkspaceEnv(),
+    }),
   /** 基于 baseRef 新建 newBranch 分支挂进 worktree,返回目录绝对路径。 */
   gitWorktreeAdd: (repoRoot: string, baseRef: string, newBranch: string) =>
     invoke<string>("git_worktree_add", {

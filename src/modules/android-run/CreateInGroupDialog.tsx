@@ -11,10 +11,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 import { Folder01Icon, FolderGitTwoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { pinyin } from "pinyin-pro";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createGroup, createRepository } from "./lib/codeupApi";
+import { toPinyin } from "./lib/pinyin";
 
 type ParentGroup = {
   id: number;
@@ -41,34 +41,9 @@ const KIND_OPTIONS = [
 /**
  * 名称转路径段:中文按字转拼音(下划线连接),其余字符原样保留后
  * 只留字母数字下划线短横线,且以字母数字或'_'开头。
- *
- * 用 pinyin-pro 的逐字 isZh 标记分段,而不是自己按 Unicode 区间转;
- * tiny-pinyin 靠 Intl.Collator 做字典二分查找,WebKit 的 ICU 排序跟
- * Node/V8 不一致,导致查找结果对不上——很多常见字(比如"赵""组")
- * 转出来是空的。pinyin-pro 是直接查表,不依赖 Collator,才靠谱。
  */
 function slugify(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return "";
-  const tokens = pinyin(trimmed, { toneType: "none", type: "all" });
-  const parts: string[] = [];
-  let nonZhBuf = "";
-  const flushNonZh = () => {
-    if (!nonZhBuf) return;
-    parts.push(nonZhBuf.toLowerCase());
-    nonZhBuf = "";
-  };
-  for (const t of tokens) {
-    if (t.isZh && t.pinyin) {
-      flushNonZh();
-      parts.push(t.pinyin.toLowerCase());
-    } else {
-      nonZhBuf += t.origin;
-    }
-  }
-  flushNonZh();
-  return parts
-    .join("_")
+  return toPinyin(raw, "_")
     .replace(/[^a-z0-9_-]+/g, "_")
     .replace(/_+/g, "_")
     .replace(/^[-_]+|[-_]+$/g, "")

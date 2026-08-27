@@ -58,4 +58,5 @@ export { UrlPromptDialog } from "./UrlPromptDialog";
 export { WeChatButton } from "./WeChatButton";
 export { YunxiaoProjectPickerDialog } from "./YunxiaoProjectPickerDialog";
 export { YunxiaoProjectsButton } from "./YunxiaoProjectsButton";
+export { YunxiaoReposButton } from "./YunxiaoReposButton";
 export { YunxiaoReposPanel } from "./YunxiaoReposPanel";

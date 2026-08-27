@@ -53,7 +53,6 @@ import {
   useAndroidRunStore,
   useProjectGitInfo,
   YunxiaoProjectPickerDialog,
-  YunxiaoReposPanel,
 } from "@/modules/android-run";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
@@ -63,7 +62,11 @@ import {
   useApplyEditorFontSize,
   useEditorFileSync,
 } from "@/modules/editor";
-import { FileExplorer, type FileExplorerHandle } from "@/modules/explorer";
+import {
+  FileExplorer,
+  type FileExplorerHandle,
+  ProjectFilesDialog,
+} from "@/modules/explorer";
 import type { GitHistorySearchHandle } from "@/modules/git-history";
 import {
   Header,
@@ -83,7 +86,6 @@ import {
 import {
   SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
-  SidebarRail,
   useSidebarPanel,
 } from "@/modules/sidebar";
 import {
@@ -351,7 +353,6 @@ export default function App() {
     sidebarWidthRef,
     sidebarView,
     initialSidebarCollapsed,
-    persistSidebarView,
     persistSidebarCollapsed,
     toggleSidebar,
     cycleSidebarView,
@@ -472,36 +473,14 @@ export default function App() {
     explorerRef.current?.revealPath(wt ? wt[1] : androidProjectRoot);
   }, [androidProjectRoot]);
 
-  // 产品文件区默认收起 —— 大多数时候左栏的项目树就够用了,展开一次后
-  // 记住选择(localStorage,纯本机偏好)。
-  const [productPaneOpen, setProductPaneOpen] = useState(
-    () => localStorage.getItem("terax.productPaneOpen") === "1",
-  );
-  useEffect(() => {
-    localStorage.setItem("terax.productPaneOpen", productPaneOpen ? "1" : "0");
-  }, [productPaneOpen]);
-  // 收起产品文件区时把侧栏宽度一起收回去 —— 否则那半边只是空着,左边的树
-  // 白白铺开一片空白;展开时再还回来。
+  // 产品目录文件走单独弹框(左树右文),不再钉在侧栏右半边 —— 工程一深
+  // 两棵树挤一起,看代码只剩一条窄缝。弹框不做启动记忆:它是"翻一下"的
+  // 入口,开着启动没意义。
+  const [productPaneOpen, setProductPaneOpen] = useState(false);
   const toggleProductPane = useCallback(() => {
-    setProductPaneOpen((open) => {
-      const next = !open;
-      const p = sidebarRef.current;
-      const width = p?.getSize().inPixels ?? 0;
-      if (p && width > 0) {
-        const target = Math.min(
-          SIDEBAR_MAX_WIDTH,
-          Math.max(SIDEBAR_MIN_WIDTH, Math.round(next ? width * 2 : width / 2)),
-        );
-        p.resize(`${target}px`);
-        // 点开合也是用户主动调宽度,得记住 —— 侧栏默认只在手动拖动时才持久化,
-        // 不显式存的话下次启动会还原成展开时的宽度,产品区明明收着,左边树
-        // 却铺开一片空白。
-        persistSidebarWidth(target, true);
-      }
-      return next;
-    });
-  }, [sidebarRef, persistSidebarWidth]);
-  // 进产品后在右侧多加一块产品文件区(左侧钉住 Space 全部项目树)。
+    setProductPaneOpen((open) => !open);
+  }, []);
+  // 进产品后工具栏多一个入口,打开这个工程自己的文件树。
   const showProductPane =
     androidProjectRoot !== null &&
     androidProjectRoot !== (activeSpaceRoot ?? explorerRoot) &&
@@ -1686,9 +1665,7 @@ export default function App() {
                                       {
                                         id: "product-pane",
                                         icon: SidebarRightIcon,
-                                        label: productPaneOpen
-                                          ? "收起产品目录文件"
-                                          : "展开产品目录文件",
+                                        label: "产品目录文件",
                                         active: productPaneOpen,
                                         onClick: toggleProductPane,
                                       },
@@ -1699,41 +1676,22 @@ export default function App() {
                             />
                           </div>
                         </div>
-                        {showProductPane &&
-                          androidProjectRoot &&
-                          productPaneOpen && (
-                            <div className="flex min-w-0 flex-1 flex-col border-l border-border/60">
-                              <div className="min-h-0 flex-1">
-                                <FileExplorer
-                                  rootPath={androidProjectRoot}
-                                  gitStatus={
-                                    explorerGitDecorations
-                                      ? sourceControl.status
-                                      : null
-                                  }
-                                  dirtyPaths={dirtyFilePaths}
-                                  activeFilePath={explorerActiveFilePath}
-                                  onOpenFile={handleOpenFile}
-                                  onPathRenamed={handlePathRenamed}
-                                  onPathDeleted={handlePathDeleted}
-                                  onRevealInTerminal={cdInNewTab}
-                                  onOpenNewTerminal={openNewTerminalAt}
-                                  onOpenInSourceControl={
-                                    handleOpenRepositoryInSourceControl
-                                  }
-                                  onOpenGitHistory={handleOpenGitHistoryForPath}
-                                  onAttachToAgent={handleAttachFileToAgent}
-                                  pathDropTarget={terminalPathDropTarget}
-                                />
-                              </div>
-                            </div>
-                          )}
                       </div>
+                      {/* 云效代码库已经挪到底栏(浮层),这个视图还给本地
+                          Git 面板 —— 树里右键"在源码管理中打开"、⌃⇧G 都还是
+                          落到这儿。 */}
                       {sidebarView !== "explorer" && (
-                        <>
-                          {/* 旧的本地 Git 面板先藏起来(保活以便随时恢复),
-                              视图内容换成云效仓库面板 */}
-                          <div className="hidden">
+                        <div className="flex h-full min-h-0 flex-col">
+                          {/* 底部那条视图切换撤了,这个面板得自己留一条回文件
+                              树的路 —— 否则进来只能靠快捷键出去。 */}
+                          <button
+                            type="button"
+                            onClick={() => openSidebarView("explorer")}
+                            className="flex shrink-0 cursor-pointer items-center gap-1 border-b border-border/60 px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+                          >
+                            ← 文件树
+                          </button>
+                          <div className="min-h-0 flex-1">
                             <SourceControlPanel
                               open
                               sourceControl={sourceControl}
@@ -1747,19 +1705,17 @@ export default function App() {
                               }
                             />
                           </div>
-                          <YunxiaoReposPanel />
-                        </>
+                        </div>
                       )}
                     </div>
-                    <SidebarRail
-                      activeView={sidebarView}
-                      onSelectView={persistSidebarView}
-                    />
+                    {/* 侧栏底部原来那条 Files / 云效代码库 的切换条已经撤了:
+                        云效代码库改成底栏浮层,只剩 Files 一个按钮没意义,
+                        腾出来的高度还给文件树。 */}
                   </div>
                 </div>
               </ResizablePanel>
               <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-border/45 transition-colors duration-[var(--dur-fast)] after:w-5 hover:bg-border" />
-              <ResizablePanel id="workspace" defaultSize="34%" minSize="25%">
+              <ResizablePanel id="workspace" defaultSize="48%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     {/* 换行交给 flex-wrap 自己判断:面包屑不给 min-w-0、内容
@@ -1767,8 +1723,10 @@ export default function App() {
                         走的是按钮那一组(换到第二行),名字始终完整。定死一个
                         断点的话名字长短一变就又不准了。
                         @container 只留给最后一档:第二行也摆不开就丢按钮文案。 */}
+                    {/* 面包屑跟分支/按钮统一到 13px:15px 时中文产品名比旁边
+                        的分支名明显大一截,看着不是一行东西。 */}
                     {androidProjectRoot && (
-                      <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-border px-3 py-1.5 text-[15px]">
+                      <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-border px-3 py-1.5 text-[13px]">
                         <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
                           <HugeiconsIcon
                             icon={Folder01Icon}
@@ -1813,7 +1771,7 @@ export default function App() {
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             onOpenDiff={openGitDiffTab}
-                            className="max-w-40 text-[13px]"
+                            className="max-w-40"
                           />
                           <AgentStatusDot
                             projectRoot={androidProjectRoot}
@@ -1878,7 +1836,7 @@ export default function App() {
                     {/* 跟顶栏同一套:面包屑不给 min-w-0、内容 nowrap,塞不下时
                         被挤到第二行的是按钮那一组,工程名不会先被截。 */}
                     {androidProjectRoot && (
-                      <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-t border-border px-3 py-1 text-[14px]">
+                      <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-t border-border px-3 py-1 text-[13px]">
                         <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
                           <HugeiconsIcon
                             icon={Folder01Icon}
@@ -1923,7 +1881,7 @@ export default function App() {
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             onOpenDiff={openGitDiffTab}
-                            className="max-w-40 text-[13px]"
+                            className="max-w-40"
                           />
                         </span>
                         {supportsSessionActions(activeTerminalAgent) &&
@@ -1975,7 +1933,7 @@ export default function App() {
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}
-                defaultSize="44%"
+                defaultSize="32%"
                 minSize="20%"
                 collapsible
                 collapsedSize={0}
@@ -2078,6 +2036,22 @@ export default function App() {
             open={changedFilesOpen}
             onOpenChange={setChangedFilesOpen}
             repoRoot={sourceControl.status?.repoRoot ?? null}
+          />
+
+          <ProjectFilesDialog
+            open={productPaneOpen}
+            onOpenChange={setProductPaneOpen}
+            rootPath={showProductPane ? androidProjectRoot : null}
+            gitStatus={explorerGitDecorations ? sourceControl.status : null}
+            dirtyPaths={dirtyFilePaths}
+            onPathRenamed={handlePathRenamed}
+            onPathDeleted={handlePathDeleted}
+            onRevealInTerminal={cdInNewTab}
+            onOpenNewTerminal={openNewTerminalAt}
+            onOpenInSourceControl={handleOpenRepositoryInSourceControl}
+            onOpenGitHistory={handleOpenGitHistoryForPath}
+            onAttachToAgent={handleAttachFileToAgent}
+            pathDropTarget={terminalPathDropTarget}
           />
 
           <NewEditorDialog

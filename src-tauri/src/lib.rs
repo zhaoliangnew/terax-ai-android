@@ -312,6 +312,7 @@ pub fn run() {
             git::commands::git_worktree_add,
             git::commands::git_worktree_remove,
             git::commands::git_delete_branch,
+            git::commands::git_delete_tag,
             git::commands::git_create_branch,
             git::commands::git_merge,
             shell::shell_run_command,

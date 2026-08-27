@@ -462,6 +462,13 @@ function formatCommitTime(secs: number): string {
   return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** 只要日期,给宽度不够的地方用(完整时间放 title)。 */
+function formatCommitDate(secs: number): string {
+  const d = new Date(secs * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+}
+
 type Props = {
   projectRoot: string | null;
   className?: string;
@@ -549,10 +556,14 @@ export function BranchChip({
   } | null>(null);
   const [logEntries, setLogEntries] = useState<GitLogEntry[] | null>(null);
   const [logError, setLogError] = useState<string | null>(null);
-  // 标签在左栏最上面,默认只露最新那个,展开才全列(几十上百个,
-  // 全摊开会把分支挤到看不见)
+  // 标签在左栏最上面,只露最新那个;要翻历史版本走单独的弹框
+  // (几十上百个,全摊开会把分支挤到看不见,而且窄栏放不下备注)
   const [tags, setTags] = useState<GitTagEntry[] | null>(null);
-  const [tagsExpanded, setTagsExpanded] = useState(false);
+  const [tagsOpen, setTagsOpen] = useState(false);
+  // 正在删的标签名(禁用重复点)
+  const [tagBusy, setTagBusy] = useState<string | null>(null);
+  // 删标签的两步确认:值是 `local:名字` / `remote:名字`
+  const [tagDeleteArmed, setTagDeleteArmed] = useArmedConfirm<string>();
   // 点提交记录里某条打开的提交详情
   const [openCommit, setOpenCommit] = useState<GitLogEntry | null>(null);
   const [commitFiles, setCommitFiles] = useState<GitCommitFileChange[] | null>(
@@ -1005,6 +1016,88 @@ export function BranchChip({
     [repoRoot, pendingDelete, deleteBusy, deleteRemoteCounterpart],
   );
 
+  /** 远端名(删远端标签要用):有远程分支就取它的前缀,否则按 origin。 */
+  const defaultRemote = useMemo(() => {
+    const hit = branches?.find((b) => b.kind === "remote");
+    return hit?.name.split("/")[0] ?? "origin";
+  }, [branches]);
+
+  const deleteTag = useCallback(
+    async (tag: string, remote?: string) => {
+      if (!repoRoot || tagBusy) return;
+      setTagBusy(tag);
+      try {
+        await native.gitDeleteTag(
+          repoRoot,
+          tag,
+          remote ? { remote } : undefined,
+        );
+        toast.success(
+          remote ? `已删除远端标签 ${remote}/${tag}` : `已删除标签 ${tag}`,
+        );
+        // 删的可能正是右边正在看的那个标签,清掉让它回落到当前分支
+        setSelected((cur) =>
+          cur?.refName === `refs/tags/${tag}` ? null : cur,
+        );
+        setListVersion((v) => v + 1);
+      } catch (e) {
+        toast.error(String(e));
+      } finally {
+        setTagBusy(null);
+      }
+    },
+    [repoRoot, tagBusy],
+  );
+
+  /**
+   * 标签右键里的两条删除项(左栏那行和标签弹框里共用)。
+   *
+   * 两步确认:第一次点只把文案换成"再点一次确认",`e.preventDefault()` 让菜单
+   * 不关,第二次才真删;4 秒没动静自动松开(useArmedConfirm)。标签删了就没了,
+   * 尤其远端那条 —— 别人 fetch 之后也跟着没,不能一下点掉。
+   */
+  const tagDeleteItems = (t: GitTagEntry) => {
+    const localKey = `local:${t.name}`;
+    const remoteKey = `remote:${t.name}`;
+    return (
+      <>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          disabled={tagBusy === t.name}
+          className="text-[12px] text-destructive focus:text-destructive"
+          onSelect={(e) => {
+            if (tagDeleteArmed !== localKey) {
+              e.preventDefault();
+              setTagDeleteArmed(localKey);
+              return;
+            }
+            setTagDeleteArmed(null);
+            void deleteTag(t.name);
+          }}
+        >
+          {tagDeleteArmed === localKey ? "再点一次确认删除" : "删除标签"}
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={tagBusy === t.name}
+          className="text-[12px] text-destructive focus:text-destructive"
+          onSelect={(e) => {
+            if (tagDeleteArmed !== remoteKey) {
+              e.preventDefault();
+              setTagDeleteArmed(remoteKey);
+              return;
+            }
+            setTagDeleteArmed(null);
+            void deleteTag(t.name, defaultRemote);
+          }}
+        >
+          {tagDeleteArmed === remoteKey
+            ? `再点一次确认从 ${defaultRemote} 删除`
+            : `删除远端标签(${defaultRemote})`}
+        </ContextMenuItem>
+      </>
+    );
+  };
+
   // 打开弹框默认选中当前分支;关闭清掉,免得下次带着旧选中打开
   const currentBranch = repo?.branch ?? null;
   useEffect(() => {
@@ -1385,19 +1478,132 @@ export function BranchChip({
               </Button>
             </div>
           )}
+          {/* 读取中/出错也占满最终尺寸(左 18rem + gap 1rem + 右 64rem):
+              弹框宽高是 w-max 按内容算的,先摆一个小小的"正在读取…"再换成
+              完整内容,开框时就会闪一下、跳一次。 */}
           {branches == null && listError == null ? (
-            <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-muted-foreground">
+            <div className="flex h-[72vh] w-[83rem] max-w-full items-center justify-center gap-2 text-[11px] text-muted-foreground">
               <Spinner className="size-3" />
               正在读取分支…
             </div>
           ) : listError ? (
-            <div className="px-3 py-3 text-[11px] leading-snug text-destructive">
+            <div className="flex h-[72vh] w-[83rem] max-w-full items-center justify-center px-3 text-[11px] leading-snug text-destructive">
               {listError}
             </div>
           ) : (
             <div className="flex min-h-0 min-w-0 gap-4">
               {/* 左:分支单列列表。单击选中看提交记录,双击才切换 */}
               <div className="h-[72vh] w-72 shrink-0 overflow-y-auto pr-1">
+                {/* 标签钉在最上面,而且只露最新那一个 —— 找"线上是哪一版"
+                    十次有九次就是看它;要翻历史版本点"全部"开单独的弹框
+                    (标签名/时间/备注/提交号四列,这条 18rem 的窄栏放不下)。
+                    标签不给双击 checkout —— 那是 detached HEAD,要用就右键
+                    基于它开分支/worktree。 */}
+                {tags != null && tags.length > 0 && (
+                  <>
+                    <div className="flex w-full items-center justify-between px-2 py-1.5">
+                      <span className="text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
+                        标签
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setTagsOpen(true)}
+                        className="cursor-pointer rounded px-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
+                      >
+                        全部 {tags.length} 个
+                      </button>
+                    </div>
+                    {tags.slice(0, 1).map((t) => (
+                      <ContextMenu key={t.name}>
+                        <ContextMenuTrigger asChild>
+                          <button
+                            type="button"
+                            title={`${t.name} · ${t.shortSha} · ${formatCommitTime(t.timestampSecs)}${t.subject ? `\n${t.subject}` : ""}`}
+                            onClick={() =>
+                              selectBranch({
+                                display: t.name,
+                                // 用全名限定,免得和同名分支撞上
+                                refName: `refs/tags/${t.name}`,
+                                checkoutName: t.name,
+                                isHead: false,
+                              })
+                            }
+                            className={cn(
+                              "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
+                              selected?.refName === `refs/tags/${t.name}` &&
+                                "bg-foreground/10",
+                            )}
+                          >
+                            <span className="size-3.5 shrink-0" />
+                            {/* 标签名用琥珀色 —— 和提交行上那个标签角标同一个
+                                颜色,一眼能对上是同一样东西 */}
+                            <span className="min-w-0 truncate text-amber-500">
+                              {t.name}
+                            </span>
+                            {/* 列宽只有 18rem,这里只放到日期;完整时间在 title 里 */}
+                            <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70">
+                              {formatCommitDate(t.timestampSecs)}
+                            </span>
+                            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                              {t.shortSha}
+                            </span>
+                          </button>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent className="min-w-52 max-w-96">
+                          <ContextMenuItem
+                            className="text-[12px]"
+                            onSelect={() =>
+                              setPendingNewBranch({
+                                baseRef: `refs/tags/${t.name}`,
+                                label: `标签 ${t.name}`,
+                              })
+                            }
+                          >
+                            基于此标签新建分支…
+                          </ContextMenuItem>
+                          {!inWorktree && (
+                            <ContextMenuItem
+                              className="text-[12px]"
+                              onSelect={() =>
+                                setPendingWorktree({
+                                  baseRef: `refs/tags/${t.name}`,
+                                  shortName: t.name,
+                                  label: `标签 ${t.name}`,
+                                })
+                              }
+                            >
+                              为此标签创建 worktree…
+                            </ContextMenuItem>
+                          )}
+                          <ContextMenuSeparator />
+                          <ContextMenuItem
+                            className="text-[12px]"
+                            onSelect={() => {
+                              void copyToClipboard(t.name);
+                              toast.success("已复制标签名", {
+                                description: t.name,
+                              });
+                            }}
+                          >
+                            复制标签名
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            className="text-[12px]"
+                            onSelect={() => {
+                              void copyToClipboard(t.sha);
+                              toast.success("已复制标签指向的提交", {
+                                description: t.sha,
+                              });
+                            }}
+                          >
+                            复制提交 SHA
+                          </ContextMenuItem>
+                          {tagDeleteItems(t)}
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    ))}
+                  </>
+                )}
                 <div className="px-2 py-1.5 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
                   本地分支
                 </div>
@@ -1568,106 +1774,6 @@ export function BranchChip({
                     </ContextMenuContent>
                   </ContextMenu>
                 ))}
-                {/* 标签夹在本地分支和远程分支之间,平时只露最新那个
-                    (找"线上是哪一版"十次有九次就是看它);点标题展开全部。
-                    标签不给双击 checkout —— 那是 detached HEAD,要用就
-                    右键基于它开分支/worktree。 */}
-                {tags != null && tags.length > 0 && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setTagsExpanded((v) => !v)}
-                      className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-foreground/10"
-                    >
-                      <span className="text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
-                        标签
-                      </span>
-                      <span className="text-[10px] text-muted-foreground/70">
-                        {tagsExpanded ? "收起" : "展开"}
-                      </span>
-                    </button>
-                    {(tagsExpanded ? tags : tags.slice(0, 1)).map((t) => (
-                      <ContextMenu key={t.name}>
-                        <ContextMenuTrigger asChild>
-                          <button
-                            type="button"
-                            title={`${t.name} · ${t.shortSha} · ${formatCommitTime(t.timestampSecs)}${t.subject ? `\n${t.subject}` : ""}`}
-                            onClick={() =>
-                              selectBranch({
-                                display: t.name,
-                                // 用全名限定,免得和同名分支撞上
-                                refName: `refs/tags/${t.name}`,
-                                checkoutName: t.name,
-                                isHead: false,
-                              })
-                            }
-                            className={cn(
-                              "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
-                              selected?.refName === `refs/tags/${t.name}` &&
-                                "bg-foreground/10",
-                            )}
-                          >
-                            <span className="size-3.5 shrink-0" />
-                            <span className="min-w-0 truncate">{t.name}</span>
-                            <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                              {t.shortSha}
-                            </span>
-                          </button>
-                        </ContextMenuTrigger>
-                        <ContextMenuContent className="min-w-52 max-w-96">
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() =>
-                              setPendingNewBranch({
-                                baseRef: `refs/tags/${t.name}`,
-                                label: `标签 ${t.name}`,
-                              })
-                            }
-                          >
-                            基于此标签新建分支…
-                          </ContextMenuItem>
-                          {!inWorktree && (
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() =>
-                                setPendingWorktree({
-                                  baseRef: `refs/tags/${t.name}`,
-                                  shortName: t.name,
-                                  label: `标签 ${t.name}`,
-                                })
-                              }
-                            >
-                              为此标签创建 worktree…
-                            </ContextMenuItem>
-                          )}
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() => {
-                              void copyToClipboard(t.name);
-                              toast.success("已复制标签名", {
-                                description: t.name,
-                              });
-                            }}
-                          >
-                            复制标签名
-                          </ContextMenuItem>
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() => {
-                              void copyToClipboard(t.sha);
-                              toast.success("已复制标签指向的提交", {
-                                description: t.sha,
-                              });
-                            }}
-                          >
-                            复制提交 SHA
-                          </ContextMenuItem>
-                        </ContextMenuContent>
-                      </ContextMenu>
-                    ))}
-                  </>
-                )}
                 {remoteBranches.length > 0 && (
                   <>
                     <div className="px-2 py-1.5 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
@@ -2239,6 +2345,124 @@ export function BranchChip({
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* 全部标签:左栏那条 18rem 的窄栏摆不下"名字 + 时间 + 备注 + 提交号"
+          四样,单开一个框列全 —— 找历史版本本来就是"翻一遍"的动作。 */}
+      <Dialog open={tagsOpen} onOpenChange={setTagsOpen}>
+        <DialogContent className="flex h-[62vh] flex-col gap-3 sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-sm">
+              标签 · 共 {tags?.length ?? 0} 个
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              点一条看它的提交记录;右键可以基于它建分支/worktree,或删除。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-2 pb-1.5 text-[10.5px] font-semibold tracking-[0.1em] text-muted-foreground/85 uppercase">
+            <span className="w-44 shrink-0">标签</span>
+            <span className="w-28 shrink-0">时间</span>
+            <span className="min-w-0 flex-1">备注</span>
+            <span className="w-16 shrink-0 text-right">提交号</span>
+          </div>
+          <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+            {(tags ?? []).map((t) => (
+              <ContextMenu key={t.name}>
+                <ContextMenuTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      selectBranch({
+                        display: t.name,
+                        refName: `refs/tags/${t.name}`,
+                        checkoutName: t.name,
+                        isHead: false,
+                      });
+                      setTagsOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
+                      selected?.refName === `refs/tags/${t.name}` &&
+                        "bg-foreground/10",
+                    )}
+                  >
+                    <span className="w-44 shrink-0 truncate font-medium text-amber-500">
+                      {t.name}
+                    </span>
+                    <span className="w-28 shrink-0 text-[11px] text-muted-foreground">
+                      {formatCommitTime(t.timestampSecs)}
+                    </span>
+                    {/* 轻量标签没有说明,这里就是空的 —— 用一个破折号占住,
+                        免得整列看着像没加载出来 */}
+                    <span
+                      className="min-w-0 flex-1 truncate text-[11.5px] text-foreground/80"
+                      title={t.subject}
+                    >
+                      {t.subject || "—"}
+                    </span>
+                    <span className="w-16 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
+                      {t.shortSha}
+                    </span>
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="min-w-52 max-w-96">
+                  <ContextMenuItem
+                    className="text-[12px]"
+                    onSelect={() =>
+                      setPendingNewBranch({
+                        baseRef: `refs/tags/${t.name}`,
+                        label: `标签 ${t.name}`,
+                      })
+                    }
+                  >
+                    基于此标签新建分支…
+                  </ContextMenuItem>
+                  {!inWorktree && (
+                    <ContextMenuItem
+                      className="text-[12px]"
+                      onSelect={() =>
+                        setPendingWorktree({
+                          baseRef: `refs/tags/${t.name}`,
+                          shortName: t.name,
+                          label: `标签 ${t.name}`,
+                        })
+                      }
+                    >
+                      为此标签创建 worktree…
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    className="text-[12px]"
+                    onSelect={() => {
+                      void copyToClipboard(t.name);
+                      toast.success("已复制标签名", { description: t.name });
+                    }}
+                  >
+                    复制标签名
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    className="text-[12px]"
+                    onSelect={() => {
+                      void copyToClipboard(t.sha);
+                      toast.success("已复制标签指向的提交", {
+                        description: t.sha,
+                      });
+                    }}
+                  >
+                    复制提交 SHA
+                  </ContextMenuItem>
+                  {tagDeleteItems(t)}
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+            {(tags?.length ?? 0) === 0 && (
+              <div className="px-2 py-3 text-[11px] text-muted-foreground">
+                这个仓库还没有标签
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 

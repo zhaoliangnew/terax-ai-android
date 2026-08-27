@@ -419,6 +419,7 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
     <Popover modal open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor asChild>{anchor}</PopoverAnchor>
       <PopoverContent
+        backdrop
         side="top"
         align="start"
         collisionPadding={8}
@@ -428,7 +429,8 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
           if (editingView !== null) e.preventDefault();
         }}
         onOpenAutoFocus={(e) => e.preventDefault()}
-        className="flex h-[44rem] max-h-[calc(100vh-5rem)] w-[74rem] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0"
+        // 高度跟云效代码库那个浮层对齐,两个入口挨着,一高一矮很扎眼
+        className="flex h-[34rem] max-h-[calc(100vh-5rem)] w-[74rem] max-w-[calc(100vw-2rem)] flex-col gap-0 p-0"
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
           <div className="flex shrink-0 items-center gap-2">

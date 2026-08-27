@@ -38,6 +38,7 @@ export function KnowledgeBaseMenu() {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
+        backdrop
         side="top"
         align="start"
         collisionPadding={8}

@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Popover as PopoverPrimitive } from "radix-ui"
 
+import { FloatingBackdrop } from "@/components/ui/floating-backdrop"
 import { cn } from "@/lib/utils"
 
 function Popover({
@@ -21,8 +22,13 @@ function PopoverContent({
   className,
   align = "center",
   sideOffset = 4,
+  backdrop = false,
+  children,
   ...props
-}: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+}: React.ComponentProps<typeof PopoverPrimitive.Content> & {
+  /** 浮层**外面**压一层淡磨砂(底栏那些入口用)。浮层自己的底色不变。 */
+  backdrop?: boolean
+}) {
   return (
     <PopoverPrimitive.Portal>
       <PopoverPrimitive.Content
@@ -34,7 +40,10 @@ function PopoverContent({
           className
         )}
         {...props}
-      />
+      >
+        {backdrop && <FloatingBackdrop />}
+        {children}
+      </PopoverPrimitive.Content>
     </PopoverPrimitive.Portal>
   )
 }

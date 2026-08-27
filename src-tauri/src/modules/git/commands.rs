@@ -401,6 +401,22 @@ pub async fn git_delete_branch(
 }
 
 #[tauri::command]
+pub async fn git_delete_tag(
+    repo_root: String,
+    tag: String,
+    remote: Option<String>,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::delete_tag(r, &repo_root, &tag, remote.as_deref(), &workspace)
+            .map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_worktree_add(
     repo_root: String,
     base_ref: String,

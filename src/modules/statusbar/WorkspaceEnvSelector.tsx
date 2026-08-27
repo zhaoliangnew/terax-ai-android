@@ -51,7 +51,7 @@ export function WorkspaceEnvSelector({ onSelect }: Props) {
           <span className="max-w-28 truncate">{label}</span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-48">
+      <DropdownMenuContent backdrop align="start" className="min-w-48">
         <DropdownMenuItem onSelect={() => onSelect(LOCAL_WORKSPACE)}>
           Windows Local
         </DropdownMenuItem>

@@ -68,6 +68,7 @@ export function CustomLinksMenu() {
           </button>
         </PopoverTrigger>
         <PopoverContent
+          backdrop
           side="top"
           align="start"
           collisionPadding={8}

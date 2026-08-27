@@ -18,7 +18,7 @@ import {
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { CreateInGroupDialog } from "./CreateInGroupDialog";
 import {
@@ -37,6 +37,7 @@ import {
   sshUrlFor,
 } from "./lib/codeupApi";
 import { openExternally } from "./lib/openExternally";
+import { searchVariants } from "./lib/pinyin";
 import { codeupUrl } from "./lib/yunxiao";
 import { YunxiaoTokenRow } from "./YunxiaoTokenRow";
 
@@ -60,6 +61,29 @@ function fmtSize(mb: number | null): string {
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)}GB`;
   if (mb >= 0.1) return `${mb.toFixed(1)}MB`;
   return mb > 0 ? "<0.1MB" : "0MB";
+}
+
+/** 补描述时的并发上限。云效接口没批量版,只能一个一个问,但不必排成一队。 */
+const BACKFILL_CONCURRENCY = 6;
+/** 攒够这么久再统一写回 state,避免每问到一条就重渲染整棵树。 */
+const PATCH_FLUSH_MS = 150;
+
+/** 并发跑一批任务,同时在跑的不超过 limit 个。 */
+async function pooled<T>(
+  items: T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const item = items[cursor++];
+      if (item !== undefined) await run(item);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
 }
 
 /** 树节点:一个代码组,子组和直属仓库都是展开时才去查。 */
@@ -127,14 +151,55 @@ export function YunxiaoReposPanel() {
 
   /** 按路径改树上某个节点(主树和搜索结果里的节点都要改到)。 */
   const patchNode = (relPath: string, updater: (n: GroupNode) => GroupNode) => {
+    applyPatches(new Map([[relPath, updater]]));
+  };
+
+  /** 一次走一遍树,把多个节点的改动一起写回。 */
+  const applyPatches = (patches: Map<string, (n: GroupNode) => GroupNode>) => {
+    if (patches.size === 0) return;
+    // 没被改到的子树保持原对象,React 才能在这一支上直接跳过重渲染
     const walk = (n: GroupNode): GroupNode => {
-      if (n.relPath === relPath) return updater(n);
-      if (!n.children) return n;
-      return { ...n, children: n.children.map(walk) };
+      const up = patches.get(n.relPath);
+      const self = up ? up(n) : n;
+      if (!self.children) return self;
+      const kids = self.children.map(walk);
+      const changed =
+        self !== n || kids.some((k, i) => k !== self.children?.[i]);
+      return changed ? { ...self, children: kids } : n;
     };
     setRoot((cur) => (cur ? walk(cur) : cur));
     setSearchResults((cur) => (cur ? cur.map(walk) : cur));
   };
+
+  /**
+   * 补描述用的写回:攒一小会儿再统一提交。
+   *
+   * 列表接口不带描述,只能逐个 GetNamespace/GetRepository 去补。以前是问到
+   * 一条就 setState 一次,一层上百个组就是上百次"重建整棵树 + 全列表重渲染",
+   * 面板卡得拖不动。攒 150ms 一起写,重渲染次数从 O(条数) 降到个位数。
+   */
+  const pendingRef = useRef(new Map<string, (n: GroupNode) => GroupNode>());
+  const flushTimerRef = useRef(0);
+  const queuePatch = (
+    relPath: string,
+    updater: (n: GroupNode) => GroupNode,
+  ) => {
+    const prev = pendingRef.current.get(relPath);
+    // 同一个节点被改两次(比如同一个组下的多个仓库)要串起来,不能后面的盖前面的
+    pendingRef.current.set(relPath, prev ? (n) => updater(prev(n)) : updater);
+    if (flushTimerRef.current) return;
+    flushTimerRef.current = window.setTimeout(() => {
+      flushTimerRef.current = 0;
+      const batch = pendingRef.current;
+      pendingRef.current = new Map();
+      applyPatches(batch);
+    }, PATCH_FLUSH_MS);
+  };
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) window.clearTimeout(flushTimerRef.current);
+    };
+  }, []);
 
   /** 查一个组的下一层子组,写回树上对应节点;描述随后逐个补齐。 */
   const loadLevel = (node: GroupNode) => {
@@ -169,29 +234,32 @@ export function YunxiaoReposPanel() {
         // 列表接口都不带描述:组描述用 GetNamespace 补,
         // 仓库描述用 GetRepository 补,补到一个显示一个
         void (async () => {
-          for (const c of children) {
-            if (c.description) continue;
-            const info = await getNamespaceInfo(orgId, token, c.relPath);
-            if (info?.description || info?.name) {
-              patchNode(c.relPath, (n) => ({
+          await pooled(
+            children.filter((c) => !c.description),
+            BACKFILL_CONCURRENCY,
+            async (c) => {
+              const info = await getNamespaceInfo(orgId, token, c.relPath);
+              if (!info?.description && !info?.name) return;
+              queuePatch(c.relPath, (n) => ({
                 ...n,
                 name: info.name || n.name,
                 description: info.description || n.description,
               }));
-            }
-          }
-          for (const r of repos) {
-            if (
-              r.description &&
-              r.creatorUid &&
-              r.lastActivityAt &&
-              r.repositorySize != null
-            ) {
-              continue;
-            }
-            const info = await getRepositoryInfo(orgId, token, r.id);
-            if (info) {
-              patchNode(node.relPath, (n) => ({
+            },
+          );
+          await pooled(
+            repos.filter(
+              (r) =>
+                !r.description ||
+                !r.creatorUid ||
+                !r.lastActivityAt ||
+                r.repositorySize == null,
+            ),
+            BACKFILL_CONCURRENCY,
+            async (r) => {
+              const info = await getRepositoryInfo(orgId, token, r.id);
+              if (!info) return;
+              queuePatch(node.relPath, (n) => ({
                 ...n,
                 repos: (n.repos ?? []).map((x) =>
                   x.id === r.id
@@ -205,8 +273,8 @@ export function YunxiaoReposPanel() {
                     : x,
                 ),
               }));
-            }
-          }
+            },
+          );
         })();
       })
       .catch((e) => {
@@ -279,8 +347,24 @@ export function YunxiaoReposPanel() {
     }
     const timer = window.setTimeout(() => {
       setSearching(true);
-      searchNamespaces(orgId, token, q)
-        .then((gs) => {
+      // 中文查询额外按拼音再问一遍(组名在云效上都是拼音/英文),结果按 id 合并。
+      // 单个写法失败不算数(拼音那次查空很正常),全都失败才报错。
+      let firstErr: unknown = null;
+      Promise.all(
+        searchVariants(q).map((v) =>
+          searchNamespaces(orgId, token, v).catch((e) => {
+            firstErr ??= e;
+            return [];
+          }),
+        ),
+      )
+        .then((lists) => {
+          const seen = new Set<number>();
+          const gs = lists.flat().filter((g) => {
+            if (seen.has(g.id)) return false;
+            seen.add(g.id);
+            return true;
+          });
           const nodes = gs
             .filter((g) => {
               const r = rel(g.pathWithNamespace);
@@ -296,19 +380,20 @@ export function YunxiaoReposPanel() {
               }),
             );
           setSearchResults(nodes);
-          // 描述照旧逐个补
-          void (async () => {
-            for (const n of nodes) {
-              if (n.description) continue;
+          if (nodes.length === 0 && firstErr) toast.error(String(firstErr));
+          // 描述照旧逐个补(并发 + 攒批写回)
+          void pooled(
+            nodes.filter((n) => !n.description),
+            BACKFILL_CONCURRENCY,
+            async (n) => {
               const info = await getNamespaceInfo(orgId, token, n.relPath);
-              if (info?.description) {
-                patchNode(n.relPath, (x) => ({
-                  ...x,
-                  description: info.description,
-                }));
-              }
-            }
-          })();
+              if (!info?.description) return;
+              queuePatch(n.relPath, (x) => ({
+                ...x,
+                description: info.description,
+              }));
+            },
+          );
         })
         .catch((e) => {
           setSearchResults([]);
@@ -340,8 +425,9 @@ export function YunxiaoReposPanel() {
     );
     return (
       <ContextMenu key={r.pathWithNamespace}>
+        {/* 两行的行高不定,右边那个"去云效"按钮跟第一行对齐 */}
         <ContextMenuTrigger asChild>
-          <div className="group flex items-center">
+          <div className="group flex items-start">
             <button
               type="button"
               title={`${ssh}${r.description ? `\n${r.description}` : ""} · 点击复制地址`}
@@ -350,38 +436,46 @@ export function YunxiaoReposPanel() {
                 toast.success(`已复制:${ssh}`);
               }}
               style={{ paddingLeft: 8 + depth * 16 }}
-              className="flex h-6 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm pr-1.5 text-left text-[13px] text-foreground/85 transition-colors hover:bg-accent/70"
+              className="flex min-w-0 flex-1 cursor-pointer flex-col gap-px rounded-sm py-1 pr-1.5 text-left text-[13px] text-foreground/85 transition-colors hover:bg-accent/70"
             >
-              {/* 占住组行展开箭头那一列,和父组拉开一级缩进 */}
-              <span className="size-3.5 shrink-0" />
-              <span
-                className={cn(
-                  "shrink-0 rounded px-1 py-px text-[9.5px]",
-                  isStandard
-                    ? "bg-emerald-500/15 text-emerald-400"
-                    : "bg-foreground/10 text-muted-foreground",
+              {/* 第一行:标记 + 名字 + 右端的创建人/时间/大小 */}
+              <div className="flex w-full min-w-0 items-center gap-2">
+                {/* 占住组行展开箭头那一列,和父组拉开一级缩进 */}
+                <span className="size-3.5 shrink-0" />
+                <span
+                  className={cn(
+                    "shrink-0 rounded px-1 py-px text-[9.5px]",
+                    isStandard
+                      ? "bg-emerald-500/15 text-emerald-400"
+                      : "bg-foreground/10 text-muted-foreground",
+                  )}
+                >
+                  {isStandard ? "标准" : "非标"}
+                </span>
+                <span className="min-w-0 truncate">{r.name}</span>
+                {(memberNames[r.creatorUid] ||
+                  r.lastActivityAt ||
+                  r.repositorySize != null) && (
+                  <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">
+                    {[
+                      memberNames[r.creatorUid],
+                      fmtDate(r.lastActivityAt),
+                      fmtSize(r.repositorySize),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
                 )}
-              >
-                {isStandard ? "标准" : "非标"}
-              </span>
-              <span className="shrink-0">{r.name}</span>
+              </div>
+              {/* 第二行:描述。跟名字挤一行时两边都被截,分行之后这一条
+                  仓库是一整块,描述也能看全 */}
               {r.description && (
-                <span className="min-w-0 truncate text-[11px] text-muted-foreground/60">
+                <div
+                  className="min-w-0 truncate text-[11px] text-muted-foreground/60"
+                  style={{ paddingLeft: 22 }}
+                >
                   {r.description}
-                </span>
-              )}
-              {(memberNames[r.creatorUid] ||
-                r.lastActivityAt ||
-                r.repositorySize != null) && (
-                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/60 tabular-nums">
-                  {[
-                    memberNames[r.creatorUid],
-                    fmtDate(r.lastActivityAt),
-                    fmtSize(r.repositorySize),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </span>
+                </div>
               )}
             </button>
             <button
