@@ -71,6 +71,8 @@ export type EntryRowProps = {
   branch?: string | null;
   /** 编辑器里改了还没保存:git 看不见,树上用一个点标出来。 */
   dirty?: boolean;
+  /** 置顶的目录:排在同级最前面,行尾挂个图钉,不然不知道为什么它在上面。 */
+  pinned?: boolean;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -97,6 +99,7 @@ function EntryRowImpl(props: EntryRowProps) {
     yunxiaoLinked = false,
     branch = null,
     dirty = false,
+    pinned = false,
   } = props;
 
   const asProject = projectKind !== null && !!onOpenProject;
@@ -177,11 +180,22 @@ function EntryRowImpl(props: EntryRowProps) {
             {AGENT_STATE_EMOJI[agentState]}
           </span>
         ) : projectKind === "flutter" ? (
-          <img
-            src={namedIconUrl("flutter") ?? ""}
-            alt=""
-            className="size-4 shrink-0"
-          />
+          // 图标集里不一定有 flutter,拿不到就别渲染一个 src="" 的破图,
+          // 直接写个 Flutter 标签更清楚
+          (namedIconUrl("flutter") ?? "") ? (
+            <img
+              src={namedIconUrl("flutter") ?? ""}
+              alt=""
+              className="size-4 shrink-0"
+            />
+          ) : (
+            <span
+              title="Flutter 工程"
+              className="shrink-0 rounded bg-sky-500/15 px-1 text-[9px] font-semibold leading-4 text-sky-400"
+            >
+              Flutter
+            </span>
+          )
         ) : (
           <HugeiconsIcon
             icon={AndroidIcon}
@@ -235,6 +249,14 @@ function EntryRowImpl(props: EntryRowProps) {
       {/* 绑过云效项目的产品目录挂个云:标记绑定关系,点一下直达项目网页。
           行本身是个 button,里面不能再套 button —— 用 span 接住点击,
           stopPropagation 免得顺带选中/展开这一行。 */}
+      {pinned && (
+        <span
+          title="已置顶"
+          className="mr-0.5 shrink-0 text-[9px] leading-none text-muted-foreground/60"
+        >
+          📌
+        </span>
+      )}
       {yunxiaoLinked && (
         // biome-ignore lint/a11y/useKeyWithClickEvents: 键盘用户走右键菜单的"关联云效项目"
         // biome-ignore lint/a11y/noStaticElementInteractions: 见上,button 里套不了 button

@@ -45,7 +45,6 @@ import {
   ProductLinkChip,
   ProjectLinksBar,
   type QuickAgentId,
-  QuickCommitButton,
   RepoUrlChip,
   setProjectLink,
   setTaskLink,
@@ -133,7 +132,11 @@ import {
   type WorkspaceEnv,
   workspaceScopeKey,
 } from "@/modules/workspace";
-import { Folder01Icon, SidebarRightIcon } from "@hugeicons/core-free-icons";
+import {
+  CheckmarkCircle01Icon,
+  Folder01Icon,
+  SidebarRightIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -1930,25 +1933,33 @@ export default function App() {
                               onRun={runInActiveTerminal}
                             />
                           )}
-                        {/* 看改动:左右分栏,来回点几个文件不用开一堆 tab。
-                            紧挨着"提交" —— 提交前先扫一眼是同一件事的两步 */}
-                        {sourceControl.changedCount > 0 && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            title="查看变更文件"
-                            onClick={() => setChangedFilesOpen(true)}
-                            className="h-7 shrink-0 gap-1 px-2 text-xs"
-                          >
-                            diff
-                          </Button>
-                        )}
-                        <QuickCommitButton
-                          projectRoot={androidProjectRoot}
-                          changedCount={sourceControl.changedCount}
-                          onOpenDiff={openGitDiffTab}
-                          className="shrink-0"
-                        />
+                        {/* 看改动和提交合成一个入口:同一个框里左边选文件、
+                            右边看 diff、底下写提交信息,不用在两个浮层间跳 */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          title={
+                            sourceControl.changedCount > 0
+                              ? `${sourceControl.changedCount} 个文件有未提交的改动`
+                              : "查看改动并提交"
+                          }
+                          onClick={() => setChangedFilesOpen(true)}
+                          className="h-7 shrink-0 gap-1 px-2 text-xs"
+                        >
+                          <HugeiconsIcon
+                            icon={CheckmarkCircle01Icon}
+                            size={13}
+                            strokeWidth={1.75}
+                          />
+                          提交
+                          {sourceControl.changedCount > 0 && (
+                            <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full border border-border/60 bg-card px-1 text-[9px] font-semibold leading-none tabular-nums text-muted-foreground/95">
+                              {sourceControl.changedCount > 99
+                                ? "99+"
+                                : sourceControl.changedCount}
+                            </span>
+                          )}
+                        </Button>
                         {/* basis-full 换行:git 地址单独占一行,不跟
                             面包屑挤在一起 */}
                         <RepoUrlChip

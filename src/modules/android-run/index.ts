@@ -11,7 +11,6 @@ export { AndroidRunToolbar } from "./AndroidRunToolbar";
 export { ApifoxMenu } from "./ApifoxMenu";
 export {
   BranchChip,
-  QuickCommitButton,
   RepoUrlChip,
   WorktreeCountBadge,
 } from "./BranchChip";

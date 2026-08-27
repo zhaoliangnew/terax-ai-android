@@ -7,8 +7,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
+import { useArmedConfirm } from "@/lib/useArmedConfirm";
 import { cn } from "@/lib/utils";
 import { type GitChangedFile, native } from "@/modules/ai/lib/native";
+import { GIT_BRANCH_CHANGED_EVENT } from "@/modules/android-run/BranchChip";
 import { GitDiffPane } from "@/modules/editor/GitDiffPane";
 import { invalidateRepoDiffs } from "@/modules/editor/lib/diffCache";
 import { Cancel01Icon } from "@hugeicons/core-free-icons";
@@ -66,12 +69,16 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
   const [branch, setBranch] = useState<string | null>(null);
   // 丢弃不可撤销,所以点一下只是"上膛"(按钮变成"确认丢弃"),再点才执行 ——
   // 比再弹一个框轻,手也不用在两个层级之间跳。
-  const [discarding, setDiscarding] = useState<GitChangedFile | null>(null);
+  const [discarding, setDiscarding] = useArmedConfirm<GitChangedFile>();
   const [discardBusy, setDiscardBusy] = useState(false);
   // "丢弃全部"同样两步:先上膛,再确认
-  const [discardAllArmed, setDiscardAllArmed] = useState(false);
+  const [discardAllArmed, setDiscardAllArmed] = useArmedConfirm<true>();
   // 丢弃完要重新拉列表,复用打开时那次的 effect
   const [reloadKey, setReloadKey] = useState(0);
+  // 提交信息就在这框底下输 —— 看改动和提交本来就是一件事的两步,
+  // 原来底栏 "diff" 和 "提交" 两个按钮各开一个层,来回跳
+  const [msg, setMsg] = useState("");
+  const [commitBusy, setCommitBusy] = useState<"local" | "push" | null>(null);
 
   // 每次打开现拉一次就够:弹框是模态的,开着的时候编辑不了文件,
   // 挂改动监听纯属空转。
@@ -79,6 +86,7 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
     if (!open || !repoRoot) {
       setFiles(null);
       setSelected(null);
+      setMsg("");
       return;
     }
     let alive = true;
@@ -102,6 +110,39 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
     // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey 是"重新拉一次"的信号
   }, [open, repoRoot, reloadKey]);
 
+  /** 暂存当前分支的全部改动并提交,可选顺带推送。 */
+  const commit = async (push: boolean) => {
+    const message = msg.trim();
+    if (!repoRoot || !message || commitBusy) return;
+    setCommitBusy(push ? "push" : "local");
+    try {
+      // 按当下的磁盘重新算一遍要提交什么:框开着这段时间别处可能又改了
+      const status = await native.gitStatus(repoRoot);
+      if (status.changedFiles.length === 0) {
+        toast.info("没有需要提交的改动");
+        onOpenChange(false);
+        return;
+      }
+      // 重命名要把旧路径也 add 进去,否则旧文件的删除留在工作区
+      const paths = status.changedFiles.flatMap((f) =>
+        f.originalPath ? [f.path, f.originalPath] : [f.path],
+      );
+      await native.gitStage(repoRoot, paths);
+      await native.gitCommit(repoRoot, message);
+      if (push) await native.gitPush(repoRoot);
+      toast.success(push ? "已提交并推送" : "已提交到本地");
+      setMsg("");
+      invalidateRepoDiffs(repoRoot);
+      window.dispatchEvent(new Event(WORKTREE_CHANGED_EVENT));
+      window.dispatchEvent(new Event(GIT_BRANCH_CHANGED_EVENT));
+      onOpenChange(false);
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setCommitBusy(null);
+    }
+  };
+
   const discardMany = async (list: GitChangedFile[], label: string) => {
     if (!repoRoot || discardBusy || list.length === 0) return;
     setDiscardBusy(true);
@@ -122,7 +163,7 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
       );
       toast.success(label);
       setDiscarding(null);
-      setDiscardAllArmed(false);
+      setDiscardAllArmed(null);
       setReloadKey((k) => k + 1);
       window.dispatchEvent(new Event(WORKTREE_CHANGED_EVENT));
     } catch (e) {
@@ -142,7 +183,7 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[80vh] w-[88vw] max-w-none flex-col gap-0 p-0 sm:max-w-[1200px]"
+        className="flex h-[66vh] w-[88vw] max-w-none flex-col gap-0 p-0 sm:max-w-[1200px]"
       >
         {/* 三段式:左标题、中间当前产品/工程/分支、右关闭。自带的关闭按钮是
             absolute top-4,对不上这条矮头部,索性自己画一个跟着行高居中 */}
@@ -195,7 +236,7 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
                 }
               }}
               onBlur={() => {
-                if (!discardBusy) setDiscardAllArmed(false);
+                if (!discardBusy) setDiscardAllArmed(null);
               }}
               className={cn(
                 "h-7 shrink-0 gap-1 px-2 text-[12px]",
@@ -332,6 +373,46 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
                 {files?.length ? "选个文件看改动" : ""}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* 提交就在这儿收口:看完改动直接写信息提交,不用再跳去别的浮层 */}
+        <div className="shrink-0 border-t border-border px-4 py-2.5">
+          {/* 单行输入 + 按钮左右排:提交信息绝大多数就一句话,给它两行高
+              纯属白占地方,真要写长的按 Shift+Enter 换行照样存得下 */}
+          <div className="flex items-center gap-2">
+            <Textarea
+              value={msg}
+              onChange={(e) => setMsg(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder={
+                files?.length
+                  ? `提交信息 —— 将暂存并提交「${branch ?? "当前分支"}」的全部 ${files.length} 个改动`
+                  : "工作区没有改动"
+              }
+              rows={1}
+              disabled={commitBusy !== null || !files?.length}
+              className="h-8 min-h-8 flex-1 resize-none py-1.5 text-[12px] leading-5"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!msg.trim() || commitBusy !== null || !files?.length}
+              onClick={() => void commit(true)}
+              className="h-8 shrink-0 gap-1 text-xs"
+            >
+              {commitBusy === "push" && <Spinner className="size-3" />}
+              提交并推送
+            </Button>
+            <Button
+              size="sm"
+              disabled={!msg.trim() || commitBusy !== null || !files?.length}
+              onClick={() => void commit(false)}
+              className="h-8 shrink-0 gap-1 text-xs"
+            >
+              {commitBusy === "local" && <Spinner className="size-3" />}
+              提交本地
+            </Button>
           </div>
         </div>
       </DialogContent>

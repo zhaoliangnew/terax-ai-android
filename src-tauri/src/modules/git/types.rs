@@ -105,6 +105,39 @@ pub struct GitLogEntry {
     pub files_changed: u32,
     pub insertions: u32,
     pub deletions: u32,
+    /// 指向这个提交的标签名(git log 的 %D 里 `tag: ` 那几项),没有就是空。
+    pub tags: Vec<String>,
+}
+
+/// 一个提交的完整信息(给"提交详情"面板用)。`body` 是说明的正文部分,
+/// 可能是空的,也可能有好几段。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitMeta {
+    pub sha: String,
+    pub short_sha: String,
+    pub author: String,
+    pub author_email: String,
+    pub timestamp_secs: i64,
+    pub parents: Vec<String>,
+    pub subject: String,
+    pub body: String,
+    /// %D 里的全部 ref(分支、tag、HEAD 指向),原样给前端展示。
+    pub refs: Vec<String>,
+    pub tags: Vec<String>,
+}
+
+/// 一个标签。`sha` 是它最终指向的提交 —— 附注标签(annotated)的
+/// objectname 是 tag 对象自己,得用 `*objectname` 才拿到提交。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitTagEntry {
+    pub name: String,
+    pub sha: String,
+    pub short_sha: String,
+    pub subject: String,
+    pub timestamp_secs: i64,
+    pub is_annotated: bool,
 }
 
 #[derive(Serialize)]

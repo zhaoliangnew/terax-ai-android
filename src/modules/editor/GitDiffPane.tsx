@@ -58,45 +58,56 @@ const READONLY_EXT = [
 ];
 const DIFF_THEME = EditorView.theme({
   "&.cm-merge-b .cm-changedText, .cm-changedText": {
-    background: "rgba(110, 200, 120, 0.20) !important",
-    borderRadius: "3px",
-    padding: "0 1px",
+    background: "rgba(110, 200, 120, 0.24) !important",
+    borderRadius: "2px",
   },
   ".cm-deletedChunk .cm-deletedText, &.cm-merge-b .cm-deletedText": {
-    background: "rgba(220, 90, 90, 0.22) !important",
-    borderRadius: "3px",
-    padding: "0 1px",
+    background: "rgba(220, 90, 90, 0.26) !important",
+    borderRadius: "2px",
   },
+  // 整行底色比标记更早被看见,所以别太淡 —— 光靠 gutter 那个字符,
+  // 扫代码的时候根本分不清这行是加的还是删的。
+  //
+  // 这里必须比"改动词"的高亮足够接近,否则整行新增时会看成"一个到行尾就
+  // 断掉的色块浮在中间"(整行都是改动词,内层高亮只包到文本末尾),而不是
+  // 一条通栏的新增行 —— 界面之间看起来不一致就是这么来的。
   "&.cm-merge-b .cm-changedLine, .cm-changedLine, .cm-inlineChangedLine": {
-    backgroundColor: "rgba(110, 200, 120, 0.05) !important",
+    backgroundColor: "rgba(110, 200, 120, 0.16) !important",
   },
   ".cm-deletedChunk": {
-    backgroundColor: "rgba(220, 90, 90, 0.05) !important",
+    backgroundColor: "rgba(220, 90, 90, 0.16) !important",
     paddingTop: "1px",
     paddingBottom: "1px",
   },
-  // 变更标记用 +/- 而不是一条色带:一眼看出是加还是删,不用靠颜色分辨
-  // (色带只有 2px,红绿在深色底上也不好认)。
+  // 变更标记做成整格实心色块 + 深色字符:绿底白加号 / 红底白减号。
+  // 试过"透明底 + 彩色字符",在深色主题下绿字红字都发灰,+ 和 − 这两个
+  // 一横一十字的形状在小字号下还是要盯着看才分得清 —— 实心底色把"这
+  // 一行是加还是删"提到了余光就能看见的层级。
   ".cm-changeGutter": {
-    width: "1.1em !important",
+    width: "1.5em !important",
     paddingLeft: "0 !important",
     textAlign: "center",
   },
   "&.cm-merge-b .cm-changedLineGutter, .cm-changedLineGutter": {
-    background: "transparent !important",
-    color: "rgb(110, 200, 120)",
-    fontWeight: "600",
+    background: "rgb(46, 160, 67) !important",
+    color: "rgb(13, 17, 23)",
+    fontWeight: "900",
+    fontSize: "1.05em",
+    lineHeight: "1",
   },
   "&.cm-merge-b .cm-changedLineGutter::after, .cm-changedLineGutter::after": {
     content: '"+"',
   },
   ".cm-deletedLineGutter, &.cm-merge-a .cm-changedLineGutter": {
-    background: "transparent !important",
-    color: "rgb(220, 110, 110)",
-    fontWeight: "600",
+    background: "rgb(218, 54, 51) !important",
+    color: "rgb(13, 17, 23)",
+    fontWeight: "900",
+    fontSize: "1.05em",
+    lineHeight: "1",
   },
+  // U+2212 减号,比连字符 - 长一截,和 + 的横一样宽,不会看岔
   ".cm-deletedLineGutter::after, &.cm-merge-a .cm-changedLineGutter::after": {
-    content: '"-"',
+    content: '"\\2212"',
   },
   ".cm-collapsedLines": {
     backgroundColor: "transparent",

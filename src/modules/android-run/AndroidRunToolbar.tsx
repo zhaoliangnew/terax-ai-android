@@ -18,6 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect } from "react";
 import { BranchChip } from "./BranchChip";
 import { adbCmd, installCommand } from "./lib/adb";
+import { ipSuffix } from "./lib/highlightSerial";
 import { useLogcatStore } from "./logcatStore";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
 
@@ -38,6 +39,7 @@ export function AndroidRunToolbar({ compact }: Props) {
   const refreshDevices = useAndroidRunStore((s) => s.refreshDevices);
   const selectModule = useAndroidRunStore((s) => s.selectModule);
   const deviceManagerOpen = useAndroidRunStore((s) => s.deviceManagerOpen);
+  const deviceNotes = useAndroidRunStore((s) => s.deviceNotes);
   const setDeviceManagerOpen = useAndroidRunStore(
     (s) => s.setDeviceManagerOpen,
   );
@@ -62,6 +64,17 @@ export function AndroidRunToolbar({ compact }: Props) {
 
   const selectedDevice =
     devices.find((d) => d.serial === selectedSerial) ?? null;
+  // 一屋子同型号机器,"Shimeta 3568SC" 谁也认不出是哪台;有备注就按历史设备
+  // 卡片上那串来显示(备注 + IP 末两段),没备注才回落厂商+型号。
+  const selectedNote = selectedDevice?.sn
+    ? (deviceNotes[selectedDevice.sn] ?? "")
+    : "";
+  const selectedSuffix = selectedDevice ? ipSuffix(selectedDevice.serial) : "";
+  const selectedLabel = selectedDevice
+    ? selectedNote
+      ? `${selectedNote}${selectedSuffix ? ` · ${selectedSuffix}` : ""}`
+      : `${selectedDevice.vendor ? `${selectedDevice.vendor} ` : ""}${selectedDevice.model}`
+    : "";
   const canRun =
     selectedDevice?.state === "device" &&
     selectedModule !== null &&
@@ -93,10 +106,10 @@ export function AndroidRunToolbar({ compact }: Props) {
         variant="outline"
         size="sm"
         onClick={() => setDeviceManagerOpen(!deviceManagerOpen)}
-        className="h-7 max-w-56 gap-1.5 rounded-md px-2 text-[13px]"
+        className="h-7 max-w-72 gap-1.5 rounded-md px-2 text-[13px]"
         title={
           selectedDevice
-            ? `${selectedDevice.vendor} ${selectedDevice.model} · ${selectedDevice.serial} · Android ${selectedDevice.androidVersion} · API ${selectedDevice.apiLevel}`
+            ? `${selectedNote ? `${selectedNote} · ` : ""}${selectedDevice.vendor} ${selectedDevice.model} · ${selectedDevice.serial} · Android ${selectedDevice.androidVersion} · API ${selectedDevice.apiLevel}`
             : "选择设备"
         }
       >
@@ -112,7 +125,7 @@ export function AndroidRunToolbar({ compact }: Props) {
           {/* 有在线设备只是没选中,说"未选择"并引导去选 —— 写"无设备"
               是睁眼说瞎话 */}
           {selectedDevice
-            ? `${selectedDevice.vendor ? `${selectedDevice.vendor} ` : ""}${selectedDevice.model}`
+            ? selectedLabel
             : devicesLoading
               ? "扫描设备…"
               : devices.some((d) => d.state === "device")

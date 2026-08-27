@@ -186,7 +186,11 @@ export async function isAndroidProjectDir(dir: string): Promise<boolean> {
   );
 }
 
-/** Walk up from `startDir` looking for the gradle project root (settings.gradle[.kts]). */
+/** Walk up from `startDir` looking for a runnable project root:
+ * gradle(settings.gradle[.kts])或 Flutter(带 flutter: 段的 pubspec.yaml)。
+ *
+ * Flutter 也要认:右侧那块设备栏(投屏/logcat/adb)对 Flutter 工程一样有用,
+ * 只认 gradle 的话在 Flutter 工程里整块都不出现。 */
 export async function findProjectRoot(
   startDir: string,
 ): Promise<string | null> {
@@ -194,7 +198,8 @@ export async function findProjectRoot(
   for (let i = 0; i < 8 && dir.length > 1; i++) {
     if (
       (await hasFile(`${dir}/settings.gradle`)) ||
-      (await hasFile(`${dir}/settings.gradle.kts`))
+      (await hasFile(`${dir}/settings.gradle.kts`)) ||
+      (await isFlutterProjectDir(dir))
     ) {
       return dir;
     }

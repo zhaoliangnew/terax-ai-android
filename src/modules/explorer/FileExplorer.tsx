@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IS_WINDOWS } from "@/lib/platform";
+import { useArmedConfirm } from "@/lib/useArmedConfirm";
 import { cn } from "@/lib/utils";
 import { type GitStatusSnapshot, native } from "@/modules/ai/lib/native";
 import {
@@ -50,6 +51,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
+import { DirSearchPopover } from "./DirSearchPopover";
 import {
   type ExplorerHeaderAction,
   ExplorerHeaderActions,
@@ -64,6 +67,13 @@ import {
 import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
+import {
+  loadPinnedDirs,
+  PINNED_DIRS_CHANGED_EVENT,
+  pinnedKey,
+  setPinnedDir,
+  togglePinnedDir,
+} from "./lib/pinnedDirs";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { useFileTree } from "./lib/useFileTree";
@@ -140,6 +150,7 @@ type Row =
       depth: number;
       gitignored: boolean;
       gitStatusCode: GitStatusCode | null;
+      pinned: boolean;
     }
   | {
       kind: "rename";
@@ -206,6 +217,10 @@ function buildRows(
   keep: Set<string> | null,
   /** 目录下挂的 worktree(只有已打开的工程才有),画成子行。 */
   worktreesFor: ((dirPath: string) => ProjectWorktree[] | undefined) | null,
+  /** 置顶的路径(用来画图钉)。 */
+  pinned: Set<string>,
+  /** 用哪份"展开集合"决定递归 —— 置顶区有自己的一份,和树互不影响。 */
+  expandedSet: Set<string>,
 ): { rows: Row[]; entryIndexByPath: Map<string, number> } {
   const rows: Row[] = [];
   const entryIndexByPath = new Map<string, number>();
@@ -213,11 +228,13 @@ function buildRows(
   const walk = (parent: string, depth: number, parentIgnored: boolean) => {
     const node = tree.nodes[parent];
     if (!node || node.status !== "loaded") return;
+    // 置顶不动这里的顺序:置顶的单独在树顶上开一块列出来,树本身保持
+    // 原样 —— 常用目录在原位置的肌肉记忆比"排到最前"更值钱
     for (const entry of node.entries) {
       const path = tree.joinPath(parent, entry.name);
       if (keep && !keep.has(path)) continue;
       const isDir = entry.kind === "dir";
-      const expanded = isDir && tree.expanded.has(path);
+      const expanded = isDir && expandedSet.has(path);
       const isRenaming = tree.renaming === path;
       const gitignored = parentIgnored || entry.gitignored;
       const gitStatusCode = gitignored ? null : lookup(path);
@@ -244,6 +261,7 @@ function buildRows(
           depth,
           gitignored,
           gitStatusCode,
+          pinned: pinned.has(pinnedKey(path)),
         });
       }
       // 工程挂着 worktree 就直接铺出来(不做展开:临时修 bug 要的就是
@@ -336,6 +354,15 @@ export const FileExplorer = memo(
       gitDecorations,
     );
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
+    // 置顶目录(工程上百个,常用的那几个提到最前面)
+    const [pinnedPaths, setPinnedPaths] = useState<Set<string>>(() =>
+      loadPinnedDirs(),
+    );
+    useEffect(() => {
+      const sync = () => setPinnedPaths(loadPinnedDirs());
+      window.addEventListener(PINNED_DIRS_CHANGED_EVENT, sync);
+      return () => window.removeEventListener(PINNED_DIRS_CHANGED_EVENT, sync);
+    }, []);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [isSearchActive, setIsSearchActive] = useState(false);
     const searchRef = useRef<ExplorerSearchHandle>(null);
@@ -386,7 +413,86 @@ export const FileExplorer = memo(
       [linkVersion],
     );
 
-    const keepPaths = useMemo(() => {
+    // 右键时的光标位置:目录内搜索的面板贴着它弹,不用把视线甩到屏幕中间
+    const [menuAnchor, setMenuAnchor] = useState<{
+      x: number;
+      y: number;
+    } | null>(null);
+    // 右键"在此目录内搜索"打开的小弹框(只看这个目录的直接子项 ——
+    // 全局递归搜索试过一版,几百条命中把树撑爆,打字掉帧)
+    const [dirSearchTarget, setDirSearchTarget] = useState<string | null>(null);
+
+    // 置顶区自己的展开状态:在这儿展开一个目录,不该顺带把树里那份也
+    // 掀开(反过来也一样)。数据还是共用 tree.nodes,只是各画各的。
+    const [pinnedExpanded, setPinnedExpanded] = useState<Set<string>>(
+      new Set(),
+    );
+    // 当前根目录下的置顶项,单独在树顶上列一块
+    const pinnedList = useMemo(() => {
+      if (!rootPath) return [] as string[];
+      const root = rootPath.replace(/\/+$/, "");
+      return [...pinnedPaths]
+        .map((p) => pinnedKey(p))
+        .filter((p) => p.startsWith(`${root}/`))
+        .sort((a, b) =>
+          (a.split("/").pop() ?? a).localeCompare(
+            b.split("/").pop() ?? b,
+            "zh",
+          ),
+        );
+    }, [pinnedPaths, rootPath]);
+
+    // 置顶区的行:复用 buildRows + renderRow,图标/工程样式/分支/状态灯
+    // 全部和树里一致。展开状态也和树共用(tree.expanded),两边同步。
+    const pinnedRows = useMemo(() => {
+      if (!rootPath || pinnedList.length === 0) return [] as Row[];
+      const worktreesFor = projectGitByPath
+        ? (dir: string) => projectGitByPath[dir]?.worktrees
+        : null;
+      const out: Row[] = [];
+      for (const p of pinnedList) {
+        out.push({
+          kind: "entry",
+          key: `pin:${p}`,
+          path: p,
+          name: p.split("/").pop() ?? p,
+          isDir: true,
+          isExpanded: pinnedExpanded.has(p),
+          depth: 0,
+          gitignored: false,
+          gitStatusCode: lookupGitStatus(p),
+          pinned: true,
+        });
+        if (!pinnedExpanded.has(p)) continue;
+        const sub = buildRows(
+          p,
+          tree,
+          lookupGitStatus,
+          null,
+          worktreesFor,
+          pinnedPaths,
+          pinnedExpanded,
+        );
+        for (const r of sub.rows) {
+          out.push({ ...r, key: `pin:${r.key}`, depth: r.depth + 1 });
+        }
+      }
+      return out;
+      // tree 整体每次渲染都换引用,只有下面这几项是 buildRows 真正读的
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      rootPath,
+      pinnedList,
+      pinnedPaths,
+      pinnedExpanded,
+      tree.nodes,
+      tree.renaming,
+      tree.pendingCreate,
+      lookupGitStatus,
+      projectGitByPath,
+    ]);
+
+    const openedKeep = useMemo(() => {
       if (!onlyOpened || !canFilterOpened || !rootPath) return null;
       const root = rootPath.replace(/\/+$/, "");
       const keep = new Set<string>();
@@ -402,6 +508,8 @@ export const FileExplorer = memo(
       return keep;
     }, [onlyOpened, canFilterOpened, openedProjectPaths, rootPath]);
 
+    const keepPaths = openedKeep;
+
     // 变更文件浏览器(产品文件区专用,左栏那棵是产品导航树,看改动在那儿
     // 没意义 —— 用"能不能设根目录"区分两棵树)。做成弹框而不是树过滤:
     // 读改动要的是"点一个看一个 diff",树只能给你一堆文件名。
@@ -412,12 +520,12 @@ export const FileExplorer = memo(
     // 光过滤还不够:父目录没展开就看不到里面的工程,而展开又是加载子节点的
     // 触发点,所以这里真去展开,而不是画的时候假装展开。
     useEffect(() => {
-      if (!keepPaths) return;
-      for (const p of keepPaths) {
+      if (!openedKeep) return;
+      for (const p of openedKeep) {
         if (!openedProjectPaths?.has(p) && !tree.expanded.has(p))
           tree.toggle(p);
       }
-    }, [keepPaths, openedProjectPaths, tree.expanded, tree.toggle]);
+    }, [openedKeep, openedProjectPaths, tree.expanded, tree.toggle]);
 
     const { rows, entryIndexByPath } = useMemo(() => {
       if (!rootPath)
@@ -431,6 +539,8 @@ export const FileExplorer = memo(
         lookupGitStatus,
         keepPaths,
         projectGitByPath ? (dir) => projectGitByPath[dir]?.worktrees : null,
+        pinnedPaths,
+        tree.expanded,
       );
       // `tree` is intentionally omitted: its identity changes every render, but
       // the listed fields are the only inputs buildRows actually reads.
@@ -444,6 +554,7 @@ export const FileExplorer = memo(
       lookupGitStatus,
       keepPaths,
       projectGitByPath,
+      pinnedPaths,
     ]);
 
     // Classify visible directories as gradle projects (async, cached). Project
@@ -454,34 +565,48 @@ export const FileExplorer = memo(
     );
     useEffect(() => {
       if (!classifyProjectDir) return;
-      const dirPaths = rows.flatMap((r) =>
+      // 置顶区那几行也要归类:只在置顶区露过面的工程,不归类就一直画成
+      // 普通文件夹,直到它在树里也出现一次才突然变成机器人
+      const dirPaths = [...rows, ...pinnedRows].flatMap((r) =>
         r.kind === "entry" && r.isDir ? [r.path] : [],
       );
       let cancelled = false;
       void (async () => {
-        let changed = false;
         for (const p of dirPaths) {
           if (projectCacheRef.current.has(p)) continue;
           const kind = await classifyProjectDir(p);
           projectCacheRef.current.set(p, kind);
-          if (kind) {
-            changed = true;
-            // 工程目录不该展开:若在归类前已被展开,自动收起。
-            if (tree.expanded.has(p)) tree.toggle(p);
-          }
+          // 工程目录不该展开:若在归类前已被展开,自动收起。
+          if (kind && tree.expanded.has(p)) tree.toggle(p);
         }
-        if (!cancelled && changed) {
-          const next = new Map<string, ProjectKind>();
-          for (const [k, v] of projectCacheRef.current) {
-            if (v) next.set(k, v);
-          }
-          setProjectDirs(next);
+        if (cancelled) return;
+        // 每轮都按缓存重算一遍再比对,不能只在"这轮有新发现"时才 set:
+        // 这个 effect 依赖 rows/pinnedRows,加载过程中会重跑好几次,前一轮
+        // 刚发现的工程只写进了 ref 就被 cleanup 掐掉,后一轮全命中缓存
+        // 又以为"没变化",结果归类结果永远刷不到界面上 —— 表现就是工程
+        // 一会儿是机器人一会儿是普通文件夹。
+        const next = new Map<string, ProjectKind>();
+        for (const [k, v] of projectCacheRef.current) {
+          if (v) next.set(k, v);
         }
+        setProjectDirs((prev) => {
+          if (prev.size === next.size) {
+            let same = true;
+            for (const [k, v] of next) {
+              if (prev.get(k) !== v) {
+                same = false;
+                break;
+              }
+            }
+            if (same) return prev;
+          }
+          return next;
+        });
       })();
       return () => {
         cancelled = true;
       };
-    }, [rows, classifyProjectDir, tree.expanded, tree.toggle]);
+    }, [rows, pinnedRows, classifyProjectDir, tree.expanded, tree.toggle]);
 
     // 工程目录任何时候都不该处于展开态:reveal 到工程内部路径之类的操作
     // 会把它撑开,.git/.worktree 全翻出来。发现就收起,顺带自愈历史状态。
@@ -500,6 +625,25 @@ export const FileExplorer = memo(
       }),
       [tree.toggle, tree.beginRename, tree.commitRename, tree.cancelRename],
     );
+    const pinnedRowActions = useMemo<RowActions>(
+      () => ({
+        ...rowActions,
+        toggle: (path: string) => {
+          setPinnedExpanded((cur) => {
+            const next = new Set(cur);
+            if (next.has(path)) next.delete(path);
+            else {
+              next.add(path);
+              // 只拉数据,不动 tree.expanded —— expand() 会把树也展开
+              tree.refresh(path);
+            }
+            return next;
+          });
+        },
+      }),
+      [rowActions, tree.refresh],
+    );
+
     const renameInProgress =
       tree.renaming !== null || tree.pendingCreate !== null;
 
@@ -512,7 +656,7 @@ export const FileExplorer = memo(
     const [copyProjectSource, setCopyProjectSource] = useState<string | null>(
       null,
     );
-    const [deleteConfirm, setDeleteConfirm] = useState(false);
+    const [deleteConfirm, setDeleteConfirm] = useArmedConfirm<true>();
     // Bumped on every right-click so the menu content remounts and the popper
     // re-anchors to the new cursor (floating-ui won't reposition on an anchor
     // change alone, only on scroll/resize).
@@ -782,7 +926,7 @@ export const FileExplorer = memo(
       }
     };
 
-    const renderRow = (row: Row) => {
+    const renderRow = (row: Row, actions: RowActions = rowActions) => {
       switch (row.kind) {
         case "entry":
         case "rename": {
@@ -793,7 +937,7 @@ export const FileExplorer = memo(
               isDir={row.isDir}
               isExpanded={row.kind === "entry" ? row.isExpanded : false}
               depth={row.depth}
-              actions={rowActions}
+              actions={actions}
               renameInProgress={renameInProgress}
               isSelected={selectedPath === row.path}
               isRenaming={row.kind === "rename"}
@@ -811,6 +955,7 @@ export const FileExplorer = memo(
               }
               isOpenedProject={!!openedProjectPaths?.has(row.path)}
               projectPtyIds={projectPtyIds}
+              pinned={row.kind === "entry" && row.pinned}
               yunxiaoLinked={row.isDir && linkedDirs.has(row.path)}
               dirty={!row.isDir && !!dirtyPaths?.has(row.path)}
               branch={
@@ -991,6 +1136,82 @@ export const FileExplorer = memo(
           <ExplorerHeaderActions actions={actions} width={headerWidth} />
         </div>
 
+        {/* 置顶区:钉住的目录统一列在树顶上,树里的位置不动。点一下 ——
+            是工程就直接开/定位终端,不是工程就在下面的树里展开并滚过去。
+            不设高度上限、不滚动:置顶就那几个,全铺出来一眼看完 —— 再套
+            一层滚动条,内外两个滚动区叠在一起最难用 */}
+        {onSetAsRoot && pinnedRows.length > 0 && (
+          <div className="shrink-0 border-b border-border pb-1">
+            <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+              置顶
+            </div>
+            {pinnedRows.map((row) => {
+              // 取消置顶走右键:行尾本来就挤着云效图标、分支名、状态灯,
+              // 再浮一个 ✕ 上去必然压到别人身上
+              const pinRoot =
+                row.kind === "entry" && row.depth === 0 ? row : null;
+              if (!pinRoot)
+                return (
+                  <div key={row.key}>{renderRow(row, pinnedRowActions)}</div>
+                );
+              return (
+                <ContextMenu key={row.key}>
+                  <ContextMenuTrigger asChild>
+                    <div>{renderRow(row, pinnedRowActions)}</div>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className={COMPACT_CONTENT}>
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => {
+                        setPinnedDir(pinRoot.path, false);
+                        toast.success("已取消置顶", {
+                          description: pinRoot.name,
+                        });
+                      }}
+                    >
+                      取消置顶
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => setRevealTarget(pinRoot.path)}
+                    >
+                      在树中定位
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 右键"在此目录内搜索":贴着光标弹,只看这一层 */}
+        <DirSearchPopover
+          dir={dirSearchTarget}
+          anchor={menuAnchor}
+          isPinned={(path) => pinnedPaths.has(pinnedKey(path))}
+          onTogglePin={(path, pinned) => {
+            setPinnedDir(path, pinned);
+            toast.success(pinned ? "已置顶" : "已取消置顶", {
+              description: path.split("/").pop(),
+            });
+          }}
+          onClose={() => setDirSearchTarget(null)}
+          onPick={async (path, isDir) => {
+            if (isDir && classifyProjectDir && onOpenProject) {
+              const kind = await classifyProjectDir(path);
+              if (kind) {
+                onOpenProject(path);
+                return;
+              }
+            }
+            if (!isDir) {
+              onOpenFile(path, true);
+              return;
+            }
+            setRevealTarget(path);
+          }}
+        />
+
         <ExplorerSearch
           ref={searchRef}
           rootPath={rootPath}
@@ -1007,102 +1228,114 @@ export const FileExplorer = memo(
         {!isSearchActive ? (
           <ContextMenu
             onOpenChange={(open) => {
-              if (!open) setDeleteConfirm(false);
+              if (!open) setDeleteConfirm(null);
             }}
           >
             <ContextMenuTrigger asChild>
-              <div
-                ref={scrollRef}
-                data-explorer-drop=""
-                className={cn(
-                  "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
-                  rootIsDropTarget &&
-                    "rounded-sm ring-1 ring-inset ring-primary/50",
-                )}
-                onPointerDown={dnd.onPointerDown}
-                onClickCapture={dnd.onClickCapture}
-                onContextMenuCapture={(e) => {
-                  const el = (e.target as HTMLElement).closest<HTMLElement>(
-                    "[data-fs-path]",
-                  );
-                  const path = el?.getAttribute("data-fs-path") ?? null;
-                  const idx =
-                    path != null ? entryIndexByPath.get(path) : undefined;
-                  const row = idx !== undefined ? rows[idx] : undefined;
-                  setMenuTarget(
-                    row && row.kind === "entry"
-                      ? { path: row.path, name: row.name, isDir: row.isDir }
-                      : null,
-                  );
-                  setDeleteConfirm(false);
-                  setMenuNonce((n) => n + 1);
-                }}
-              >
-                {pendingAtRoot ? (
-                  <div
-                    className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
-                    style={{ paddingLeft: 6 }}
-                  >
-                    <span className="size-3.5 shrink-0" />
-                    <img
-                      src={
-                        pendingAtRoot.kind === "dir"
-                          ? folderIconUrl("", false)
-                          : fileIconUrl("untitled")
-                      }
-                      alt=""
-                      className="size-4 shrink-0 opacity-70"
-                    />
-                    <InlineInput
-                      initial=""
-                      placeholder={
-                        pendingAtRoot.kind === "dir" ? "New folder" : "New file"
-                      }
-                      onCommit={tree.commitCreate}
-                      onCancel={tree.cancelCreate}
-                    />
-                  </div>
-                ) : null}
-                {root?.status === "loading" && (
-                  <div className="px-3 py-2 text-[11px] text-muted-foreground">
-                    Loading…
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                {/* 置顶那块有标题,这块没有的话两片列表糊在一起分不出来 */}
+                {onSetAsRoot && pinnedRows.length > 0 && (
+                  <div className="shrink-0 px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                    {rootPath?.split("/").filter(Boolean).pop() ?? "全部"}
                   </div>
                 )}
-                {root?.status === "error" && (
-                  <div className="px-3 py-2 text-[11px] text-destructive">
-                    {root.message}
-                  </div>
-                )}
-                {root?.status === "loaded" ? (
-                  <div
-                    style={{
-                      height: virtualizer.getTotalSize(),
-                      position: "relative",
-                      width: "100%",
-                    }}
-                  >
-                    {virtualizer.getVirtualItems().map((virtualRow) => {
-                      const row = rows[virtualRow.index];
-                      if (!row) return null;
-                      return (
-                        <div
-                          key={virtualRow.key}
-                          data-virtual-row-index={virtualRow.index}
-                          style={{
-                            position: "absolute",
-                            top: 0,
-                            left: 0,
-                            width: "100%",
-                            height: virtualRow.size,
-                            transform: `translateY(${virtualRow.start}px)`,
-                          }}
-                        >
-                          {renderRow(row)}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
+                <div
+                  ref={scrollRef}
+                  data-explorer-drop=""
+                  className={cn(
+                    "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
+                    rootIsDropTarget &&
+                      "rounded-sm ring-1 ring-inset ring-primary/50",
+                  )}
+                  onPointerDown={dnd.onPointerDown}
+                  onClickCapture={dnd.onClickCapture}
+                  onContextMenuCapture={(e) => {
+                    const el = (e.target as HTMLElement).closest<HTMLElement>(
+                      "[data-fs-path]",
+                    );
+                    const path = el?.getAttribute("data-fs-path") ?? null;
+                    const idx =
+                      path != null ? entryIndexByPath.get(path) : undefined;
+                    const row = idx !== undefined ? rows[idx] : undefined;
+                    setMenuTarget(
+                      row && row.kind === "entry"
+                        ? { path: row.path, name: row.name, isDir: row.isDir }
+                        : null,
+                    );
+                    setDeleteConfirm(null);
+                    setMenuNonce((n) => n + 1);
+                    // 记下光标,"在此目录内搜索"的面板要贴着这儿弹
+                    setMenuAnchor({ x: e.clientX, y: e.clientY });
+                  }}
+                >
+                  {pendingAtRoot ? (
+                    <div
+                      className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
+                      style={{ paddingLeft: 6 }}
+                    >
+                      <span className="size-3.5 shrink-0" />
+                      <img
+                        src={
+                          pendingAtRoot.kind === "dir"
+                            ? folderIconUrl("", false)
+                            : fileIconUrl("untitled")
+                        }
+                        alt=""
+                        className="size-4 shrink-0 opacity-70"
+                      />
+                      <InlineInput
+                        initial=""
+                        placeholder={
+                          pendingAtRoot.kind === "dir"
+                            ? "New folder"
+                            : "New file"
+                        }
+                        onCommit={tree.commitCreate}
+                        onCancel={tree.cancelCreate}
+                      />
+                    </div>
+                  ) : null}
+                  {root?.status === "loading" && (
+                    <div className="px-3 py-2 text-[11px] text-muted-foreground">
+                      Loading…
+                    </div>
+                  )}
+                  {root?.status === "error" && (
+                    <div className="px-3 py-2 text-[11px] text-destructive">
+                      {root.message}
+                    </div>
+                  )}
+                  {root?.status === "loaded" ? (
+                    <div
+                      style={{
+                        height: virtualizer.getTotalSize(),
+                        position: "relative",
+                        width: "100%",
+                      }}
+                    >
+                      {virtualizer.getVirtualItems().map((virtualRow) => {
+                        const row = rows[virtualRow.index];
+                        if (!row) return null;
+                        return (
+                          <div
+                            key={virtualRow.key}
+                            data-virtual-row-index={virtualRow.index}
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              height: virtualRow.size,
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
+                          >
+                            {renderRow(row)}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </ContextMenuTrigger>
             <ContextMenuContent
@@ -1122,6 +1355,39 @@ export const FileExplorer = memo(
                       打开
                     </ContextMenuItem>
                   )}
+                  {menuTarget.isDir && onSetAsRoot && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => setDirSearchTarget(menuTarget.path)}
+                    >
+                      在此目录内搜索…
+                    </ContextMenuItem>
+                  )}
+                  {/* 置顶:同级里排到最前面,常用工程不用每次滚半天 */}
+                  {/* 工程本身不给置顶:置顶是给"产品目录"用的入口,工程
+                      钉上去只会让那一块越堆越长 */}
+                  {menuTarget.isDir &&
+                    !projectDirs.has(menuTarget.path) &&
+                    (() => {
+                      const isPinned = pinnedPaths.has(
+                        pinnedKey(menuTarget.path),
+                      );
+                      return (
+                        <ContextMenuItem
+                          className={COMPACT_ITEM}
+                          onSelect={() => {
+                            // 文案按当场读到的真实结果给,不用渲染时算的
+                            // isPinned —— 那个只负责菜单显示"置顶/取消置顶"
+                            const now = togglePinnedDir(menuTarget.path);
+                            toast.success(now ? "已置顶" : "已取消置顶", {
+                              description: menuTarget.name,
+                            });
+                          }}
+                        >
+                          {isPinned ? "取消置顶" : "置顶"}
+                        </ContextMenuItem>
+                      );
+                    })()}
                   {menuTarget.isDir && onRevealInTerminal && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}

@@ -566,3 +566,65 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
     assert!(!feature[0].is_head);
     assert!(feature[0].worktree_path.is_some());
 }
+
+#[test]
+fn list_tags_returns_annotated_and_lightweight_pointing_at_commits() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "first"]);
+    fx.run_git(&["tag", "v0.1.0"]);
+    fx.write_file("b.txt", "b\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "second"]);
+    // 附注标签:objectname 是 tag 对象,必须解引用到提交才算对
+    fx.run_git(&["tag", "-a", "v0.2.0", "-m", "release two"]);
+
+    let tags = operations::list_tags(&fx.registry, &fx.repo_str(), &fx.workspace).expect("tags");
+    assert_eq!(tags.len(), 2);
+
+    let annotated = tags.iter().find(|t| t.name == "v0.2.0").expect("v0.2.0");
+    assert!(annotated.is_annotated);
+    assert_eq!(annotated.subject, "release two");
+    let light = tags.iter().find(|t| t.name == "v0.1.0").expect("v0.1.0");
+    assert!(!light.is_annotated);
+
+    // 两个标签指向的都是提交对象,而且是不同的提交
+    let log = operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace)
+        .expect("log");
+    let shas: Vec<&str> = log.iter().map(|c| c.sha.as_str()).collect();
+    assert!(shas.contains(&annotated.sha.as_str()));
+    assert!(shas.contains(&light.sha.as_str()));
+    assert_ne!(annotated.sha, light.sha);
+}
+
+#[test]
+fn log_reports_tags_pointing_at_each_commit() {
+    if skip_if_no_git() {
+        return;
+    }
+    let fx = GitRepoFixture::new();
+    fx.write_file("a.txt", "a\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "tagged"]);
+    fx.run_git(&["tag", "v1.0.0"]);
+    fx.run_git(&["tag", "-a", "shipped", "-m", "ship it"]);
+    fx.write_file("b.txt", "b\n");
+    fx.run_git(&["add", "."]);
+    fx.run_git(&["commit", "-q", "-m", "untagged"]);
+
+    let log = operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace)
+        .expect("log");
+    let untagged = log.iter().find(|c| c.subject == "untagged").expect("head");
+    assert!(untagged.tags.is_empty());
+
+    let tagged = log.iter().find(|c| c.subject == "tagged").expect("tagged");
+    let mut tags = tagged.tags.clone();
+    tags.sort();
+    assert_eq!(tags, vec!["shipped".to_string(), "v1.0.0".to_string()]);
+    // 分支名不能混进标签里
+    assert!(!tagged.tags.iter().any(|t| t == "main" || t.contains("HEAD")));
+}

@@ -9,8 +9,8 @@ use crate::modules::git::process::{
 };
 use crate::modules::git::types::{
     DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
-    GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot,
-    GitPushResult, GitRepoInfo, GitStatusSnapshot, TextSource, DEFAULT_TIMEOUT_SECS,
+    GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult,
+    GitCommitMeta, GitRepoInfo, GitStatusSnapshot, GitTagEntry, TextSource, DEFAULT_TIMEOUT_SECS,
     NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
@@ -499,8 +499,20 @@ pub fn push(
     })
 }
 
-const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%s";
+// %D 是这个提交上挂的 ref(`HEAD -> master, tag: 5.75.0.3, origin/master`),
+// 放在 %s 前面 —— subject 是最后一段,里面出现 \x1f 也不会串位。
+const LOG_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%D%x1f%s";
 const MAX_LOG_LIMIT: u32 = 200;
+
+/// 从 %D 那串 ref 里挑出标签名。其余的(HEAD -> x、origin/x)不要。
+fn tags_from_decoration(decoration: &str) -> Vec<String> {
+    decoration
+        .split(", ")
+        .filter_map(|r| r.trim().strip_prefix("tag: "))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect()
+}
 
 pub fn log(
     registry: &WorkspaceRegistry,
@@ -581,7 +593,7 @@ pub fn log(
             continue;
         }
         if line.contains('\x1f') {
-            let mut fields = line.splitn(6, '\x1f');
+            let mut fields = line.splitn(7, '\x1f');
             let sha = fields.next().unwrap_or("").to_string();
             if !sha_is_safe(&sha) {
                 continue;
@@ -594,6 +606,7 @@ pub fn log(
                 .split_ascii_whitespace()
                 .map(|s| s.to_string())
                 .collect();
+            let tags = tags_from_decoration(fields.next().unwrap_or(""));
             let subject = fields.next().unwrap_or("").to_string();
             let short_sha = sha.chars().take(7).collect::<String>();
             entries.push(GitLogEntry {
@@ -607,6 +620,7 @@ pub fn log(
                 files_changed: 0,
                 insertions: 0,
                 deletions: 0,
+                tags,
             });
             continue;
         }
@@ -620,6 +634,144 @@ pub fn log(
         }
     }
     Ok(entries)
+}
+
+// body(%b)放最后:里面有换行,只能整段读,不能按行拆
+const COMMIT_META_FORMAT: &str = "%H%x1f%an%x1f%ae%x1f%at%x1f%P%x1f%D%x1f%s%x1f%b";
+
+/// 单个提交的完整信息(含说明正文、父提交、ref)。
+pub fn commit_meta(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    sha: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<GitCommitMeta> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if !sha_is_safe(sha) {
+        return Err(GitError::command("git show", "invalid commit sha"));
+    }
+    let format_arg = format!("--format={COMMIT_META_FORMAT}");
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("show"),
+            OsStr::new("-s"),
+            OsStr::new("--no-color"),
+            OsStr::new(&format_arg),
+            OsStr::new(sha),
+            OsStr::new("--"),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.timed_out {
+        return Err(GitError::TimedOut("git show"));
+    }
+    ensure_success(&output, "git show failed")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut fields = stdout.splitn(8, '\x1f');
+    let full_sha = fields.next().unwrap_or("").trim().to_string();
+    let author = fields.next().unwrap_or("").to_string();
+    let author_email = fields.next().unwrap_or("").to_string();
+    let timestamp_secs = fields.next().unwrap_or("0").parse::<i64>().unwrap_or(0);
+    let parents: Vec<String> = fields
+        .next()
+        .unwrap_or("")
+        .split_ascii_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+    let decoration = fields.next().unwrap_or("");
+    let subject = fields.next().unwrap_or("").to_string();
+    // 尾部换行是 git 给的,不是正文的一部分
+    let body = fields.next().unwrap_or("").trim_end().to_string();
+    let refs: Vec<String> = decoration
+        .split(", ")
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    Ok(GitCommitMeta {
+        short_sha: full_sha.chars().take(7).collect(),
+        sha: full_sha,
+        author,
+        author_email,
+        timestamp_secs,
+        parents,
+        subject,
+        body,
+        tags: tags_from_decoration(decoration),
+        refs,
+    })
+}
+
+// 分隔符直接写真的 0x1F 字节:for-each-ref 的 --format 不认 %x1f 转义
+// (git 2.52 实测原样输出),但对未知字节是原样透传的。
+const TAG_FORMAT: &str = "%(refname:short)\x1f%(objectname)\x1f%(*objectname)\x1f%(creatordate:unix)\x1f%(objecttype)\x1f%(contents:subject)";
+const MAX_TAGS: usize = 1000;
+// 标签说明里常整段贴发版说明(见过 1KB+ 的),列表只当提示用,截断就够
+const MAX_TAG_SUBJECT_CHARS: usize = 400;
+
+/// 仓库里的标签,按创建时间倒序(新的在前)。
+pub fn list_tags(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<Vec<GitTagEntry>> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    let format_arg = format!("--format={TAG_FORMAT}");
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("for-each-ref"),
+            OsStr::new("--sort=-creatordate"),
+            OsStr::new(&format_arg),
+            OsStr::new("refs/tags"),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    if output.timed_out {
+        return Err(GitError::TimedOut("git for-each-ref"));
+    }
+    ensure_success(&output, "git for-each-ref failed")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut tags = Vec::new();
+    for raw_line in stdout.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let mut fields = line.splitn(6, '\x1f');
+        let name = fields.next().unwrap_or("").to_string();
+        let object_name = fields.next().unwrap_or("");
+        let peeled = fields.next().unwrap_or("");
+        let timestamp = fields.next().unwrap_or("0").parse::<i64>().unwrap_or(0);
+        let object_type = fields.next().unwrap_or("");
+        let subject_raw = fields.next().unwrap_or("");
+        // 附注标签的 objectname 是 tag 对象本身,*objectname 才是提交
+        let sha = if peeled.is_empty() {
+            object_name
+        } else {
+            peeled
+        };
+        if name.is_empty() || !sha_is_safe(sha) {
+            continue;
+        }
+        let subject: String = subject_raw.chars().take(MAX_TAG_SUBJECT_CHARS).collect();
+        tags.push(GitTagEntry {
+            name,
+            sha: sha.to_string(),
+            short_sha: sha.chars().take(7).collect(),
+            subject,
+            timestamp_secs: timestamp,
+            is_annotated: object_type == "tag",
+        });
+        if tags.len() >= MAX_TAGS {
+            break;
+        }
+    }
+    Ok(tags)
 }
 
 pub fn show_commit_diff(
@@ -1418,6 +1570,93 @@ pub fn create_branch(
         DEFAULT_TIMEOUT_SECS,
     )?;
     ensure_success(&output, "git branch failed")
+}
+
+/// `git commit --amend --only -m <msg>`:只改上一条提交的说明,不动索引。
+///
+/// `--only` 是关键:不带它的话 `--amend` 会把已暂存的东西一并塞进上一条
+/// 提交,变成"顺手改了内容"。工作区脏不脏都只改说明。
+pub fn amend_message(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    message: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<GitCommitResult> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if message.trim().is_empty() {
+        return Err(GitError::command("git commit --amend", "empty message"));
+    }
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("commit"),
+            OsStr::new("--amend"),
+            OsStr::new("--only"),
+            OsStr::new("-m"),
+            OsStr::new(message),
+        ],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git commit --amend failed")?;
+    let sha = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        ["rev-parse", "HEAD"],
+    )?
+    .unwrap_or_default();
+    Ok(GitCommitResult {
+        commit_sha: sha,
+        summary: message.lines().next().unwrap_or("").to_string(),
+    })
+}
+
+/// `git push -u <remote> <branch>`:把某个本地分支推到远端同名分支上。
+///
+/// 和 `push()` 的区别:那个只推当前 HEAD,这个可以推任意本地分支(git 允许
+/// 推没被检出的分支),给分支列表右键用。远端优先 origin,没有就用第一个。
+pub fn push_branch(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    branch: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<GitPushResult> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err(GitError::InvalidPath(branch.into()));
+    }
+    let remotes = git_stdout_lines(&repo_root.workspace, &repo_root.git_path, ["remote"])?;
+    let remote = if remotes.iter().any(|r| r == "origin") {
+        "origin".to_string()
+    } else {
+        remotes.first().cloned().ok_or(GitError::NoUpstream)?
+    };
+    // 显式写成 <branch>:<branch>,不吃 push.default 的配置脸色
+    let refspec = format!("{branch}:refs/heads/{branch}");
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        [
+            OsStr::new("push"),
+            OsStr::new("--set-upstream"),
+            OsStr::new(&remote),
+            OsStr::new(&refspec),
+        ],
+        NETWORK_TIMEOUT_SECS,
+    )?;
+    if output.timed_out {
+        return Err(GitError::TimedOut("git push"));
+    }
+    ensure_success(&output, "git push failed")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Ok(GitPushResult {
+        remote: Some(remote),
+        branch: Some(branch.to_string()),
+        // git 把 "Everything up-to-date" 写在 stderr 上
+        pushed: !stderr.contains("Everything up-to-date"),
+    })
 }
 
 /// `git merge --no-edit <ref>`:把 `ref_name` 合并进当前分支。

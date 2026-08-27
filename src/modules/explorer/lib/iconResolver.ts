@@ -31,14 +31,16 @@ function toIconifySlug(name: string): string {
   return name.replace(/_/g, "-");
 }
 
-function catBody(iconName: string): string | null {
+type CatIcon = { body: string; width?: number; height?: number };
+
+function catIcon(iconName: string): CatIcon | null {
   const slug = toIconifySlug(iconName);
   const direct = cat.icons[slug];
-  if (direct) return direct.body;
+  if (direct) return direct;
   const alias = cat.aliases?.[slug];
   if (alias) {
     const parent = cat.icons[alias.parent];
-    if (parent) return parent.body;
+    if (parent) return parent;
   }
   return null;
 }
@@ -46,12 +48,16 @@ function catBody(iconName: string): string | null {
 function buildDataUrl(iconName: string): string | null {
   const cached = dataUrlCache.get(iconName);
   if (cached !== undefined) return cached || null;
-  const body = catBody(iconName);
-  if (!body) {
+  const icon = catIcon(iconName);
+  if (!icon) {
     dataUrlCache.set(iconName, "");
     return null;
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${CAT_W} ${CAT_H}">${body}</svg>`;
+  // 单个图标可以自带 width/height(catppuccin 的 flutter 就是 4.233),
+  // 一律套整套的 16×16 会把它缩成左上角一个小点
+  const w = icon.width ?? CAT_W;
+  const h = icon.height ?? CAT_H;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">${icon.body}</svg>`;
   const url = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   dataUrlCache.set(iconName, url);
   return url;

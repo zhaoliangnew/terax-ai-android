@@ -102,6 +102,33 @@ export type GitLogEntry = {
   filesChanged: number;
   insertions: number;
   deletions: number;
+  /** 指向这个提交的标签名,没有就是空数组。 */
+  tags: string[];
+};
+
+export type GitCommitMeta = {
+  sha: string;
+  shortSha: string;
+  author: string;
+  authorEmail: string;
+  timestampSecs: number;
+  parents: string[];
+  subject: string;
+  /** 说明的正文(subject 之后的部分),可能是空的。 */
+  body: string;
+  /** %D 里的全部 ref(分支、tag、HEAD 指向)。 */
+  refs: string[];
+  tags: string[];
+};
+
+export type GitTagEntry = {
+  name: string;
+  /** 标签最终指向的提交(附注标签已经解引用过)。 */
+  sha: string;
+  shortSha: string;
+  subject: string;
+  timestampSecs: number;
+  isAnnotated: boolean;
 };
 
 export type GitCommitFileChange = {
@@ -333,6 +360,20 @@ export const native = {
       repoRoot,
       workspace: currentWorkspaceEnv(),
     }),
+  /** 只改上一条提交的说明(git commit --amend --only),不动索引。 */
+  gitAmendMessage: (repoRoot: string, message: string) =>
+    invoke<GitCommitResult>("git_amend_message", {
+      repoRoot,
+      message,
+      workspace: currentWorkspaceEnv(),
+    }),
+  /** 把某个本地分支推到远端同名分支(可以是没检出的分支)。 */
+  gitPushBranch: (repoRoot: string, branch: string) =>
+    invoke<GitPushResult>("git_push_branch", {
+      repoRoot,
+      branch,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitLog: (
     repoRoot: string,
     options?: { limit?: number; beforeSha?: string; refName?: string },
@@ -342,6 +383,17 @@ export const native = {
       limit: options?.limit ?? null,
       beforeSha: options?.beforeSha ?? null,
       refName: options?.refName ?? null,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitTags: (repoRoot: string) =>
+    invoke<GitTagEntry[]>("git_tags", {
+      repoRoot,
+      workspace: currentWorkspaceEnv(),
+    }),
+  gitCommitMeta: (repoRoot: string, sha: string) =>
+    invoke<GitCommitMeta>("git_commit_meta", {
+      repoRoot,
+      sha,
       workspace: currentWorkspaceEnv(),
     }),
   gitShowCommit: (repoRoot: string, sha: string) =>
