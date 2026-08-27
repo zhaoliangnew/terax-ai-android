@@ -68,6 +68,8 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
   // 比再弹一个框轻,手也不用在两个层级之间跳。
   const [discarding, setDiscarding] = useState<GitChangedFile | null>(null);
   const [discardBusy, setDiscardBusy] = useState(false);
+  // "丢弃全部"同样两步:先上膛,再确认
+  const [discardAllArmed, setDiscardAllArmed] = useState(false);
   // 丢弃完要重新拉列表,复用打开时那次的 effect
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -100,29 +102,28 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
     // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey 是"重新拉一次"的信号
   }, [open, repoRoot, reloadKey]);
 
-  const discardFile = async (f: GitChangedFile) => {
-    if (!repoRoot || discardBusy) return;
+  const discardMany = async (list: GitChangedFile[], label: string) => {
+    if (!repoRoot || discardBusy || list.length === 0) return;
     setDiscardBusy(true);
     try {
-      await native.gitDiscard(repoRoot, [
-        { path: f.path, untracked: f.untracked },
-      ]);
+      await native.gitDiscard(
+        repoRoot,
+        list.map((f) => ({ path: f.path, untracked: f.untracked })),
+      );
       invalidateRepoDiffs(repoRoot);
-      // 丢弃的是这个文件的全部改动,编辑器里没保存的那部分也一起扔
+      const root = repoRoot.replace(/[\\/]+$/, "");
       window.dispatchEvent(
         new CustomEvent<WorktreeDiscardedDetail>(WORKTREE_DISCARDED_EVENT, {
           detail: {
-            paths: [`${repoRoot.replace(/[\\/]+$/, "")}/${f.path}`],
-            relPaths: [f.path],
+            paths: list.map((f) => `${root}/${f.path}`),
+            relPaths: list.map((f) => f.path),
           },
         }),
       );
-      toast.success(
-        f.untracked ? `已删除 ${f.path}` : `已丢弃 ${f.path} 的改动`,
-      );
+      toast.success(label);
       setDiscarding(null);
+      setDiscardAllArmed(false);
       setReloadKey((k) => k + 1);
-      // 文件树的 git 着色、提交角标都跟着这个信号刷新
       window.dispatchEvent(new Event(WORKTREE_CHANGED_EVENT));
     } catch (e) {
       toast.error(String(e));
@@ -130,6 +131,12 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
       setDiscardBusy(false);
     }
   };
+
+  const discardFile = (f: GitChangedFile) =>
+    discardMany(
+      [f],
+      f.untracked ? `已删除 ${f.path}` : `已丢弃 ${f.path} 的改动`,
+    );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -171,6 +178,36 @@ export function ChangedFilesDialog({ open, onOpenChange, repoRoot }: Props) {
               </span>
             )}
           </span>
+
+          {/* 丢弃全部:同样两步确认。改动多的时候一个个点太累,但这是
+              整仓库范围的不可撤销操作,按钮平时不显红,上膛后才变红 */}
+          {!!files?.length && (
+            <Button
+              variant={discardAllArmed ? "destructive" : "ghost"}
+              size="sm"
+              disabled={discardBusy}
+              title={`丢弃全部 ${files.length} 个文件的改动(未跟踪的文件会被删除),不可撤销`}
+              onClick={() => {
+                if (discardAllArmed) {
+                  void discardMany(files, `已丢弃全部 ${files.length} 个文件`);
+                } else {
+                  setDiscardAllArmed(true);
+                }
+              }}
+              onBlur={() => {
+                if (!discardBusy) setDiscardAllArmed(false);
+              }}
+              className={cn(
+                "h-7 shrink-0 gap-1 px-2 text-[12px]",
+                !discardAllArmed && "text-destructive hover:text-destructive",
+              )}
+            >
+              {discardBusy && discardAllArmed && <Spinner className="size-3" />}
+              {discardAllArmed
+                ? `确认丢弃全部 ${files.length} 个?`
+                : "丢弃全部"}
+            </Button>
+          )}
 
           <DialogClose asChild>
             <Button
