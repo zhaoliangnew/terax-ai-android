@@ -1,9 +1,11 @@
 import { ProjectWatermark } from "@/app/components/ProjectWatermark";
 import { Button } from "@/components/ui/button";
 import {
+  MAIN_LAYOUT_ID,
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
+  useResizableLayout,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -63,9 +65,11 @@ import {
   useEditorFileSync,
 } from "@/modules/editor";
 import {
+  EMPTY_PROJECT_FILES,
   FileExplorer,
   type FileExplorerHandle,
   ProjectFilesDialog,
+  type ProjectFilesState,
 } from "@/modules/explorer";
 import type { GitHistorySearchHandle } from "@/modules/git-history";
 import {
@@ -137,7 +141,7 @@ import {
 import {
   CheckmarkCircle01Icon,
   Folder01Icon,
-  SidebarRightIcon,
+  FolderTreeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -343,6 +347,9 @@ export default function App() {
     adoptWorkspaceEnv,
   ]);
 
+  // 三栏拖出来的比例记在 localStorage 里,下次启动照着还原
+  const mainLayout = useResizableLayout(MAIN_LAYOUT_ID);
+
   const spaceTabs = useMemo(
     () => tabs.filter((t) => t.spaceId === (activeSpaceId ?? DEFAULT_SPACE_ID)),
     [tabs, activeSpaceId],
@@ -353,6 +360,7 @@ export default function App() {
     sidebarWidthRef,
     sidebarView,
     initialSidebarCollapsed,
+    sidebarWidthStored,
     persistSidebarCollapsed,
     toggleSidebar,
     cycleSidebarView,
@@ -477,6 +485,11 @@ export default function App() {
   // 两棵树挤一起,看代码只剩一条窄缝。弹框不做启动记忆:它是"翻一下"的
   // 入口,开着启动没意义。
   const [productPaneOpen, setProductPaneOpen] = useState(false);
+  // 每个工程各记各的:开着哪些文件、当前是哪个。关掉弹框、切到别的工程再
+  // 回来还是原样 —— 弹框本身一关就卸载,状态放它里面等于每次都从头开始。
+  const [projectFilesByRoot, setProjectFilesByRoot] = useState<
+    Record<string, ProjectFilesState>
+  >({});
   const toggleProductPane = useCallback(() => {
     setProductPaneOpen((open) => !open);
   }, []);
@@ -1052,6 +1065,20 @@ export default function App() {
     (s) => s.explorerGitDecorations,
   );
 
+  // 工程的终端 tab 全关了,才把它在"产品目录文件"里开着的那几个文件忘掉。
+  // 当前这个工程留着不动 —— worktree 之类的根不一定在 openedProjectPaths 里。
+  useEffect(() => {
+    setProjectFilesByRoot((cur) => {
+      const stale = Object.keys(cur).filter(
+        (root) => root !== androidProjectRoot && !openedProjectPaths.has(root),
+      );
+      if (stale.length === 0) return cur;
+      const next = { ...cur };
+      for (const root of stale) delete next[root];
+      return next;
+    });
+  }, [openedProjectPaths, androidProjectRoot]);
+
   const openPreviewTab = useCallback(
     (url: string) => {
       const id = newPreviewTab(url);
@@ -1583,9 +1610,13 @@ export default function App() {
             <ResizablePanelGroup
               orientation="horizontal"
               className="min-h-0 flex-1"
-              onLayoutChanged={(_, { isUserInteraction }) => {
+              defaultLayout={mainLayout.defaultLayout}
+              onLayoutChanged={(layout, meta) => {
+                // 整体比例交给库存(拖完就记住),侧栏宽度另外还要按 px 存一份:
+                // 收起再展开、下次启动都靠它还原
+                mainLayout.onLayoutChanged(layout, meta);
                 const width = sidebarRef.current?.getSize().inPixels ?? 0;
-                persistSidebarWidth(width, isUserInteraction);
+                persistSidebarWidth(width, meta.isUserInteraction);
               }}
             >
               <ResizablePanel
@@ -1594,7 +1625,9 @@ export default function App() {
                 defaultSize={
                   initialSidebarCollapsed
                     ? "0px"
-                    : `${sidebarWidthRef.current}px`
+                    : sidebarWidthStored
+                      ? `${sidebarWidthRef.current}px`
+                      : "20%"
                 }
                 minSize={`${SIDEBAR_MIN_WIDTH}px`}
                 maxSize={`${SIDEBAR_MAX_WIDTH}px`}
@@ -1659,19 +1692,6 @@ export default function App() {
                                 );
                               }}
                               linkVersion={linkVersion}
-                              headerActions={
-                                showProductPane && androidProjectRoot
-                                  ? [
-                                      {
-                                        id: "product-pane",
-                                        icon: SidebarRightIcon,
-                                        label: "产品目录文件",
-                                        active: productPaneOpen,
-                                        onClick: toggleProductPane,
-                                      },
-                                    ]
-                                  : undefined
-                              }
                               pathDropTarget={terminalPathDropTarget}
                             />
                           </div>
@@ -1715,7 +1735,7 @@ export default function App() {
                 </div>
               </ResizablePanel>
               <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-border/45 transition-colors duration-[var(--dur-fast)] after:w-5 hover:bg-border" />
-              <ResizablePanel id="workspace" defaultSize="48%" minSize="25%">
+              <ResizablePanel id="workspace" defaultSize="50%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     {/* 换行交给 flex-wrap 自己判断:面包屑不给 min-w-0、内容
@@ -1728,12 +1748,22 @@ export default function App() {
                     {androidProjectRoot && (
                       <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-border px-3 py-1.5 text-[13px]">
                         <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
-                          <HugeiconsIcon
-                            icon={Folder01Icon}
-                            size={14}
-                            strokeWidth={1.75}
-                            className="shrink-0 text-muted-foreground/70"
-                          />
+                          {/* 面包屑最前面这个文件夹图标就是"产品目录文件"的
+                              入口 —— 它本来就代表这个工程所在的目录,比在工具栏
+                              上单挂一个按钮好找 */}
+                          <button
+                            type="button"
+                            title="产品目录文件"
+                            disabled={!showProductPane}
+                            onClick={toggleProductPane}
+                            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
+                          >
+                            <HugeiconsIcon
+                              icon={Folder01Icon}
+                              size={14}
+                              strokeWidth={1.75}
+                            />
+                          </button>
                           <ProductLinkChip
                             dir={
                               (displayProjectRoot ?? androidProjectRoot)
@@ -1784,6 +1814,24 @@ export default function App() {
                             busyAgent={activeTerminalAgent}
                             onLaunch={openAgentTerminal}
                           />
+                          {/* 和"用 AS / Sourcetree 打开"排一起:都是"拿这个
+                              工程去干点什么"的入口。面包屑最前面那个文件夹图标
+                              是同一个功能,那边顺手、这边好找,两个都留着 */}
+                          {showProductPane && (
+                            <button
+                              type="button"
+                              aria-label="产品目录文件"
+                              title="产品目录文件(左树右文,不占 tab)"
+                              onClick={toggleProductPane}
+                              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded border border-border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
+                            >
+                              <HugeiconsIcon
+                                icon={FolderTreeIcon}
+                                size={13}
+                                strokeWidth={1.75}
+                              />
+                            </button>
+                          )}
                           <OpenInToolMenu projectRoot={androidProjectRoot} />
                           <ProjectLinksBar
                             projectRoot={androidProjectRoot}
@@ -1838,12 +1886,22 @@ export default function App() {
                     {androidProjectRoot && (
                       <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-t border-border px-3 py-1 text-[13px]">
                         <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
-                          <HugeiconsIcon
-                            icon={Folder01Icon}
-                            size={13}
-                            strokeWidth={1.75}
-                            className="shrink-0 text-muted-foreground/70"
-                          />
+                          {/* 面包屑最前面这个文件夹图标就是"产品目录文件"的
+                              入口 —— 它本来就代表这个工程所在的目录,比在工具栏
+                              上单挂一个按钮好找 */}
+                          <button
+                            type="button"
+                            title="产品目录文件"
+                            disabled={!showProductPane}
+                            onClick={toggleProductPane}
+                            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
+                          >
+                            <HugeiconsIcon
+                              icon={Folder01Icon}
+                              size={13}
+                              strokeWidth={1.75}
+                            />
+                          </button>
                           <ProductLinkChip
                             dir={
                               (displayProjectRoot ?? androidProjectRoot)
@@ -1933,7 +1991,7 @@ export default function App() {
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}
-                defaultSize="32%"
+                defaultSize="30%"
                 minSize="20%"
                 collapsible
                 collapsedSize={0}
@@ -2042,6 +2100,18 @@ export default function App() {
             open={productPaneOpen}
             onOpenChange={setProductPaneOpen}
             rootPath={showProductPane ? androidProjectRoot : null}
+            state={
+              (androidProjectRoot
+                ? projectFilesByRoot[androidProjectRoot]
+                : null) ?? EMPTY_PROJECT_FILES
+            }
+            onStateChange={(next) => {
+              if (!androidProjectRoot) return;
+              setProjectFilesByRoot((cur) => ({
+                ...cur,
+                [androidProjectRoot]: next,
+              }));
+            }}
             gitStatus={explorerGitDecorations ? sourceControl.status : null}
             dirtyPaths={dirtyFilePaths}
             onPathRenamed={handlePathRenamed}

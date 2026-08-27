@@ -29,16 +29,19 @@ function clampSidebarWidth(width: number): number {
   );
 }
 
-function readSidebarWidth(): number {
+/** 用户手动拖过的宽度;没拖过返回 null —— 第一次打开要按比例分,不是按 px。 */
+function readStoredSidebarWidth(): number | null {
   try {
     const stored = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
     const parsed = stored ? Number.parseInt(stored, 10) : NaN;
-    return Number.isFinite(parsed)
-      ? clampSidebarWidth(parsed)
-      : SIDEBAR_DEFAULT_WIDTH;
+    return Number.isFinite(parsed) ? clampSidebarWidth(parsed) : null;
   } catch {
-    return SIDEBAR_DEFAULT_WIDTH;
+    return null;
   }
+}
+
+function readSidebarWidth(): number {
+  return readStoredSidebarWidth() ?? SIDEBAR_DEFAULT_WIDTH;
 }
 
 function readSidebarView(): SidebarViewId {
@@ -76,6 +79,10 @@ export function useSidebarPanel(
   const [sidebarView, setSidebarViewState] =
     useState<SidebarViewId>(readSidebarView);
   const [initialSidebarCollapsed] = useState(readSidebarCollapsed);
+  // 没拖过侧栏就让它跟另外两栏一起按比例分(20/50/30),拖过就照 px 还原
+  const [sidebarWidthStored] = useState(
+    () => readStoredSidebarWidth() !== null,
+  );
   const collapsedRef = useRef(initialSidebarCollapsed);
 
   const persistSidebarView = useCallback((view: SidebarViewId) => {
@@ -200,6 +207,7 @@ export function useSidebarPanel(
     sidebarWidthRef,
     sidebarView,
     initialSidebarCollapsed,
+    sidebarWidthStored,
     persistSidebarView,
     persistSidebarCollapsed,
     toggleSidebar,

@@ -53,6 +53,24 @@ function zoomAwareRect(el: HTMLElement | null): void {
  */
 const RESIZE_TARGET = { coarse: 28, fine: 20 }
 
+/**
+ * 三栏布局要记住用户拖出来的比例。库自带这个 hook:挂载时读回上次的布局
+ * (读到就盖掉各 Panel 的 defaultSize),拖完写回去。
+ *
+ * id 带版本号:改了默认比例又想让老用户看到新默认,换个 id 就行 —— 存量
+ * 记录读不到,自然落回 defaultSize。
+ */
+export const MAIN_LAYOUT_ID = "terax.layout.main.v1"
+
+export function useResizableLayout(id: string) {
+  return ResizablePrimitive.useDefaultLayout({
+    id,
+    // 窗口缩放、程序里调 resize() 都不算数,只记手动拖的
+    onlySaveAfterUserInteractions: true,
+    storage: typeof localStorage === "undefined" ? undefined : localStorage,
+  })
+}
+
 function ResizablePanelGroup({
   className,
   elementRef,

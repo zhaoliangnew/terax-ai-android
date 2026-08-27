@@ -2351,7 +2351,7 @@ export function BranchChip({
       {/* 全部标签:左栏那条 18rem 的窄栏摆不下"名字 + 时间 + 备注 + 提交号"
           四样,单开一个框列全 —— 找历史版本本来就是"翻一遍"的动作。 */}
       <Dialog open={tagsOpen} onOpenChange={setTagsOpen}>
-        <DialogContent className="flex h-[62vh] flex-col gap-3 sm:max-w-3xl">
+        <DialogContent className="flex h-[62vh] flex-col gap-3 sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle className="text-sm">
               标签 · 共 {tags?.length ?? 0} 个
@@ -2361,9 +2361,9 @@ export function BranchChip({
             </DialogDescription>
           </DialogHeader>
           <div className="flex shrink-0 items-center gap-3 border-b border-border/60 px-2 pb-1.5 text-[10.5px] font-semibold tracking-[0.1em] text-muted-foreground/85 uppercase">
-            <span className="w-44 shrink-0">标签</span>
-            <span className="w-28 shrink-0">时间</span>
-            <span className="min-w-0 flex-1">备注</span>
+            <span className="w-24 shrink-0">版本号</span>
+            <span className="w-28 shrink-0">发版时间</span>
+            <span className="min-w-0 flex-1">发版内容</span>
             <span className="w-16 shrink-0 text-right">提交号</span>
           </div>
           <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
@@ -2382,23 +2382,21 @@ export function BranchChip({
                       setTagsOpen(false);
                     }}
                     className={cn(
-                      "flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
+                      "flex w-full min-w-0 cursor-pointer items-start gap-3 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
                       selected?.refName === `refs/tags/${t.name}` &&
                         "bg-foreground/10",
                     )}
                   >
-                    <span className="w-44 shrink-0 truncate font-medium text-amber-500">
+                    <span className="w-24 shrink-0 truncate font-medium text-amber-500">
                       {t.name}
                     </span>
                     <span className="w-28 shrink-0 text-[11px] text-muted-foreground">
                       {formatCommitTime(t.timestampSecs)}
                     </span>
-                    {/* 轻量标签没有说明,这里就是空的 —— 用一个破折号占住,
+                    {/* 发版内容整段摆出来,不截断 —— 截了就得逐条 hover 看
+                        tooltip,那还不如不列。轻量标签没有说明,用破折号占住,
                         免得整列看着像没加载出来 */}
-                    <span
-                      className="min-w-0 flex-1 truncate text-[11.5px] text-foreground/80"
-                      title={t.subject}
-                    >
+                    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[11.5px] leading-relaxed text-foreground/80">
                       {t.subject || "—"}
                     </span>
                     <span className="w-16 shrink-0 text-right font-mono text-[11px] text-muted-foreground">
@@ -2433,6 +2431,22 @@ export function BranchChip({
                     </ContextMenuItem>
                   )}
                   <ContextMenuSeparator />
+                  <ContextMenuItem
+                    className="text-[12px]"
+                    onSelect={() => {
+                      // 制表符分隔:粘到表格/文档里是四列,粘到聊天窗也还是一行
+                      const row = [
+                        t.name,
+                        formatCommitTime(t.timestampSecs),
+                        t.subject,
+                        t.shortSha,
+                      ].join("\t");
+                      void copyToClipboard(row);
+                      toast.success("已复制整行", { description: row });
+                    }}
+                  >
+                    复制整行
+                  </ContextMenuItem>
                   <ContextMenuItem
                     className="text-[12px]"
                     onSelect={() => {
