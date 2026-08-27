@@ -15,6 +15,7 @@ import {
   AndroidIcon,
   ArrowRight01Icon,
   CloudIcon,
+  Pin02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
@@ -252,9 +253,10 @@ function EntryRowImpl(props: EntryRowProps) {
       {pinned && (
         <span
           title="已置顶"
-          className="mr-0.5 shrink-0 text-[9px] leading-none text-muted-foreground/60"
+          className="mr-0.5 shrink-0 leading-none text-muted-foreground/60"
         >
-          📌
+          {/* 用图标不用 📌:emoji 是彩色斜的,在一排单色描边图标里太跳 */}
+          <HugeiconsIcon icon={Pin02Icon} size={11} strokeWidth={2} />
         </span>
       )}
       {yunxiaoLinked && (

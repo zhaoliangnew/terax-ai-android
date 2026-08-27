@@ -1738,70 +1738,28 @@ export default function App() {
               <ResizablePanel id="workspace" defaultSize="50%" minSize="25%">
                 <div className="h-full min-h-0 px-0.5">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
-                    {/* 换行交给 flex-wrap 自己判断:面包屑不给 min-w-0、内容
-                        nowrap,它的最小宽度就是完整的产品/工程名,塞不下时被挤
-                        走的是按钮那一组(换到第二行),名字始终完整。定死一个
-                        断点的话名字长短一变就又不准了。
-                        @container 只留给最后一档:第二行也摆不开就丢按钮文案。 */}
+                    {/* 换行交给 flex-wrap 自己判断,但换的是**面包屑里面**:
+                        名字那一组自己 flex-wrap,摆不下时先掉下去的是排在最后的
+                        分支名,右边的按钮留在第一行 —— 按钮被挤到第二行、分支
+                        却在第一行被切掉,才是最难受的那种。每个名字自己
+                        nowrap(`[&>*]:whitespace-nowrap`),所以断的是词与词
+                        之间,不会从名字中间劈开。 */}
                     {/* 面包屑跟分支/按钮统一到 13px:15px 时中文产品名比旁边
                         的分支名明显大一截,看着不是一行东西。 */}
                     {androidProjectRoot && (
                       <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-border px-3 py-1.5 text-[13px]">
-                        <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
-                          {/* 面包屑最前面这个文件夹图标就是"产品目录文件"的
-                              入口 —— 它本来就代表这个工程所在的目录,比在工具栏
-                              上单挂一个按钮好找 */}
-                          <button
-                            type="button"
-                            title="产品目录文件"
-                            disabled={!showProductPane}
-                            onClick={toggleProductPane}
-                            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
-                          >
-                            <HugeiconsIcon
-                              icon={Folder01Icon}
-                              size={14}
-                              strokeWidth={1.75}
-                            />
-                          </button>
-                          <ProductLinkChip
-                            dir={
-                              (displayProjectRoot ?? androidProjectRoot)
-                                .split("/")
-                                .slice(0, -1)
-                                .join("/") || androidProjectRoot
-                            }
-                            label={
-                              (displayProjectRoot ?? androidProjectRoot)
-                                .split("/")
-                                .slice(-2, -1)[0] ?? ""
-                            }
-                            linkVersion={linkVersion}
-                            onLink={setProjectLinkDir}
-                            className="@max-[360px]:truncate"
-                          />
-                          <span className="shrink-0 text-muted-foreground/40">
-                            /
-                          </span>
-                          <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
-                            {(displayProjectRoot ?? androidProjectRoot)
-                              .split("/")
-                              .slice(-1)[0] ?? ""}
-                          </span>
-                          {activeWorktreeName && (
-                            <>
-                              <span className="shrink-0 text-muted-foreground/40">
-                                /
-                              </span>
-                              <span className="shrink-0 text-foreground/80">
-                                {activeWorktreeName}
-                              </span>
-                            </>
-                          )}
+                        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                          {/* 顶部这条只留分支:产品名/工程名在上面的 tab 上
+                              已经写着了,再重复一遍就是把这一行挤到换行。产品
+                              目录文件的入口挪到了 AS 图标左边那个,云效项目
+                              chip 在底部那条面包屑里还留着。 */}
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             onOpenDiff={openGitDiffTab}
-                            className="max-w-40"
+                            /* 不再按 max-w-40 死切:分支名摆不下时整条会掉到
+                               第二行,那一行是空的,再截就是白截。真比一整行
+                               还长才截(chip 自己有 truncate)。 */
+                            className="max-w-full"
                           />
                           <AgentStatusDot
                             projectRoot={androidProjectRoot}
@@ -1885,61 +1843,68 @@ export default function App() {
                         被挤到第二行的是按钮那一组,工程名不会先被截。 */}
                     {androidProjectRoot && (
                       <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-t border-border px-3 py-1 text-[13px]">
-                        <span className="flex flex-1 items-center gap-2 whitespace-nowrap @max-[360px]:min-w-0">
-                          {/* 面包屑最前面这个文件夹图标就是"产品目录文件"的
+                        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                          {/* 路径这几段包成一整块:断行只发生在"路径 | 分支"
+                              之间,不会把 产品 / 工程 / worktree 拆成好几行 */}
+                          <span className="flex min-w-0 items-center gap-2 whitespace-nowrap">
+                            {/* 面包屑最前面这个文件夹图标就是"产品目录文件"的
                               入口 —— 它本来就代表这个工程所在的目录,比在工具栏
                               上单挂一个按钮好找 */}
-                          <button
-                            type="button"
-                            title="产品目录文件"
-                            disabled={!showProductPane}
-                            onClick={toggleProductPane}
-                            className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
-                          >
-                            <HugeiconsIcon
-                              icon={Folder01Icon}
-                              size={13}
-                              strokeWidth={1.75}
+                            <button
+                              type="button"
+                              title="产品目录文件"
+                              disabled={!showProductPane}
+                              onClick={toggleProductPane}
+                              className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
+                            >
+                              <HugeiconsIcon
+                                icon={Folder01Icon}
+                                size={13}
+                                strokeWidth={1.75}
+                              />
+                            </button>
+                            <ProductLinkChip
+                              dir={
+                                (displayProjectRoot ?? androidProjectRoot)
+                                  .split("/")
+                                  .slice(0, -1)
+                                  .join("/") || androidProjectRoot
+                              }
+                              label={
+                                (displayProjectRoot ?? androidProjectRoot)
+                                  .split("/")
+                                  .slice(-2, -1)[0] ?? ""
+                              }
+                              linkVersion={linkVersion}
+                              onLink={setProjectLinkDir}
+                              className="@max-[360px]:truncate"
                             />
-                          </button>
-                          <ProductLinkChip
-                            dir={
-                              (displayProjectRoot ?? androidProjectRoot)
+                            <span className="shrink-0 text-muted-foreground/40">
+                              /
+                            </span>
+                            <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
+                              {(displayProjectRoot ?? androidProjectRoot)
                                 .split("/")
-                                .slice(0, -1)
-                                .join("/") || androidProjectRoot
-                            }
-                            label={
-                              (displayProjectRoot ?? androidProjectRoot)
-                                .split("/")
-                                .slice(-2, -1)[0] ?? ""
-                            }
-                            linkVersion={linkVersion}
-                            onLink={setProjectLinkDir}
-                            className="@max-[360px]:truncate"
-                          />
-                          <span className="shrink-0 text-muted-foreground/40">
-                            /
+                                .slice(-1)[0] ?? ""}
+                            </span>
+                            {activeWorktreeName && (
+                              <>
+                                <span className="shrink-0 text-muted-foreground/40">
+                                  /
+                                </span>
+                                <span className="shrink-0 text-foreground/80">
+                                  {activeWorktreeName}
+                                </span>
+                              </>
+                            )}
                           </span>
-                          <span className="font-semibold text-emerald-500 @max-[360px]:truncate">
-                            {(displayProjectRoot ?? androidProjectRoot)
-                              .split("/")
-                              .slice(-1)[0] ?? ""}
-                          </span>
-                          {activeWorktreeName && (
-                            <>
-                              <span className="shrink-0 text-muted-foreground/40">
-                                /
-                              </span>
-                              <span className="shrink-0 text-foreground/80">
-                                {activeWorktreeName}
-                              </span>
-                            </>
-                          )}
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             onOpenDiff={openGitDiffTab}
-                            className="max-w-40"
+                            /* 不再按 max-w-40 死切:分支名摆不下时整条会掉到
+                               第二行,那一行是空的,再截就是白截。真比一整行
+                               还长才截(chip 自己有 truncate)。 */
+                            className="max-w-full"
                           />
                         </span>
                         {supportsSessionActions(activeTerminalAgent) &&

@@ -1,6 +1,9 @@
 import { Spinner } from "@/components/ui/spinner";
+import { toPinyin } from "@/lib/pinyin";
 import { cn } from "@/lib/utils";
 import { native } from "@/modules/ai/lib/native";
+import { Pin02Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
@@ -89,12 +92,35 @@ export function DirSearchPopover({
     return () => window.removeEventListener("keydown", onKey);
   }, [dir, onClose]);
 
+  // 每个条目的拼音只算一次;上百个目录逐字转拼音,跟着每次按键重算会掉帧
+  const indexed = useMemo(
+    () =>
+      (entries ?? []).map((e) => ({
+        entry: e,
+        pinyin: toPinyin(e.name, "").toLowerCase(),
+      })),
+    [entries],
+  );
+
+  /**
+   * 中文和拼音互相都能搜到:查询词和条目名各自转一遍拼音再比。
+   *
+   * 目录名这儿是混着的 —— 「0.2.0-标准版本」是中文,底下的工程又都是
+   * `app_xxx` 拼音。想到哪个打哪个,不该还要先想"这个目录当初起的是中文名
+   * 还是拼音名"。非中文字符原样保留,所以纯英文查询走的还是普通子串匹配。
+   */
   const hits = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!entries) return [];
     if (!q) return entries;
-    return entries.filter((e) => e.name.toLowerCase().includes(q));
-  }, [entries, query]);
+    const qPinyin = toPinyin(q, "").toLowerCase();
+    return indexed
+      .filter(
+        ({ entry, pinyin }) =>
+          entry.name.toLowerCase().includes(q) || pinyin.includes(qPinyin),
+      )
+      .map(({ entry }) => entry);
+  }, [entries, indexed, query]);
 
   // 筛完之后高亮项可能已经越界
   useEffect(() => {
@@ -217,13 +243,17 @@ export function DirSearchPopover({
                       title={pinned ? "取消置顶" : "置顶"}
                       onClick={() => onTogglePin(path, !pinned)}
                       className={cn(
-                        "shrink-0 cursor-pointer px-0.5 text-[10px] leading-none transition-opacity",
+                        "shrink-0 cursor-pointer px-0.5 leading-none text-muted-foreground transition-opacity",
                         pinned
                           ? "opacity-100"
                           : "opacity-0 group-hover:opacity-60 hover:!opacity-100",
                       )}
                     >
-                      📌
+                      <HugeiconsIcon
+                        icon={Pin02Icon}
+                        size={11}
+                        strokeWidth={2}
+                      />
                     </button>
                   )}
                 </div>

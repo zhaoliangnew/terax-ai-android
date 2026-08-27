@@ -799,7 +799,11 @@ export const FileExplorer = memo(
     useImperativeHandle(
       ref,
       () => ({
-        revealPath: (p: string) => setRevealTarget(p),
+        revealPath: (p: string) => {
+          // 刚从置顶区点开的工程:树不用跟着展开(见 skipRevealUntilRef)
+          if (performance.now() < skipRevealUntilRef.current) return;
+          setRevealTarget(p);
+        },
         focus: () => {
           containerRef.current?.focus();
           if (!selectedPath && entryPaths.length > 0) {
@@ -926,7 +930,27 @@ export const FileExplorer = memo(
       }
     };
 
-    const renderRow = (row: Row, actions: RowActions = rowActions) => {
+    /**
+     * 从置顶区打开工程之后,别让树跟着展开定位过去。
+     *
+     * 置顶本来就是为了不用去树里翻,点一下却把树里同一条路径整个掀开,等于
+     * 又翻了一遍。定位那一步在 App 里:androidProjectRoot 一变就调 revealPath,
+     * 它并不知道这次点击是从哪儿来的 —— 所以这里点完打一个短时间窗,把紧跟着
+     * 的那一次 reveal 挡掉(worktree 行 reveal 的是所属工程,路径对不上,
+     * 所以按时间挡而不是按路径)。
+     */
+    const skipRevealUntilRef = useRef(0);
+    const openProjectFromPinned = (path: string) => {
+      skipRevealUntilRef.current = performance.now() + 1500;
+      onOpenProject?.(path);
+    };
+
+    const renderRow = (
+      row: Row,
+      actions: RowActions = rowActions,
+      fromPinned = false,
+    ) => {
+      const openProject = fromPinned ? openProjectFromPinned : onOpenProject;
       switch (row.kind) {
         case "entry":
         case "rename": {
@@ -949,7 +973,7 @@ export const FileExplorer = memo(
               projectKind={
                 row.isDir ? (projectDirs.get(row.path) ?? null) : null
               }
-              onOpenProject={onOpenProject}
+              onOpenProject={openProject}
               isActiveProject={
                 !!activeProjectPath && row.path === activeProjectPath
               }
@@ -990,7 +1014,7 @@ export const FileExplorer = memo(
               name={row.name}
               branch={row.branch}
               depth={row.depth}
-              onOpen={onOpenProject}
+              onOpen={openProject}
               isActive={!!activeProjectPath && row.path === activeProjectPath}
               isOpened={!!openedProjectPaths?.has(row.path)}
               projectPtyIds={projectPtyIds}
@@ -1138,11 +1162,12 @@ export const FileExplorer = memo(
 
         {/* 置顶区:钉住的目录统一列在树顶上,树里的位置不动。点一下 ——
             是工程就直接开/定位终端,不是工程就在下面的树里展开并滚过去。
-            不设高度上限、不滚动:置顶就那几个,全铺出来一眼看完 —— 再套
-            一层滚动条,内外两个滚动区叠在一起最难用 */}
+            平时不出滚动条(置顶就那几个,全铺出来一眼看完);但置顶的目录
+            一展开可能是上百个工程,不封顶的话它会把下面的树整个顶出容器,
+            结果两边都滚不动。所以给一个 45% 的上限,超了才自己滚。 */}
         {onSetAsRoot && pinnedRows.length > 0 && (
-          <div className="shrink-0 border-b border-border pb-1">
-            <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+          <div className="max-h-[45%] shrink-0 overflow-y-auto overflow-x-hidden border-b border-border pb-1">
+            <div className="sticky top-0 z-20 bg-background px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
               置顶
             </div>
             {pinnedRows.map((row) => {
@@ -1152,12 +1177,21 @@ export const FileExplorer = memo(
                 row.kind === "entry" && row.depth === 0 ? row : null;
               if (!pinRoot)
                 return (
-                  <div key={row.key}>{renderRow(row, pinnedRowActions)}</div>
+                  <div key={row.key}>
+                    {renderRow(row, pinnedRowActions, true)}
+                  </div>
                 );
               return (
                 <ContextMenu key={row.key}>
+                  {/* 置顶目录那一行钉在顶上:往下滚的时候还看得见自己在哪个
+                      目录里。纯 CSS sticky —— 下一个置顶目录顶上来就自然把
+                      前一个推走,不用算滚动位置 */}
                   <ContextMenuTrigger asChild>
-                    <div>{renderRow(row, pinnedRowActions)}</div>
+                    {/* top-6 = 上面那条"置顶"标题的高度,不然目录行会滑到
+                        标题底下被盖住 */}
+                    <div className="sticky top-6 z-10 bg-background">
+                      {renderRow(row, pinnedRowActions, true)}
+                    </div>
                   </ContextMenuTrigger>
                   <ContextMenuContent className={COMPACT_CONTENT}>
                     <ContextMenuItem

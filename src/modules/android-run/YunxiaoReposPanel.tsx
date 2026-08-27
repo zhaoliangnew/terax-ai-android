@@ -7,6 +7,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Spinner } from "@/components/ui/spinner";
+import { searchVariants } from "@/lib/pinyin";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
@@ -37,7 +38,6 @@ import {
   sshUrlFor,
 } from "./lib/codeupApi";
 import { openExternally } from "./lib/openExternally";
-import { searchVariants } from "./lib/pinyin";
 import { codeupUrl } from "./lib/yunxiao";
 import { YunxiaoTokenRow } from "./YunxiaoTokenRow";
 
