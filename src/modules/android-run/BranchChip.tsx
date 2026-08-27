@@ -32,6 +32,7 @@ import {
   copyToClipboard,
   revealInFinder,
 } from "@/modules/explorer/lib/contextActions";
+import type { GitDiffOpenInput } from "@/modules/tabs";
 import {
   ArrowUp01Icon,
   CheckmarkCircle01Icon,
@@ -339,13 +340,26 @@ export function WorktreeCountBadge({
   );
 }
 
+/** 变更文件 → 打开 diff 用的参数。unstaged 看工作区改动,staged 看暂存区。 */
+function diffInputFor(repoRoot: string, f: GitChangedFile): GitDiffOpenInput {
+  return {
+    path: f.path,
+    repoRoot,
+    mode: f.unstaged ? "-" : "+",
+    originalPath: f.originalPath ?? null,
+  };
+}
+
 /** 提交弹框里的改动预览:多少个文件、分别是哪些。 */
 function ChangedFilesPreview({
   repoRoot,
   active,
+  onOpenFile,
 }: {
   repoRoot: string | null;
   active: boolean;
+  /** 点某个文件:打开它的 diff。不传就是纯展示。 */
+  onOpenFile?: (file: GitChangedFile) => void;
 }) {
   const [files, setFiles] = useState<GitChangedFile[] | null>(null);
   useEffect(() => {
@@ -389,15 +403,20 @@ function ChangedFilesPreview({
           </div>
           <div className="mt-1 max-h-36 overflow-y-auto rounded border border-border/60 p-1.5 font-mono text-[11px] leading-relaxed">
             {files.map((f) => (
-              <div key={f.path} className="flex items-center gap-2">
+              <button
+                key={f.path}
+                type="button"
+                disabled={!onOpenFile}
+                title={onOpenFile ? `${f.path} · 点击看 diff` : f.path}
+                onClick={() => onOpenFile?.(f)}
+                className="flex w-full items-center gap-2 rounded px-0.5 text-left enabled:cursor-pointer enabled:hover:bg-accent/60"
+              >
                 {/* w-16 才装得下 "Untracked";再窄就溢出和路径粘成一串 */}
                 <span className="w-16 shrink-0 truncate text-muted-foreground/70">
                   {f.statusLabel}
                 </span>
-                <span className="min-w-0 flex-1 truncate" title={f.path}>
-                  {f.path}
-                </span>
-              </div>
+                <span className="min-w-0 flex-1 truncate">{f.path}</span>
+              </button>
             ))}
           </div>
         </>
@@ -424,6 +443,8 @@ type Props = {
   className?: string;
   /** 只要文字,不要图标也不可点(水印那种大字底下用)。 */
   bare?: boolean;
+  /** 点改动文件打开它的 diff(git-diff tab)。 */
+  onOpenDiff?: (input: GitDiffOpenInput) => void;
 };
 
 /**
@@ -433,7 +454,12 @@ type Props = {
  * 弹框拦下 —— 带着脏文件 checkout 成功与否全看运气,失败一半还会把人
  * 留在半切换状态,不如一开始就要求先提交。
  */
-export function BranchChip({ projectRoot, className, bare }: Props) {
+export function BranchChip({
+  projectRoot,
+  className,
+  bare,
+  onOpenDiff,
+}: Props) {
   const repo = useProjectRepo(projectRoot);
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<GitBranchEntry[] | null>(null);
@@ -665,8 +691,18 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
     [repoRoot, commitMsg],
   );
 
+  // 待删的本地分支在远程的对应物(origin 之类),有才显示"删除本地和远程"
+  const deleteRemoteCounterpart = useMemo(() => {
+    if (!pendingDelete || pendingDelete.remote || !branches) return null;
+    const hit = branches.find(
+      (b) =>
+        b.kind === "remote" && remoteShortName(b.name) === pendingDelete.branch,
+    );
+    return hit ? (hit.name.split("/")[0] ?? null) : null;
+  }, [pendingDelete, branches]);
+
   const deleteBranch = useCallback(
-    async (force: boolean) => {
+    async (force: boolean, alsoRemote = false) => {
       const target = pendingDelete;
       if (!repoRoot || !target || deleteBusy) return;
       setDeleteBusy(true);
@@ -676,7 +712,17 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
           remote: target.remote ?? undefined,
           force,
         });
-        toast.success(`已删除${target.display}`);
+        // 本地删干净了再动远程 —— 本地删失败(比如未合并)时远程不能先没了
+        if (alsoRemote && !target.remote && deleteRemoteCounterpart) {
+          await native.gitDeleteBranch(repoRoot, target.branch, {
+            remote: deleteRemoteCounterpart,
+          });
+        }
+        toast.success(
+          alsoRemote && deleteRemoteCounterpart
+            ? `已删除本地和远程分支 ${target.branch}`
+            : `已删除${target.display}`,
+        );
         setPendingDelete(null);
         // 删的可能正是选中的分支,清掉让它回落到当前分支
         setSelected(null);
@@ -688,7 +734,7 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
         setDeleteBusy(false);
       }
     },
-    [repoRoot, pendingDelete, deleteBusy],
+    [repoRoot, pendingDelete, deleteBusy, deleteRemoteCounterpart],
   );
 
   // 打开弹框默认选中当前分支;关闭清掉,免得下次带着旧选中打开
@@ -1270,7 +1316,16 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
               <div className="flex h-[60vh] w-[44rem] min-w-0 flex-col border-l border-border pl-4">
                 <div className="mb-1.5 flex items-center justify-between gap-2">
                   <div className="min-w-0 truncate text-[12px] font-semibold">
-                    提交记录 · {selected?.display ?? ""}
+                    提交记录 · {/* 分支名高亮,当前分支用和左侧列表一致的绿 */}
+                    <span
+                      className={
+                        selected?.isHead
+                          ? "text-emerald-500"
+                          : "text-foreground"
+                      }
+                    >
+                      {selected?.display ?? ""}
+                    </span>
                   </div>
                 </div>
                 <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1432,6 +1487,15 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
           <ChangedFilesPreview
             repoRoot={repoRoot}
             active={pendingSwitch !== null}
+            onOpenFile={
+              onOpenDiff && repoRoot != null
+                ? (f) => {
+                    onOpenDiff(diffInputFor(repoRoot, f));
+                    setPendingSwitch(null);
+                    setOpen(false);
+                  }
+                : undefined
+            }
           />
           <Textarea
             autoFocus
@@ -1642,6 +1706,19 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
             >
               取消
             </Button>
+            {/* 本地分支有远程对应物时,给"一起删"的口子 */}
+            {pendingDelete?.remote == null && deleteRemoteCounterpart && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={deleteBusy}
+                title={`同时删除 ${deleteRemoteCounterpart}/${pendingDelete?.branch},这会影响所有协作者,且无法撤销`}
+                onClick={() => void deleteBranch(!!deleteError, true)}
+                className="gap-1 text-xs text-destructive hover:text-destructive"
+              >
+                删除本地和远程
+              </Button>
+            )}
             {/* -d 因未合并被拒后,就地给出 -D 的口子 */}
             {pendingDelete?.remote == null && deleteError && (
               <Button
@@ -1730,7 +1807,20 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
               」的全部改动,输入提交信息:
             </DialogDescription>
           </DialogHeader>
-          <ChangedFilesPreview repoRoot={repoRoot} active={commitOnlyOpen} />
+          <ChangedFilesPreview
+            repoRoot={repoRoot}
+            active={commitOnlyOpen}
+            onOpenFile={
+              onOpenDiff && repoRoot != null
+                ? (f) => {
+                    onOpenDiff(diffInputFor(repoRoot, f));
+                    // diff 开在浮层/面板后面,不关看不见
+                    setCommitOnlyOpen(false);
+                    setOpen(false);
+                  }
+                : undefined
+            }
+          />
           <Textarea
             autoFocus
             value={commitMsg}
@@ -1784,11 +1874,14 @@ export function BranchChip({ projectRoot, className, bare }: Props) {
 export function QuickCommitButton({
   projectRoot,
   changedCount = 0,
+  onOpenDiff,
   className,
 }: {
   projectRoot: string | null;
   /** 未提交的变更文件数,>0 时在按钮上挂个角标 —— 一眼知道有没有账没结。 */
   changedCount?: number;
+  /** 点改动文件打开它的 diff(git-diff tab)。 */
+  onOpenDiff?: (input: GitDiffOpenInput) => void;
   className?: string;
 }) {
   const repo = useProjectRepo(projectRoot);
@@ -1882,7 +1975,17 @@ export function QuickCommitButton({
             将暂存并提交当前分支「{repo.branch}」的全部改动,输入提交信息:
           </span>
         </div>
-        <ChangedFilesPreview repoRoot={repo.repoRoot} active={open} />
+        <ChangedFilesPreview
+          repoRoot={repo.repoRoot}
+          active={open}
+          onOpenFile={
+            onOpenDiff &&
+            ((f) => {
+              onOpenDiff(diffInputFor(repo.repoRoot, f));
+              setOpen(false); // diff 开在浮层后面,不关看不见
+            })
+          }
+        />
         <Textarea
           // biome-ignore lint/a11y/noAutofocus: 打开就是为了输提交信息
           autoFocus

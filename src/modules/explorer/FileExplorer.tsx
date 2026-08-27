@@ -25,11 +25,13 @@ import {
 } from "@/modules/android-run";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
+import { ChangedFilesDialog } from "@/modules/source-control/ChangedFilesDialog";
 import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
   ArrowDown01Icon,
   ArrowUp01Icon,
   FileAddIcon,
+  FileEditIcon,
   FilterHorizontalIcon,
   Folder01Icon,
   FolderAddIcon,
@@ -123,6 +125,8 @@ type Props = {
   linkVersion?: number;
   pathDropTarget?: TerminalPathDropTarget;
   gitStatus?: GitStatusSnapshot | null;
+  /** 有未保存编辑的文件(编辑器里改了没存),树上单独标一下 —— git 还看不见它们。 */
+  dirtyPaths?: Set<string>;
 };
 
 type Row =
@@ -306,6 +310,7 @@ export const FileExplorer = memo(
       classifyProjectDir,
       onOpenProject,
       projectGitByPath,
+      dirtyPaths,
       activeProjectPath,
       openedProjectPaths,
       projectPtyIds,
@@ -396,6 +401,13 @@ export const FileExplorer = memo(
       }
       return keep;
     }, [onlyOpened, canFilterOpened, openedProjectPaths, rootPath]);
+
+    // 变更文件浏览器(产品文件区专用,左栏那棵是产品导航树,看改动在那儿
+    // 没意义 —— 用"能不能设根目录"区分两棵树)。做成弹框而不是树过滤:
+    // 读改动要的是"点一个看一个 diff",树只能给你一堆文件名。
+    const canBrowseChanged =
+      !onSetAsRoot && !!gitStatus && gitStatus.changedFiles.length > 0;
+    const [changedOpen, setChangedOpen] = useState(false);
 
     // 光过滤还不够:父目录没展开就看不到里面的工程,而展开又是加载子节点的
     // 触发点,所以这里真去展开,而不是画的时候假装展开。
@@ -800,6 +812,7 @@ export const FileExplorer = memo(
               isOpenedProject={!!openedProjectPaths?.has(row.path)}
               projectPtyIds={projectPtyIds}
               yunxiaoLinked={row.isDir && linkedDirs.has(row.path)}
+              dirty={!row.isDir && !!dirtyPaths?.has(row.path)}
               branch={
                 row.isDir
                   ? (projectGitByPath?.[row.path]?.branch ?? null)
@@ -857,6 +870,15 @@ export const FileExplorer = memo(
         label: onlyOpened ? "显示全部目录" : "只看已打开的工程",
         active: onlyOpened,
         onClick: () => setOnlyOpened((v) => !v),
+      });
+    }
+    if (canBrowseChanged) {
+      actions.push({
+        id: "changed",
+        icon: FileEditIcon,
+        text: "diff",
+        label: "查看变更文件",
+        onClick: () => setChangedOpen(true),
       });
     }
     if (headerActions) actions.push(...headerActions);
@@ -1329,6 +1351,12 @@ export const FileExplorer = memo(
           sourcePath={copyProjectSource}
           rootDir={rootPath}
           onClose={() => setCopyProjectSource(null)}
+        />
+
+        <ChangedFilesDialog
+          open={changedOpen}
+          onOpenChange={setChangedOpen}
+          repoRoot={gitStatus?.repoRoot ?? null}
         />
 
         {dnd.dragLabel ? (

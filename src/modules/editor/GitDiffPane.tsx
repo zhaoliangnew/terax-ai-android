@@ -1,6 +1,10 @@
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  WORKTREE_CHANGED_EVENT,
+  WORKTREE_DISCARDED_EVENT,
+} from "@/modules/source-control/events";
 import { unifiedMergeView } from "@codemirror/merge";
 import { EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -41,6 +45,8 @@ type Props = {
   source: WorkingSource | CommitSource;
   chipLabel?: string;
   active: boolean;
+  /** 藏起右上角的仓库路径(弹框里标题已经写了产品/工程/分支,重复且必被截断)。 */
+  hideRepoPath?: boolean;
 };
 
 const LARGE_FILE_THRESHOLD = 256 * 1024;
@@ -69,15 +75,28 @@ const DIFF_THEME = EditorView.theme({
     paddingTop: "1px",
     paddingBottom: "1px",
   },
+  // 变更标记用 +/- 而不是一条色带:一眼看出是加还是删,不用靠颜色分辨
+  // (色带只有 2px,红绿在深色底上也不好认)。
+  ".cm-changeGutter": {
+    width: "1.1em !important",
+    paddingLeft: "0 !important",
+    textAlign: "center",
+  },
   "&.cm-merge-b .cm-changedLineGutter, .cm-changedLineGutter": {
-    background: "rgba(110, 200, 120, 0.55) !important",
+    background: "transparent !important",
+    color: "rgb(110, 200, 120)",
+    fontWeight: "600",
+  },
+  "&.cm-merge-b .cm-changedLineGutter::after, .cm-changedLineGutter::after": {
+    content: '"+"',
   },
   ".cm-deletedLineGutter, &.cm-merge-a .cm-changedLineGutter": {
-    background: "rgba(220, 90, 90, 0.5) !important",
+    background: "transparent !important",
+    color: "rgb(220, 110, 110)",
+    fontWeight: "600",
   },
-  ".cm-changeGutter": {
-    width: "2px !important",
-    paddingLeft: "0 !important",
+  ".cm-deletedLineGutter::after, &.cm-merge-a .cm-changedLineGutter::after": {
+    content: '"-"',
   },
   ".cm-collapsedLines": {
     backgroundColor: "transparent",
@@ -136,7 +155,12 @@ function loadStateFromCache(source: WorkingSource | CommitSource): LoadState {
   };
 }
 
-export function GitDiffPane({ source, chipLabel, active }: Props) {
+export function GitDiffPane({
+  source,
+  chipLabel,
+  active,
+  hideRepoPath = false,
+}: Props) {
   const cmRef = useRef<ReactCodeMirrorRef>(null);
   const themeExt = useEditorThemeExt();
   const [state, setState] = useState<LoadState>(() =>
@@ -145,6 +169,20 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
 
   const key = cacheKey(source);
 
+  // 工作区变了(存盘、丢弃、切分支)就重取:diff 内容加载一次就缓存住,
+  // 不给信号的话丢弃完这里还挂着丢弃前那份,看着像没生效。
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    const bump = () => setReloadKey((k) => k + 1);
+    window.addEventListener(WORKTREE_CHANGED_EVENT, bump);
+    window.addEventListener(WORKTREE_DISCARDED_EVENT, bump);
+    return () => {
+      window.removeEventListener(WORKTREE_CHANGED_EVENT, bump);
+      window.removeEventListener(WORKTREE_DISCARDED_EVENT, bump);
+    };
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadKey 是"重取一次"的信号
   useEffect(() => {
     if (!active) return;
     const cached = loadStateFromCache(source);
@@ -193,7 +231,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [active, key, source]);
+  }, [active, key, source, reloadKey]);
 
   const path = source.path;
   const repoRoot = source.repoRoot;
@@ -236,9 +274,7 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
     let cancelled = false;
     resolveLanguage(path).then((res) => {
       if (cancelled || !res) return;
-      setState((s) =>
-        s.kind === "loaded" ? { ...s, langExt: res.ext } : s,
-      );
+      setState((s) => (s.kind === "loaded" ? { ...s, langExt: res.ext } : s));
     });
     return () => {
       cancelled = true;
@@ -278,7 +314,12 @@ export function GitDiffPane({ source, chipLabel, active }: Props) {
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-3 text-[10.5px] tabular-nums text-muted-foreground">
-          <span className="truncate max-w-80 font-mono">{repoRoot}</span>
+          {/* 仓库路径截断得厉害,悬停给全路径 —— 光看尾巴认不出是哪个仓库 */}
+          {!hideRepoPath && (
+            <span className="max-w-80 truncate font-mono" title={repoRoot}>
+              {repoRoot}
+            </span>
+          )}
           {useFallback ? (
             <>
               <span className="text-emerald-600 dark:text-emerald-400">

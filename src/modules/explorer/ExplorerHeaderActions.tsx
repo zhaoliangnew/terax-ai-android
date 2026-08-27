@@ -21,6 +21,8 @@ export type ExplorerHeaderAction = {
   /** 亮着的状态,比如筛选开启。 */
   active?: boolean;
   iconSize?: number;
+  /** 用文字代替图标(比如 "diff")—— 有些动作画成图标反而认不出。 */
+  text?: string;
 };
 
 /** size-6 的按钮 + gap-1。 */
@@ -63,7 +65,7 @@ export function ExplorerHeaderActions({ actions, width }: Props) {
           variant="ghost"
           size="icon"
           className={cn(
-            "size-6",
+            a.text ? "h-6 w-auto px-1.5 text-[11px]" : "size-6",
             a.active
               ? "text-emerald-500 hover:text-emerald-400"
               : "text-muted-foreground hover:text-foreground",
@@ -72,11 +74,13 @@ export function ExplorerHeaderActions({ actions, width }: Props) {
           title={a.tooltip ?? a.label}
           aria-label={a.label}
         >
-          <HugeiconsIcon
-            icon={a.icon}
-            size={a.iconSize ?? 13}
-            strokeWidth={2}
-          />
+          {a.text ?? (
+            <HugeiconsIcon
+              icon={a.icon}
+              size={a.iconSize ?? 13}
+              strokeWidth={2}
+            />
+          )}
         </Button>
       ))}
 

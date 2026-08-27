@@ -35,6 +35,16 @@ export function invalidateRepoDiffs(repoRoot: string): void {
   }
 }
 
+/** 某个文件的工作区 diff(暂存/未暂存两种)全部作废 —— 存盘之后用。
+ * 传绝对路径也行:key 里存的是仓库内相对路径,这里按后缀匹配。 */
+export function invalidateFileDiffs(absOrRelPath: string): void {
+  const norm = absOrRelPath.replace(/\\/g, "/");
+  for (const k of [...cache.keys()]) {
+    const rel = k.split("|w|")[1]?.slice(2); // "<mode>|<path>" 去掉模式那两个字符
+    if (rel && (norm === rel || norm.endsWith(`/${rel}`))) cache.delete(k);
+  }
+}
+
 export function workingDiffKey(
   repoRoot: string,
   path: string,

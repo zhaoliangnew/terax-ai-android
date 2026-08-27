@@ -6,6 +6,7 @@ import {
 import { GIT_BRANCH_CHANGED_EVENT } from "@/modules/android-run/BranchChip";
 import { useWorkspaceEnvStore, workspaceScopeKey } from "@/modules/workspace";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { WORKTREE_CHANGED_EVENT } from "./events";
 
 const AUTO_FETCH_THROTTLE_MS = 5 * 60_000;
 const AUTO_FETCH_LRU_LIMIT = 16;
@@ -569,9 +570,15 @@ export function useSourceControl(
     const onBranchChanged = () => {
       void refresh({ remote: "never" });
     };
+    // 编辑器存盘等改动工作区的操作:立刻重查,别等聚焦
+    const onWorktreeChanged = () => {
+      void refresh({ remote: "never" });
+    };
     window.addEventListener("focus", onFocus);
     window.addEventListener(GIT_BRANCH_CHANGED_EVENT, onBranchChanged);
+    window.addEventListener(WORKTREE_CHANGED_EVENT, onWorktreeChanged);
     return () => {
+      window.removeEventListener(WORKTREE_CHANGED_EVENT, onWorktreeChanged);
       window.removeEventListener("focus", onFocus);
       window.removeEventListener(GIT_BRANCH_CHANGED_EVENT, onBranchChanged);
       if (timer) window.clearTimeout(timer);

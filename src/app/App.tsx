@@ -1,4 +1,5 @@
 import { ProjectWatermark } from "@/app/components/ProjectWatermark";
+import { Button } from "@/components/ui/button";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -91,6 +92,7 @@ import {
   useRepositoryTargeting,
   useSourceControlContext,
 } from "@/modules/source-control";
+import { ChangedFilesDialog } from "@/modules/source-control/ChangedFilesDialog";
 import {
   useSpacePersistence,
   useSpaces,
@@ -441,6 +443,17 @@ export default function App() {
   const [projectLinkDir, setProjectLinkDir] = useState<string | null>(null);
   // 云效需求地址有两个入口(工具栏按钮 / 目录树右键),改完靠这个信号互相同步。
   const [linkVersion, setLinkVersion] = useState(0);
+  // 底栏"查看变更文件"弹框(和产品文件区头部那个按钮是同一个东西)
+  const [changedFilesOpen, setChangedFilesOpen] = useState(false);
+  // 有未保存编辑的文件:git 看不见它们(还没落盘),但树上得标出来,
+  // 否则"我明明改了这个文件"和树上一片素白对不上。
+  const dirtyFilePaths = useMemo(
+    () =>
+      new Set(
+        tabs.flatMap((t) => (t.kind === "editor" && t.dirty ? [t.path] : [])),
+      ),
+    [tabs],
+  );
   const bumpLinks = useCallback(() => setLinkVersion((n) => n + 1), []);
 
   // 切 tab 时把左栏定位到该 tab 的工程根,省得每次手动一层层展开找回来。
@@ -988,6 +1001,10 @@ export default function App() {
   // 终端 cwd → android-run 项目根(工具栏已移到镜像面板,项目发现放这里驱动)。
   const setAndroidProjectRoot = useAndroidRunStore((s) => s.setProjectRoot);
   useEffect(() => {
+    // 切到编辑器等非终端 tab 时不清空:点开个文件看看,不该把产品文件区/
+    // 投屏/Logcat 整块拆掉(投屏面板一卸载会话就断了)。工程上下文跟着
+    // "最后一个终端"走,切回终端自然更新。
+    if (activeTerminalLeafCwd === null) return;
     void setAndroidProjectRoot(activeTerminalLeafCwd);
   }, [activeTerminalLeafCwd, setAndroidProjectRoot]);
 
@@ -1628,6 +1645,7 @@ export default function App() {
                                   ? sourceControl.status
                                   : null
                               }
+                              dirtyPaths={dirtyFilePaths}
                               activeFilePath={explorerActiveFilePath}
                               onOpenFile={handleOpenFile}
                               onPathRenamed={handlePathRenamed}
@@ -1690,6 +1708,7 @@ export default function App() {
                                       ? sourceControl.status
                                       : null
                                   }
+                                  dirtyPaths={dirtyFilePaths}
                                   activeFilePath={explorerActiveFilePath}
                                   onOpenFile={handleOpenFile}
                                   onPathRenamed={handlePathRenamed}
@@ -1790,6 +1809,7 @@ export default function App() {
                           )}
                           <BranchChip
                             projectRoot={androidProjectRoot}
+                            onOpenDiff={openGitDiffTab}
                             className="max-w-40 text-[13px]"
                           />
                           <AgentStatusDot
@@ -1899,6 +1919,7 @@ export default function App() {
                           )}
                           <BranchChip
                             projectRoot={androidProjectRoot}
+                            onOpenDiff={openGitDiffTab}
                             className="max-w-40 text-[13px]"
                           />
                         </span>
@@ -1909,9 +1930,23 @@ export default function App() {
                               onRun={runInActiveTerminal}
                             />
                           )}
+                        {/* 看改动:左右分栏,来回点几个文件不用开一堆 tab。
+                            紧挨着"提交" —— 提交前先扫一眼是同一件事的两步 */}
+                        {sourceControl.changedCount > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="查看变更文件"
+                            onClick={() => setChangedFilesOpen(true)}
+                            className="h-7 shrink-0 gap-1 px-2 text-xs"
+                          >
+                            diff
+                          </Button>
+                        )}
                         <QuickCommitButton
                           projectRoot={androidProjectRoot}
                           changedCount={sourceControl.changedCount}
+                          onOpenDiff={openGitDiffTab}
                           className="shrink-0"
                         />
                         {/* basis-full 换行:git 地址单独占一行,不跟
@@ -2026,6 +2061,12 @@ export default function App() {
             workspaceRoot={explorerRoot}
             onOpenContentHit={openContentHit}
             insertCommand={insertHistoryCommand}
+          />
+
+          <ChangedFilesDialog
+            open={changedFilesOpen}
+            onOpenChange={setChangedFilesOpen}
+            repoRoot={sourceControl.status?.repoRoot ?? null}
           />
 
           <NewEditorDialog

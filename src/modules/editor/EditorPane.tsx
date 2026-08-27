@@ -3,6 +3,11 @@ import { getCustomEndpointKey, getKey } from "@/modules/ai/lib/keyring";
 import { lspFormatDocument, useLspExtension } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { onKeysChanged } from "@/modules/settings/store";
+import {
+  WORKTREE_CHANGED_EVENT,
+  WORKTREE_DISCARDED_EVENT,
+  type WorktreeDiscardedDetail,
+} from "@/modules/source-control/events";
 import { acceptCompletion, startCompletion } from "@codemirror/autocomplete";
 import { redo, undo } from "@codemirror/commands";
 import {
@@ -108,13 +113,75 @@ export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
     const { path, overrideLanguage, onDirtyChange, onSaved, onClose } = props;
 
-    const { doc, onChange, save, reload, adoptDiskText, openAnyway } =
-      useDocument({
-        path,
-        onDirtyChange,
-      });
+    const {
+      doc,
+      onChange,
+      save,
+      reload,
+      forceReloadFromDisk,
+      adoptDiskText,
+      openAnyway,
+    } = useDocument({
+      path,
+      onDirtyChange,
+    });
     const reloadRef = useRef(reload);
     reloadRef.current = reload;
+    const forceReloadRef = useRef(forceReloadFromDisk);
+    forceReloadRef.current = forceReloadFromDisk;
+    const pathForReloadRef = useRef(path);
+    pathForReloadRef.current = path;
+    // 工作区被应用自己改写(丢弃改动、切分支之类)时磁盘内容变了,而编辑器
+    // 抱着打开时那份 —— 丢弃完文件还显示着改动就是这么来的。reload 自带
+    // 脏检查:有未保存编辑时不覆盖(不能因为别处一个操作就吞掉手上没存的
+    // 字),但得说一声,否则"丢弃了却还显示着"看着就像没生效。
+    useEffect(() => {
+      const onWorktreeChanged = () => {
+        // 有未保存的编辑时 reload 自己会让路,静悄悄跳过就行 —— 真去覆盖
+        // 磁盘那一下(保存)另有 mtime 冲突提示兜着,这里再弹一个纯属噪音。
+        reloadRef.current();
+      };
+      window.addEventListener(WORKTREE_CHANGED_EVENT, onWorktreeChanged);
+      // 终端里 git checkout / 别的编辑器改了文件,不会走上面那个事件 ——
+      // 窗口回到前台时对一次盘,和别的 IDE 一个习惯。这条只在内容真变了
+      // 才会重渲染(adoptRead 的 skipIfUnchanged)。
+      const onFocus = () => {
+        reloadRef.current();
+      };
+      window.addEventListener("focus", onFocus);
+      // 显式丢弃:这个文件的改动都不要了,没保存的编辑也一起扔,
+      // 否则自动保存过一秒又把它写回磁盘,看着像丢弃没生效。
+      const onDiscarded = (e: Event) => {
+        const detail = (e as CustomEvent<WorktreeDiscardedDetail>).detail;
+        if (!detail) return;
+        const mine = pathForReloadRef.current.replace(/\\/g, "/");
+        // 绝对路径可能因为软链/规范化(/private 前缀之类)对不上,
+        // 再按"仓库内相对路径"兜一次底。
+        const hit =
+          detail.paths?.some((p) => p.replace(/\\/g, "/") === mine) ||
+          detail.relPaths?.some((rel) => {
+            const r = rel.replace(/\\/g, "/").replace(/^\/+/, "");
+            return mine === r || mine.endsWith(`/${r}`);
+          });
+        if (!hit) return;
+        void forceReloadRef.current().then((text) => {
+          const view = cmRef.current?.view;
+          if (text == null || !view) return;
+          // 直接写进视图:光改 React 状态时,react-codemirror 会因为
+          // "用户刚在打字"把外部更新推迟掉,屏幕上还留着已经被丢弃的内容。
+          if (view.state.doc.toString() === text) return;
+          view.dispatch({
+            changes: { from: 0, to: view.state.doc.length, insert: text },
+          });
+        });
+      };
+      window.addEventListener(WORKTREE_DISCARDED_EVENT, onDiscarded);
+      return () => {
+        window.removeEventListener(WORKTREE_CHANGED_EVENT, onWorktreeChanged);
+        window.removeEventListener(WORKTREE_DISCARDED_EVENT, onDiscarded);
+        window.removeEventListener("focus", onFocus);
+      };
+    }, []);
     const adoptDiskTextRef = useRef(adoptDiskText);
     adoptDiskTextRef.current = adoptDiskText;
     const cmRef = useRef<ReactCodeMirrorRef>(null);
@@ -236,6 +303,7 @@ export const EditorPane = memo(
         }
       }
       onSavedRef.current?.();
+      // 刷新信号统一在 useDocument 的写盘出口发(自动保存不走这儿)
     }, []);
     const performSaveRef = useRef(performSave);
     performSaveRef.current = performSave;
@@ -624,7 +692,8 @@ export const EditorPane = memo(
         );
       }
 
-      const canForce = doc.status === "toolarge" && doc.size <= FORCE_READ_LIMIT;
+      const canForce =
+        doc.status === "toolarge" && doc.size <= FORCE_READ_LIMIT;
       return (
         <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
           <div className="text-sm text-foreground">

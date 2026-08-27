@@ -69,6 +69,8 @@ export type EntryRowProps = {
   yunxiaoLinked?: boolean;
   /** 工程当前所在分支(只有开着 tab 的工程才有),灰字跟在名字后面。 */
   branch?: string | null;
+  /** 编辑器里改了还没保存:git 看不见,树上用一个点标出来。 */
+  dirty?: boolean;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -94,6 +96,7 @@ function EntryRowImpl(props: EntryRowProps) {
     projectPtyIds,
     yunxiaoLinked = false,
     branch = null,
+    dirty = false,
   } = props;
 
   const asProject = projectKind !== null && !!onOpenProject;
@@ -211,6 +214,13 @@ function EntryRowImpl(props: EntryRowProps) {
       >
         {name}
       </span>
+      {/* 未保存的编辑 git 看不见,给个点(和 tab 上那个 ● 一个意思) */}
+      {dirty && (
+        <span
+          title="有未保存的修改"
+          className="size-1.5 shrink-0 rounded-full bg-amber-400"
+        />
+      )}
       {/* 开着 tab 的工程把当前分支亮出来:多工程并行时"哪个在哪个分支"
           是最常核对的事,不用挨个点进去看底栏 */}
       {asProject && branch && (

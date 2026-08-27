@@ -1,9 +1,11 @@
 import { notifyDocumentSaved } from "@/modules/lsp";
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import { WORKTREE_CHANGED_EVENT } from "@/modules/source-control/events";
 import { currentWorkspaceEnv } from "@/modules/workspace";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { invalidateFileDiffs } from "./diffCache";
 import { detectEol, type Eol, normalizeToLf, restoreEol } from "./eol";
 
 type ReadResult =
@@ -71,6 +73,11 @@ export function useDocument({ path, onDirtyChange }: Options) {
     // Edits typed while the write was in flight must stay dirty.
     setDirty(bufferRef.current !== content);
     notifyDocumentSaved(path);
+    // 所有写盘都从这里过(手动保存、自动保存、格式化后回写),刷新信号也
+    // 必须发在这儿 —— 之前挂在编辑器的手动保存里,自动保存直接调 saveNow
+    // 绕过去了,于是"存了但树上不变色、没有 diff 按钮"。
+    invalidateFileDiffs(path);
+    window.dispatchEvent(new Event(WORKTREE_CHANGED_EVENT));
   }, [path]);
 
   // False when the write was withheld because the file changed on disk
@@ -84,10 +91,12 @@ export function useDocument({ path, onDirtyChange }: Options) {
       }).catch(() => null);
       if (stat && stat.mtime !== known) {
         const name = path.split(/[\\/]/).pop() ?? path;
-        toast.warning("File changed on disk", {
+        // 这条挡住的往往是自动保存,而自动保存是静默的 —— 不说清楚就成了
+        // "打的字莫名其妙没保存"。把"自动保存已暂停"直说,给个覆盖的口子。
+        toast.warning("文件在磁盘上被改过了", {
           id: `save-conflict:${path}`,
-          description: `${name} was modified by another program while you had unsaved changes. Overwrite to keep your version.`,
-          action: { label: "Overwrite", onClick: () => void writeToDisk() },
+          description: `${name} 在你编辑期间被其他程序改动过,自动保存已暂停。选"覆盖"保留你的版本。`,
+          action: { label: "覆盖", onClick: () => void writeToDisk() },
         });
         return false;
       }
@@ -176,9 +185,35 @@ export function useDocument({ path, onDirtyChange }: Options) {
       })
       // Transient failures (e.g. ENOENT mid atomic-rename) must not replace
       // a healthy buffer with an error screen.
-      .catch((e) => console.warn("[editor] reload failed", path, e));
+      // 文件被删了(比如丢弃一个未跟踪文件)不是错,别刷屏
+      .catch((e) => {
+        if (!/No such file|os error 2/i.test(String(e))) {
+          console.warn("[editor] reload failed", path, e);
+        }
+      });
     return true;
   }, [readFromDisk, adoptRead, path]);
+
+  /**
+   * 无条件按磁盘内容重置缓冲区,连没保存的编辑一起丢 —— 只给"丢弃这个
+   * 文件的改动"这种显式操作用。顺手掐掉待写的自动保存,不然一秒后它又
+   * 把刚丢掉的内容写回去。
+   */
+  const forceReloadFromDisk = useCallback((): Promise<string | null> => {
+    clearAutoSaveTimer();
+    return readFromDisk(forceRef.current)
+      .then((res) => {
+        adoptRead(res);
+        // 把采纳后的文本交回去:调用方要直接写进编辑器视图 ——
+        // react-codemirror 在"正在输入"时会把外部更新推迟到一个可能永远
+        // 不执行的回调里,只改 React 状态屏幕上不一定跟着变。
+        return res.kind === "text" ? normalizeToLf(res.content) : null;
+      })
+      .catch((e) => {
+        console.warn("[editor] force reload failed", path, e);
+        return null;
+      });
+  }, [clearAutoSaveTimer, readFromDisk, adoptRead, path]);
 
   const save = useCallback(async (): Promise<boolean> => {
     clearAutoSaveTimer();
@@ -223,5 +258,14 @@ export function useDocument({ path, onDirtyChange }: Options) {
 
   useEffect(() => clearAutoSaveTimer, [path, clearAutoSaveTimer]);
 
-  return { doc, dirty, onChange, save, reload, adoptDiskText, openAnyway };
+  return {
+    doc,
+    dirty,
+    onChange,
+    save,
+    reload,
+    forceReloadFromDisk,
+    adoptDiskText,
+    openAnyway,
+  };
 }

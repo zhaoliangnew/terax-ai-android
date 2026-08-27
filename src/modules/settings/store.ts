@@ -1,4 +1,9 @@
 import {
+  type AgentLaunchCommands,
+  DEFAULT_AGENT_LAUNCH_COMMANDS,
+  normalizeAgentLaunchCommands,
+} from "@/modules/agents/lib/launcher";
+import {
   type AutocompleteProviderId,
   type CustomEndpoint,
   DEFAULT_AUTOCOMPLETE_MODEL,
@@ -14,11 +19,6 @@ import {
   type SttProvider,
   WHISPERCPP_DEFAULT_BASE_URL,
 } from "@/modules/ai/config";
-import {
-  type AgentLaunchCommands,
-  DEFAULT_AGENT_LAUNCH_COMMANDS,
-  normalizeAgentLaunchCommands,
-} from "@/modules/agents/lib/launcher";
 import type { KeyBinding, ShortcutId } from "@/modules/shortcuts/shortcuts";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
@@ -357,7 +357,9 @@ export const DEFAULT_PREFERENCES: Preferences = {
   agentLaunchCommands: DEFAULT_AGENT_LAUNCH_COMMANDS,
   defaultWorkspaceEnv: "local",
   shortcuts: {} as Record<ShortcutId, KeyBinding[]>,
-  editorAutoSave: false,
+  // 默认开:改完不用记得按保存,git 状态/树上的着色/diff 也跟着自动对上
+  // (没落盘 git 就看不见)。设置里可以关。
+  editorAutoSave: true,
   editorAutoSaveDelay: 1000,
   editorFormatOnSave: false,
   editorFormatter: "lsp",
