@@ -3,7 +3,7 @@ import { indentUnit } from "@codemirror/language";
 import { lintGutter } from "@codemirror/lint";
 import { search } from "@codemirror/search";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { type Command, EditorView } from "@codemirror/view";
 import { chromeTheme } from "./chromeTheme";
 
 // Compartments allow runtime reconfiguration without rebuilding state.
@@ -128,6 +128,32 @@ const SHARED_EXTENSIONS: readonly Extension[] = Object.freeze([
     },
   }),
 ]);
+
+/**
+ * 退格键:光标在"整行只有空白"的行上时,一下把这一行连同换行删掉,直接回到
+ * 上一行末尾。
+ *
+ * 默认行为是一格一格(或一个缩进单位)地退,而代码里的空行往往缩着好几级,
+ * 要按四五下才回得去 —— 这一行本来也没内容,留着那串空格没有任何意义。
+ * 其它情况一律交还给默认命令。
+ */
+export const deleteBlankLineBackward: Command = (view) => {
+  const { state } = view;
+  const range = state.selection.main;
+  if (!range.empty) return false;
+  const line = state.doc.lineAt(range.head);
+  // 整行都是空白,且不是第一行
+  if (line.text.trim() !== "" || line.number === 1) return false;
+  const from = state.doc.line(line.number - 1).to;
+  if (from >= line.to) return false;
+  view.dispatch({
+    changes: { from, to: line.to },
+    selection: { anchor: from },
+    scrollIntoView: true,
+    userEvent: "delete.backward",
+  });
+  return true;
+};
 
 export function buildSharedExtensions(): readonly Extension[] {
   return SHARED_EXTENSIONS;

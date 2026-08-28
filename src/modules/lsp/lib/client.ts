@@ -384,7 +384,10 @@ export function lspInteractions(opts: {
         }
         const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
         if (pos == null) return false;
-        void gotoDefinition(view, pos);
+        // ⌘点击 = 找调用,加 Shift = 跳定义。点在声明上时"跳到定义"等于原地
+        // 不动(看着像没反应),而"谁调用了它"才是这时候真正想问的。
+        if (event.shiftKey) void gotoDefinition(view, pos);
+        else void findReferences(view, pos);
         return true;
       },
     }),
@@ -420,8 +423,11 @@ export class TeraxLspClient extends LanguageServerClient {
     position: LspPos;
     context: { includeDeclaration: boolean };
   }): Promise<LspLocation[] | null> {
-    return this.raw.request("textDocument/references", params, 10_000) as
-      Promise<LspLocation[] | null>;
+    return this.raw.request(
+      "textDocument/references",
+      params,
+      10_000,
+    ) as Promise<LspLocation[] | null>;
   }
 
   textDocumentDidClose(uri: string): void {

@@ -44,6 +44,7 @@ import { useDiagnosticsStore } from "./lib/diagnosticsStore";
 import {
   buildSharedExtensions,
   DEFAULT_INDENT,
+  deleteBlankLineBackward,
   indentCompartment,
   indentExtension,
   languageCompartment,
@@ -60,6 +61,7 @@ import {
 } from "./lib/externalFormat";
 import { detectIndentUnit } from "./lib/indent";
 import { type LanguageResult, resolveLanguage } from "./lib/languageResolver";
+import { type SymbolMode, symbolJumpExtension } from "./lib/symbolJump";
 import { FORCE_READ_LIMIT, useDocument } from "./lib/useDocument";
 import { useEditorThemeExt } from "./lib/useEditorThemeExt";
 import { initVimGlobals, vimHandlersExtension } from "./lib/vim";
@@ -71,6 +73,8 @@ export type EditorPaneHandle = {
   findNext: () => void;
   findPrevious: () => void;
   clearQuery: () => void;
+  /** 当前查询的命中总数,以及光标处是第几个(都是 1 基;没命中给 0)。 */
+  searchStatus: (q: string) => { index: number; total: number };
   /** Open CodeMirror's find/replace panel. */
   openSearch: () => void;
   focus: () => void;
@@ -95,6 +99,8 @@ type Props = {
   onDirtyChange?: (dirty: boolean) => void;
   onSaved?: () => void;
   onClose?: () => void;
+  /** 给了就开"跳到定义/找调用":⌘点击、F12、⌘B 找定义,加 Shift 找调用。 */
+  onJumpToSymbol?: (name: string, mode: SymbolMode) => void;
 };
 
 // Above this, syntax highlighting and LSP are disabled: a multi-MB lezer
@@ -112,6 +118,19 @@ function formatBytes(n: number): string {
 export const EditorPane = memo(
   forwardRef<EditorPaneHandle, Props>(function EditorPane(props, ref) {
     const { path, overrideLanguage, onDirtyChange, onSaved, onClose } = props;
+    // 扩展只建一次(extensions 是 useMemo([]) 的),所以回调走 ref
+    const jumpRef = useRef(props.onJumpToSymbol);
+    useEffect(() => {
+      jumpRef.current = props.onJumpToSymbol;
+    }, [props.onJumpToSymbol]);
+    /**
+     * 内置搜索跳转让不让位给 LSP。
+     *
+     * 两套都挂着 ⌘点击,谁先返回 true 谁生效。内置这套的优先级是 highest,
+     * 所以由它自己判断:该 LSP 上的时候返回 false,事件就落到 LSP 那套手里。
+     */
+    const jumpStrategy = usePreferencesStore((s) => s.symbolJumpStrategy);
+    const searchJumpAllowedRef = useRef(true);
 
     const {
       doc,
@@ -396,10 +415,18 @@ export const EditorPane = memo(
           close: () => onCloseRef.current?.(),
         })),
         ...buildSharedExtensions(),
+        // 空白行上退格 = 整行删掉回到上一行(见 deleteBlankLineBackward)
+        Prec.highest(
+          keymap.of([{ key: "Backspace", run: deleteBlankLineBackward }]),
+        ),
         indentCompartment.of(DEFAULT_INDENT),
         languageCompartment.of([]),
         lspCompartment.of([]),
         diagnosticsReporter(() => pathRef.current),
+        symbolJumpExtension({
+          enabled: () => searchJumpAllowedRef.current && !!jumpRef.current,
+          onJump: (name, mode) => jumpRef.current?.(name, mode),
+        }),
         // Before inlineCompletion so an open popup wins Tab over the ghost.
         Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
         inlineCompletion({
@@ -493,6 +520,11 @@ export const EditorPane = memo(
         effects: lspCompartment.reconfigure(lspExt ?? []),
       });
     }, [lspExt]);
+    useEffect(() => {
+      searchJumpAllowedRef.current =
+        jumpStrategy === "search" ||
+        (jumpStrategy === "auto" && lspExt === null);
+    }, [jumpStrategy, lspExt]);
 
     useEffect(
       () => () => useDiagnosticsStore.getState().report(pathRef.current, null),
@@ -544,6 +576,22 @@ export const EditorPane = memo(
     useImperativeHandle(
       ref,
       () => ({
+        searchStatus: (q: string) => {
+          const view = cmRef.current?.view;
+          if (!view || !q) return { index: 0, total: 0 };
+          const query = new SearchQuery({ search: q, caseSensitive: false });
+          if (!query.valid) return { index: 0, total: 0 };
+          const head = view.state.selection.main.from;
+          let total = 0;
+          let index = 0;
+          const cursor = query.getCursor(view.state);
+          for (let it = cursor.next(); !it.done; it = cursor.next()) {
+            total += 1;
+            // 光标落在某个命中里或它前面 —— 那个就是"当前第几个"
+            if (index === 0 && it.value.to >= head) index = total;
+          }
+          return { index: index || (total ? 1 : 0), total };
+        },
         setQuery: (q: string) => {
           const view = cmRef.current?.view;
           if (!view) return;

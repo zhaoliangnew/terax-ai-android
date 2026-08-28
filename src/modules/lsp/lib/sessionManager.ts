@@ -198,7 +198,7 @@ async function createSession(
       command: preset.command,
       args: preset.args,
       root,
-      env: preset.env,
+      env: { ...preset.env, ...((await preset.resolveEnv?.()) ?? {}) },
       maxMemoryMb: preset.maxMemoryMb,
     });
   } catch (e) {

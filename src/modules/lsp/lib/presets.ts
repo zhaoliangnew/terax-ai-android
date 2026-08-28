@@ -1,3 +1,4 @@
+import { native } from "@/modules/ai/lib/native";
 import type { LspCustomServer } from "@/modules/settings/store";
 
 export type LspPreset = {
@@ -10,10 +11,47 @@ export type LspPreset = {
   rootMarkers: string[];
   initializationOptions?: unknown;
   env?: Record<string, string>;
+  /**
+   * 启动前现算的环境变量,和 `env` 合并(这个优先)。
+   *
+   * 有些服务器对运行时有硬要求,而那个运行时的位置每台机器不一样,写死没用。
+   */
+  resolveEnv?: () => Promise<Record<string, string>>;
   maxMemoryMb?: number;
   /** Absent for user-defined servers. */
   install?: { command: string; docsUrl: string };
 };
+
+/**
+ * 找一个 21 以上的 JDK 交给 jdtls / kotlin-language-server。
+ *
+ * 这两个服务器自己要跑在 JDK 21+ 上,跟工程用哪个 JDK 编译没关系。而安卓开发机
+ * 的 `~/.zshrc` 里常年把 JAVA_HOME 钉在 17(Gradle 要),服务器继承过来就直接
+ * "requires at least Java 21" 退出。
+ *
+ * 生成的 JAVA_HOME 会盖掉登录 shell 那份 —— 后端 spawn 的顺序是"登录环境 →
+ * 预置 env",后者赢。找不到 21+ 就返回空,维持原样。
+ */
+async function javaHome21Plus(): Promise<Record<string, string>> {
+  // java_home 是 macOS 独有的;别的平台就按机器上的 JAVA_HOME/PATH 来
+  if (
+    typeof navigator === "undefined" ||
+    !/Mac|iPhone|iPad/.test(navigator.platform)
+  ) {
+    return {};
+  }
+  try {
+    const out = await native.runCommand(
+      "/usr/libexec/java_home -v 21+",
+      null,
+      10,
+    );
+    const home = out.stdout.trim();
+    return home ? { JAVA_HOME: home } : {};
+  } catch {
+    return {};
+  }
+}
 
 export const LSP_PRESETS: LspPreset[] = [
   {
@@ -166,6 +204,49 @@ export const LSP_PRESETS: LspPreset[] = [
     install: {
       command: "npm install -g intelephense",
       docsUrl: "https://intelephense.com",
+    },
+  },
+  {
+    id: "jdtls",
+    name: "Java",
+    // eclipse.jdt.ls 的启动脚本,brew 装完就叫这个名字,自己走 stdio
+    command: "jdtls",
+    args: [],
+    resolveEnv: javaHome21Plus,
+    languages: { java: "java" },
+    rootMarkers: [
+      "build.gradle",
+      "build.gradle.kts",
+      "settings.gradle",
+      "pom.xml",
+      ".git",
+    ],
+    // 安卓工程动辄几千个类,给足堆;不给的话索引到一半 OOM 退出
+    maxMemoryMb: 4096,
+    install: {
+      // jdtls 要 21+ 才跑得起来,一起装上
+      command: "brew install jdtls openjdk@21",
+      docsUrl: "https://github.com/eclipse-jdtls/eclipse.jdt.ls",
+    },
+  },
+  {
+    id: "kotlin-ls",
+    name: "Kotlin",
+    command: "kotlin-language-server",
+    args: [],
+    // 和 jdtls 同一个坑:它也得跑在 21+ 上,而机器上的 JAVA_HOME 多半钉在 17
+    resolveEnv: javaHome21Plus,
+    languages: { kt: "kotlin", kts: "kotlin" },
+    rootMarkers: [
+      "build.gradle.kts",
+      "build.gradle",
+      "settings.gradle",
+      ".git",
+    ],
+    maxMemoryMb: 3072,
+    install: {
+      command: "brew install kotlin-language-server",
+      docsUrl: "https://github.com/fwcd/kotlin-language-server",
     },
   },
   {

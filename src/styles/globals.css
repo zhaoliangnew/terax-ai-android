@@ -240,6 +240,28 @@ html[data-chrome="borderless"] .terax-bg-surface {
   zoom: calc(1 / var(--app-zoom));
 }
 
+/* 产品目录文件弹框里的编辑器:跳过去之后经常找不到光标落在哪 —— 加粗一倍、
+ * 换成醒目的绿色,并且不参与闪烁(闪没的那半拍最容易看丢)。只在这个弹框里
+ * 生效,主编辑器保持各主题自己的 caret 颜色。 */
+.terax-jump-caret .cm-cursor,
+.terax-jump-caret .cm-cursor-primary {
+  border-left-width: 3px;
+  border-left-color: var(--color-emerald-500, #10b981);
+  animation: none;
+}
+
+/* 查找命中/同名高亮:主题给的那层淡蓝在深色底上几乎看不出来。换成琥珀色,
+ * 当前那一个再压深一档并描个边,一眼分得出"正在看的是哪一个"。 */
+.terax-jump-caret .cm-searchMatch,
+.terax-jump-caret .cm-selectionMatch {
+  background-color: color-mix(in oklab, #f59e0b 28%, transparent);
+  border-radius: 2px;
+}
+.terax-jump-caret .cm-searchMatch-selected {
+  background-color: color-mix(in oklab, #f59e0b 60%, transparent);
+  outline: 1px solid color-mix(in oklab, #f59e0b 85%, transparent);
+}
+
 /* Custom window chrome (Linux/Windows): the OS gives us a transparent
  * borderless window, and we paint the rounded corners + border + shadow
  * ourselves so the app doesn't look naked on GNOME/KDE/Hyprland. */

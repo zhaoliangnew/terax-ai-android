@@ -485,6 +485,11 @@ export default function App() {
   // 两棵树挤一起,看代码只剩一条窄缝。弹框不做启动记忆:它是"翻一下"的
   // 入口,开着启动没意义。
   const [productPaneOpen, setProductPaneOpen] = useState(false);
+  // 快捷键回调里要读它的最新值(那个回调不跟着它重建)
+  const productPaneOpenRef = useRef(false);
+  useEffect(() => {
+    productPaneOpenRef.current = productPaneOpen;
+  }, [productPaneOpen]);
   // 每个工程各记各的:开着哪些文件、当前是哪个。关掉弹框、切到别的工程再
   // 回来还是原样 —— 弹框本身一关就卸载,状态放它里面等于每次都从头开始。
   const [projectFilesByRoot, setProjectFilesByRoot] = useState<
@@ -1282,6 +1287,12 @@ export default function App() {
       ) {
         return !(activeTab?.kind === "terminal" && activeTab.blocks === true);
       }
+      // 产品目录文件弹框开着时,⌘F 应该是"在这个文件里找",不是全局搜索;
+      // ⌘B 那些跳转键也归弹框里的编辑器。全局这套是 window 捕获 +
+      // stopImmediatePropagation,不在这儿让开的话弹框根本收不到键。
+      if (productPaneOpenRef.current) {
+        if (id === "search.focus" || id === "explorer.focus") return true;
+      }
       if (id === "sidebar.toggle") {
         // Ctrl+B is also Claude Code's "run in background" key. While a terminal
         // is focused, let Ctrl+B reach the shell/Claude instead of toggling the
@@ -1749,6 +1760,24 @@ export default function App() {
                     {androidProjectRoot && (
                       <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-border px-3 py-1.5 text-[13px]">
                         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                          {/* 产品目录文件的入口摆在这条最前面:它跟着的是
+                              "当前这个工程",和右边那排外部工具(AS/访达)不是
+                              一回事,排在分支前面更顺手 */}
+                          {showProductPane && (
+                            <button
+                              type="button"
+                              aria-label="产品目录文件"
+                              title="产品目录文件(左树右文,不占 tab)"
+                              onClick={toggleProductPane}
+                              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded border border-border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
+                            >
+                              <HugeiconsIcon
+                                icon={FolderTreeIcon}
+                                size={13}
+                                strokeWidth={1.75}
+                              />
+                            </button>
+                          )}
                           {/* 顶部这条只留分支:产品名/工程名在上面的 tab 上
                               已经写着了,再重复一遍就是把这一行挤到换行。产品
                               目录文件的入口挪到了 AS 图标左边那个,云效项目
@@ -1772,24 +1801,6 @@ export default function App() {
                             busyAgent={activeTerminalAgent}
                             onLaunch={openAgentTerminal}
                           />
-                          {/* 和"用 AS / Sourcetree 打开"排一起:都是"拿这个
-                              工程去干点什么"的入口。面包屑最前面那个文件夹图标
-                              是同一个功能,那边顺手、这边好找,两个都留着 */}
-                          {showProductPane && (
-                            <button
-                              type="button"
-                              aria-label="产品目录文件"
-                              title="产品目录文件(左树右文,不占 tab)"
-                              onClick={toggleProductPane}
-                              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded border border-border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
-                            >
-                              <HugeiconsIcon
-                                icon={FolderTreeIcon}
-                                size={13}
-                                strokeWidth={1.75}
-                              />
-                            </button>
-                          )}
                           <OpenInToolMenu projectRoot={androidProjectRoot} />
                           <ProjectLinksBar
                             projectRoot={androidProjectRoot}

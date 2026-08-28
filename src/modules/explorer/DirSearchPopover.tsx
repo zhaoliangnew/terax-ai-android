@@ -49,7 +49,18 @@ export function DirSearchPopover({
   // 而且面板是 portal 出来的,挂载时机自己控制更稳
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
-    if (dir) requestAnimationFrame(() => inputRef.current?.focus());
+    if (!dir) return;
+    // 它是从右键菜单里开的,而 Radix 的菜单关闭时会把焦点还给触发元素 ——
+    // 那一下发生在我们抢焦点之后,输入框就白聚焦了。所以补几次,抢赢为止。
+    const timers = [0, 60, 160].map((delay) =>
+      window.setTimeout(() => {
+        const el = inputRef.current;
+        if (el && document.activeElement !== el) el.focus();
+      }, delay),
+    );
+    return () => {
+      for (const t of timers) window.clearTimeout(t);
+    };
   }, [dir]);
 
   useEffect(() => {
