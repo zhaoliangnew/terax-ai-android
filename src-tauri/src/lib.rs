@@ -158,7 +158,37 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 把 panic 的消息和位置写进日志再让它 abort。
+///
+/// release profile 是 `panic = "abort"`,所以任意一处 panic 都会直接带走整个
+/// 应用 —— 表现是"闪退",而默认的 panic 信息只走 stderr,双击启动的 app 根本
+/// 没人接,日志里一个字都不留。装上这个钩子之后,下次闪退能在
+/// `~/Library/Logs/com.leniu.androiddev/Android Dev.log` 里看到是哪一行。
+fn install_panic_logger() {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".into());
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string payload>".into());
+        let thread = std::thread::current();
+        log::error!(
+            "panic at {location} on thread {:?}: {message}",
+            thread.name().unwrap_or("<unnamed>")
+        );
+        previous(info);
+    }));
+}
+
 pub fn run() {
+    install_panic_logger();
+
     #[cfg(windows)]
     {
         let args: Vec<String> = std::env::args().collect();

@@ -113,7 +113,10 @@ codegen-units = 1
 lto = "fat"
 opt-level = "s"
 panic = "abort"
-strip = true
+# 只剥 DWARF,留下符号表:崩溃报告里的栈才有函数名可读。全剥(strip = true)之后
+# 那份 .ips 就只剩一串地址,而 release 的代码布局跟随便重编一个二进制对不上,
+# 事后没法补符号 —— 为这个多出的两三 MB 值。
+strip = "debuginfo"
 
 # rust-lang/rust#110536: stripping proc-macro dylibs breaks the dlopen rustc does
 # at compile time on macOS, reported as a bogus E0463. Never shipped, so nothing to strip.

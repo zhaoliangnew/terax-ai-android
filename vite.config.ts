@@ -11,6 +11,17 @@ const rootDir = import.meta.dirname;
 // Bundle/treemap analysis is opt-in: `ANALYZE=true pnpm build` emits stats.html.
 const analyze = process.env.ANALYZE === "true";
 
+// 版本号就是编译时刻:V20260831-1522。状态栏右下角显示它,报问题时一眼能对上
+// 是哪一次构建 —— 比 package.json 里那个从来没人改过的 0.0.1 有用。
+// 取本地时间,不是 UTC:看的人和打包的人在同一个时区。
+function buildStamp(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `V${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(
+    d.getHours(),
+  )}${pad(d.getMinutes())}`;
+}
+
 // Module-graph inspector is opt-in via `pnpm dev:inspect`; keeps plain
 // `pnpm dev` from paying its transform-tracking overhead on every run.
 const inspectGraph = process.env.INSPECT === "true";
@@ -40,6 +51,9 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => ({
         ]
       : []),
   ],
+  define: {
+    __BUILD_STAMP__: JSON.stringify(buildStamp()),
+  },
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "./src"),

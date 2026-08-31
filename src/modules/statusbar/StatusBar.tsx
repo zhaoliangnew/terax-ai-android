@@ -24,7 +24,7 @@ import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Clock } from "./Clock";
+import { BuildStamp } from "./BuildStamp";
 import { DiagnosticsBadge } from "./DiagnosticsBadge";
 import { WorkspaceEnvSelector } from "./WorkspaceEnvSelector";
 
@@ -91,7 +91,7 @@ export function StatusBar({
         ) : (
           <AiOpenButton onOpen={onOpenAi} />
         )}
-        <Clock />
+        <BuildStamp />
       </div>
     </footer>
   );
