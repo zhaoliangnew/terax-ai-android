@@ -2,6 +2,7 @@ import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import { AiDiffStack, EditorStack, GitDiffStack } from "@/modules/editor";
 import { GitHistoryStack } from "@/modules/git-history";
+import { HtmlStack } from "@/modules/html-preview";
 import { MarkdownStack } from "@/modules/markdown";
 import { PreviewStack } from "@/modules/preview";
 import type { Tab } from "@/modules/tabs";
@@ -31,7 +32,7 @@ type Props = {
   onAiDiffReject: AiDiffStackProps["onReject"];
   onOpenCommitFile: GitHistoryStackProps["onOpenCommitFile"];
   onGitHistorySearchHandle: GitHistoryStackProps["onSearchHandle"];
-  onSetMarkdownView: EditorStackProps["onSetMarkdownView"];
+  onSetFileView: EditorStackProps["onSetFileView"];
 };
 
 const LAYER = "absolute inset-0";
@@ -62,13 +63,14 @@ export function WorkspaceSurface({
   onAiDiffReject,
   onOpenCommitFile,
   onGitHistorySearchHandle,
-  onSetMarkdownView,
+  onSetFileView,
 }: Props) {
   const kind = activeTab?.kind;
   const isTerminalTab = kind === "terminal";
   const isEditorTab = kind === "editor";
   const isPreviewTab = kind === "preview";
   const isMarkdownTab = kind === "markdown";
+  const isHtmlTab = kind === "html";
   const isAiDiffTab = kind === "ai-diff";
   const isGitDiffTab = kind === "git-diff" || kind === "git-commit-file";
   const isGitHistoryTab = kind === "git-history";
@@ -103,7 +105,7 @@ export function WorkspaceSurface({
           registerHandle={registerEditorHandle}
           onDirtyChange={onEditorDirtyChange}
           onCloseTab={onEditorCloseTab}
-          onSetMarkdownView={onSetMarkdownView}
+          onSetFileView={onSetFileView}
         />
       </div>
       <div
@@ -124,7 +126,17 @@ export function WorkspaceSurface({
         <MarkdownStack
           tabs={tabs}
           activeId={activeId}
-          onSetMarkdownView={onSetMarkdownView}
+          onSetFileView={onSetFileView}
+        />
+      </div>
+      <div
+        className={cn(LAYER, !isHtmlTab && "invisible pointer-events-none")}
+        aria-hidden={!isHtmlTab}
+      >
+        <HtmlStack
+          tabs={tabs}
+          activeId={activeId}
+          onSetFileView={onSetFileView}
         />
       </div>
       <div

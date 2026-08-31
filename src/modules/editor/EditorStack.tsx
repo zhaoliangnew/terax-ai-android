@@ -1,5 +1,5 @@
-import { cn, isMarkdownPath } from "@/lib/utils";
-import { MarkdownViewToggle } from "@/modules/markdown";
+import { ViewToggle } from "@/components/ViewToggle";
+import { cn, isHtmlPath, isMarkdownPath } from "@/lib/utils";
 import type { EditorTab, Tab } from "@/modules/tabs";
 import { useEffect, useRef } from "react";
 import { EditorPane, type EditorPaneHandle } from "./EditorPane";
@@ -10,8 +10,12 @@ type Props = {
   onDirtyChange: (id: number, dirty: boolean) => void;
   registerHandle: (id: number, handle: EditorPaneHandle | null) => void;
   onCloseTab: (id: number) => void;
-  onSetMarkdownView: (id: number, mode: "rendered" | "raw") => void;
+  onSetFileView: (id: number, mode: "rendered" | "raw") => void;
 };
+
+function hasRenderedView(path: string): boolean {
+  return isMarkdownPath(path) || isHtmlPath(path);
+}
 
 export function EditorStack({
   tabs,
@@ -19,7 +23,7 @@ export function EditorStack({
   onDirtyChange,
   registerHandle,
   onCloseTab,
-  onSetMarkdownView,
+  onSetFileView,
 }: Props) {
   const editors = tabs.filter(
     (t): t is EditorTab => t.kind === "editor" && !t.cold,
@@ -103,10 +107,10 @@ export function EditorStack({
             aria-hidden={!visible}
           >
             <div className="relative h-full overflow-hidden bg-background">
-              {isMarkdownPath(t.path) && (
-                <MarkdownViewToggle
+              {hasRenderedView(t.path) && (
+                <ViewToggle
                   mode="raw"
-                  onChange={(mode) => onSetMarkdownView(t.id, mode)}
+                  onChange={(mode) => onSetFileView(t.id, mode)}
                   renderedDisabled={t.dirty}
                   renderedHint="Save to preview"
                 />

@@ -9,7 +9,11 @@ type Props = {
   renderedHint?: string;
 };
 
-export function MarkdownViewToggle({
+/**
+ * Rendered/raw switch shared by every file kind that has both a rendered view
+ * and an editor view (markdown, html).
+ */
+export function ViewToggle({
   mode,
   onChange,
   renderedDisabled,
@@ -27,7 +31,8 @@ export function MarkdownViewToggle({
           mode === "rendered"
             ? "bg-accent text-foreground"
             : "text-muted-foreground hover:text-foreground",
-          renderedDisabled && "cursor-not-allowed opacity-40 hover:text-muted-foreground",
+          renderedDisabled &&
+            "cursor-not-allowed opacity-40 hover:text-muted-foreground",
         )}
       >
         Rendered

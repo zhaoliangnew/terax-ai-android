@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
-import type { MarkdownTab, Tab } from "@/modules/tabs";
-import { MarkdownPreviewPane } from "./MarkdownPreviewPane";
+import type { HtmlTab, Tab } from "@/modules/tabs";
+import { HtmlPreviewPane } from "./HtmlPreviewPane";
 
 type Props = {
   tabs: Tab[];
@@ -8,14 +8,12 @@ type Props = {
   onSetFileView: (id: number, mode: "rendered" | "raw") => void;
 };
 
-export function MarkdownStack({ tabs, activeId, onSetFileView }: Props) {
-  const markdowns = tabs.filter(
-    (t): t is MarkdownTab => t.kind === "markdown" && !t.cold,
-  );
-  if (markdowns.length === 0) return null;
+export function HtmlStack({ tabs, activeId, onSetFileView }: Props) {
+  const htmls = tabs.filter((t): t is HtmlTab => t.kind === "html" && !t.cold);
+  if (htmls.length === 0) return null;
   return (
     <div className="relative h-full w-full">
-      {markdowns.map((t) => {
+      {htmls.map((t) => {
         const visible = t.id === activeId;
         return (
           <div
@@ -26,7 +24,7 @@ export function MarkdownStack({ tabs, activeId, onSetFileView }: Props) {
             )}
             aria-hidden={!visible}
           >
-            <MarkdownPreviewPane
+            <HtmlPreviewPane
               path={t.path}
               visible={visible}
               onSetView={(mode) => onSetFileView(t.id, mode)}

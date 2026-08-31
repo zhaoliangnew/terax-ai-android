@@ -13,6 +13,7 @@ export {
   type GitDiffOpenInput,
   type GitDiffTab,
   type GitHistoryTab,
+  type HtmlTab,
   MAX_PANES_PER_TAB,
   type MarkdownTab,
   nextActiveInSpace,

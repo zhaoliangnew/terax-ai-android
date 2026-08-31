@@ -1,4 +1,4 @@
-import { isMarkdownPath } from "@/lib/utils";
+import { isHtmlPath, isMarkdownPath } from "@/lib/utils";
 import {
   createAgentPanePlan,
   type AgentInstanceCount,
@@ -79,6 +79,17 @@ export type MarkdownTab = TabBase & {
   path: string;
 };
 
+/** A local .html file shown rendered, as opposed to a URL in a `PreviewTab`. */
+export type HtmlTab = TabBase & {
+  id: number;
+  kind: "html";
+  title: string;
+  path: string;
+};
+
+/** File kinds that open rendered by default and can be flipped to the editor. */
+export type RenderedKind = "markdown" | "html";
+
 export type AiDiffStatus = "pending" | "approved" | "rejected";
 
 export type AiDiffTab = TabBase & {
@@ -130,6 +141,7 @@ export type Tab =
   | EditorTab
   | PreviewTab
   | MarkdownTab
+  | HtmlTab
   | AiDiffTab
   | GitDiffTab
   | GitHistoryTab
@@ -171,16 +183,18 @@ type CloseTabsPlanResult = {
   nextActiveId: number;
 };
 
-export function planMarkdownTabOpen(
+function planRenderedTabOpen(
   tabs: Tab[],
   path: string,
+  kind: RenderedKind,
   spaceId: string,
   allocId: () => number,
 ): { tabs: Tab[]; tabId: number } {
   const pathKey = path.replace(/\\/g, "/");
   const existing = tabs.find(
     (tab) =>
-      tab.kind === "markdown" &&
+      (tab.kind === "markdown" || tab.kind === "html") &&
+      tab.kind === kind &&
       tab.spaceId === spaceId &&
       tab.path.replace(/\\/g, "/") === pathKey,
   );
@@ -192,7 +206,7 @@ export function planMarkdownTabOpen(
       ...tabs,
       {
         id: tabId,
-        kind: "markdown",
+        kind,
         spaceId,
         title: basename(path),
         path,
@@ -200,6 +214,24 @@ export function planMarkdownTabOpen(
     ],
     tabId,
   };
+}
+
+export function planMarkdownTabOpen(
+  tabs: Tab[],
+  path: string,
+  spaceId: string,
+  allocId: () => number,
+): { tabs: Tab[]; tabId: number } {
+  return planRenderedTabOpen(tabs, path, "markdown", spaceId, allocId);
+}
+
+export function planHtmlTabOpen(
+  tabs: Tab[],
+  path: string,
+  spaceId: string,
+  allocId: () => number,
+): { tabs: Tab[]; tabId: number } {
+  return planRenderedTabOpen(tabs, path, "html", spaceId, allocId);
 }
 
 export function planFileTabOpen(
@@ -966,14 +998,15 @@ export function useTabs(initial?: Partial<TerminalTab>) {
   }, []);
 
   // Mirrors tabsRef like openFileTab instead of using a functional update: a
-  // batch that opens a markdown file before a regular one (multi-file "Open
-  // With") would otherwise have the queued markdown update clobbered by
+  // batch that opens a rendered file before a regular one (multi-file "Open
+  // With") would otherwise have the queued rendered update clobbered by
   // openFileTab's setTabs(plan.tabs), which is built from the stale ref.
-  const newMarkdownTab = useCallback((path: string) => {
+  const newRenderedTab = useCallback((path: string, kind: RenderedKind) => {
     const curr = tabsRef.current;
-    const plan = planMarkdownTabOpen(
+    const plan = planRenderedTabOpen(
       curr,
       path,
+      kind,
       activeSpaceIdRef.current,
       () => nextIdRef.current++,
     );
@@ -984,6 +1017,16 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     setActiveId(plan.tabId);
     return plan.tabId;
   }, []);
+
+  const newMarkdownTab = useCallback(
+    (path: string) => newRenderedTab(path, "markdown"),
+    [newRenderedTab],
+  );
+
+  const newHtmlTab = useCallback(
+    (path: string) => newRenderedTab(path, "html"),
+    [newRenderedTab],
+  );
 
   const setOverrideLanguage = useCallback((id: number, lang: string | null) => {
     setTabs((curr) =>
@@ -997,44 +1040,48 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     );
   }, []);
 
-  const setMarkdownView = useCallback(
-    (id: number, mode: "rendered" | "raw") => {
-      setTabs((curr) =>
-        curr.map((t) => {
-          if (
-            t.id !== id ||
-            !isMarkdownPath((t as { path?: string }).path ?? "")
-          )
-            return t;
-          if (mode === "raw" && t.kind === "markdown") {
-            return {
-              ...t,
-              kind: "editor" as const,
-              dirty: false,
-              preview: false,
-              overrideLanguage:
-                (t as { overrideLanguage?: string | null }).overrideLanguage ??
-                null,
-            };
-          }
-          if (mode === "rendered" && t.kind === "editor") {
-            if (t.dirty) return t;
-            return {
-              id: t.id,
-              kind: "markdown" as const,
-              spaceId: t.spaceId,
-              cold: t.cold,
-              title: t.title,
-              path: t.path,
-              overrideLanguage: t.overrideLanguage ?? null,
-            };
-          }
-          return t;
-        }),
-      );
-    },
-    [],
-  );
+  // Flips one tab between its rendered view and the raw editor in place, so the
+  // tab id, position and space survive the switch. The path decides which
+  // rendered kind it flips back to; files with neither renderer are left alone.
+  const setFileView = useCallback((id: number, mode: "rendered" | "raw") => {
+    setTabs((curr) =>
+      curr.map((t) => {
+        if (t.id !== id) return t;
+        const path = (t as { path?: string }).path ?? "";
+        const renderedKind: RenderedKind | null = isMarkdownPath(path)
+          ? "markdown"
+          : isHtmlPath(path)
+            ? "html"
+            : null;
+        if (!renderedKind) return t;
+        if (mode === "raw") {
+          if (t.kind !== "markdown" && t.kind !== "html") return t;
+          return {
+            ...t,
+            kind: "editor" as const,
+            dirty: false,
+            preview: false,
+            overrideLanguage:
+              (t as { overrideLanguage?: string | null }).overrideLanguage ??
+              null,
+          };
+        }
+        if (t.kind === "editor") {
+          if (t.dirty) return t;
+          return {
+            id: t.id,
+            kind: renderedKind,
+            spaceId: t.spaceId,
+            cold: t.cold,
+            title: t.title,
+            path: t.path,
+            overrideLanguage: t.overrideLanguage ?? null,
+          };
+        }
+        return t;
+      }),
+    );
+  }, []);
 
   const openGitDiffTab = useCallback((input: GitDiffOpenInput, pin = false) => {
     const curr = tabsRef.current;
@@ -1185,7 +1232,7 @@ export function useTabs(initial?: Partial<TerminalTab>) {
             }),
           };
         }
-        if (x.kind === "markdown") {
+        if (x.kind === "markdown" || x.kind === "html") {
           return {
             ...x,
             ...(patch.title !== undefined && { title: patch.title }),
@@ -1427,7 +1474,8 @@ export function useTabs(initial?: Partial<TerminalTab>) {
     pinTab,
     newPreviewTab,
     newMarkdownTab,
-    setMarkdownView,
+    newHtmlTab,
+    setFileView,
     openAiDiffTab,
     openGitDiffTab,
     openCommitHistoryTab,

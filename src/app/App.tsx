@@ -13,7 +13,7 @@ import { consumeLaunchFiles, getLaunchDir } from "@/lib/launchDir";
 import { quoteShellArg } from "@/lib/shellQuote";
 import { usePresence } from "@/lib/usePresence";
 import { useZoom } from "@/lib/useZoom";
-import { cn, isMarkdownPath } from "@/lib/utils";
+import { cn, isHtmlPath, isMarkdownPath } from "@/lib/utils";
 import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
 import {
   type AgentLaunchRequest,
@@ -193,7 +193,8 @@ export default function App() {
     pinTab,
     newPreviewTab,
     newMarkdownTab,
-    setMarkdownView,
+    newHtmlTab,
+    setFileView,
     setOverrideLanguage,
     openAiDiffTab,
     closeAiDiffTab,
@@ -922,13 +923,15 @@ export default function App() {
 
   const handleOpenFile = useCallback(
     (path: string, pin?: boolean) => {
-      // Markdown opens in its rendered view by default; a per-tab toggle flips
-      // it to the raw editor. Other files default to preview (pin=false);
-      // explicit actions like context-menu "Open" pass pin=true to persist.
+      // Markdown and html open in their rendered view by default; a per-tab
+      // toggle flips them to the raw editor. Other files default to preview
+      // (pin=false); explicit actions like context-menu "Open" pass pin=true
+      // to persist.
       if (isMarkdownPath(path)) newMarkdownTab(path);
+      else if (isHtmlPath(path)) newHtmlTab(path);
       else openFileTab(path, pin ?? false);
     },
-    [openFileTab, newMarkdownTab],
+    [openFileTab, newMarkdownTab, newHtmlTab],
   );
 
   const openLaunchFiles = useCallback(
@@ -1024,7 +1027,9 @@ export default function App() {
     return null;
   })();
   const explorerActiveFilePath =
-    activeTab?.kind === "editor" || activeTab?.kind === "markdown"
+    activeTab?.kind === "editor" ||
+    activeTab?.kind === "markdown" ||
+    activeTab?.kind === "html"
       ? activeTab.path
       : null;
   const isRepositoryContextCurrent = useCallback(
@@ -1829,7 +1834,7 @@ export default function App() {
                         onAiDiffReject={(id) => respondToApproval(id, false)}
                         onOpenCommitFile={openCommitFileDiffTab}
                         onGitHistorySearchHandle={setGitHistoryHandle}
-                        onSetMarkdownView={setMarkdownView}
+                        onSetFileView={setFileView}
                       />
                       {/* 终端空白处的水印:纯装饰,pointer-events-none 保证不挡
                           选中/点击,也不参与滚动。字号跟着面板宽度走(cqw),

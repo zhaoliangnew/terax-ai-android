@@ -7,7 +7,8 @@ import {
 } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
-import { cn } from "@/lib/utils";
+import { ViewToggle } from "@/components/ViewToggle";
+import { cn, isHtmlPath, isMarkdownPath } from "@/lib/utils";
 import type { GitStatusSnapshot } from "@/modules/ai/lib/native";
 import type { EditorPaneHandle } from "@/modules/editor";
 import {
@@ -54,6 +55,18 @@ const EditorPane = lazy(() =>
   })),
 );
 
+// 渲染视图同理:markdown 那套解析器不比编辑器轻,不看就不拉。
+const MarkdownPreviewPane = lazy(() =>
+  import("@/modules/markdown/MarkdownPreviewPane").then((m) => ({
+    default: m.MarkdownPreviewPane,
+  })),
+);
+const HtmlPreviewPane = lazy(() =>
+  import("@/modules/html-preview/HtmlPreviewPane").then((m) => ({
+    default: m.HtmlPreviewPane,
+  })),
+);
+
 /** 一个工程在这个弹框里开着的文件。 */
 export type ProjectFilesState = {
   /** 按打开顺序,同一个文件只出现一次。 */
@@ -72,6 +85,61 @@ const MOD_LABEL =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform)
     ? "⌘"
     : "Ctrl+";
+
+/** 弹框最小尺寸:再小左树和右边的编辑区就都没法看了。 */
+const MIN_DIALOG_W = 720;
+const MIN_DIALOG_H = 420;
+
+/**
+ * 右下角拖着改弹框大小。
+ *
+ * 框是 `top-1/2 left-1/2 -translate-1/2` 居中定位的 —— 右下角要跟住手指,
+ * 宽高得长两倍的位移量(一半长在左上、一半长在右下)。
+ */
+function ResizeGrip({
+  onResize,
+}: {
+  onResize: (w: number, h: number) => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label="拖动改变弹框大小"
+      className="absolute right-1 bottom-1 z-20 size-3.5 cursor-nwse-resize rounded-br border-r-2 border-b-2 border-border/70 transition-colors hover:border-foreground/60"
+      onPointerDown={(e) => {
+        const box = e.currentTarget.closest<HTMLElement>(
+          '[data-slot="dialog-content"]',
+        );
+        if (!box) return;
+        e.preventDefault();
+        const grip = e.currentTarget;
+        const rect = box.getBoundingClientRect();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        grip.setPointerCapture(e.pointerId);
+        const move = (ev: PointerEvent) =>
+          onResize(
+            Math.min(
+              window.innerWidth - 16,
+              Math.max(MIN_DIALOG_W, rect.width + (ev.clientX - startX) * 2),
+            ),
+            Math.min(
+              window.innerHeight - 16,
+              Math.max(MIN_DIALOG_H, rect.height + (ev.clientY - startY) * 2),
+            ),
+          );
+        const stop = () => {
+          grip.removeEventListener("pointermove", move);
+          grip.removeEventListener("pointerup", stop);
+          grip.removeEventListener("pointercancel", stop);
+        };
+        grip.addEventListener("pointermove", move);
+        grip.addEventListener("pointerup", stop);
+        grip.addEventListener("pointercancel", stop);
+      }}
+    />
+  );
+}
 
 /** 文件名(Windows 上路径是反斜杠,两种分隔符都得认)。 */
 function baseName(path: string): string {
@@ -208,6 +276,8 @@ export function ProjectFilesDialog({
 
   const goTo = (path: string, line: number) => {
     pendingGoto.current = { path, line };
+    // 跳行只有编辑器接得住,渲染视图里没有"第几行"这回事。
+    if (hasRenderedView(path)) setView(path, "raw");
     openFile(path);
     flushPendingGoto();
   };
@@ -239,6 +309,42 @@ export function ProjectFilesDialog({
   const findInputRef = useRef<HTMLInputElement>(null);
 
   const activeHandle = () => (active ? handles.current.get(active) : undefined);
+
+  /**
+   * Markdown / html 默认渲染,这里记的是被手动翻回源码的那几个。不进
+   * `ProjectFilesState` —— 视图模式是"这一眼想怎么看",不该跨会话粘住。
+   */
+  const [rawPaths, setRawPaths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  // null = 跟着默认的"铺满屏幕";拖过右下角之后才记具体像素。
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [unsavedPaths, setUnsavedPaths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const hasRenderedView = (path: string) =>
+    isMarkdownPath(path) || isHtmlPath(path);
+  const isPreviewing = (path: string) =>
+    hasRenderedView(path) && !rawPaths.has(path);
+  const setView = (path: string, mode: "rendered" | "raw") =>
+    setRawPaths((curr) => {
+      const next = new Set(curr);
+      if (mode === "raw") next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  // 存盘前预览读的还是磁盘上那份,所以有改动时把"渲染"按钮禁掉。主窗口那边
+  // 改了没存也算 —— dirtyPaths 是它传进来的。
+  const setDirty = (path: string, dirty: boolean) =>
+    setUnsavedPaths((curr) => {
+      if (curr.has(path) === dirty) return curr;
+      const next = new Set(curr);
+      if (dirty) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  const isUnsaved = (path: string) =>
+    unsavedPaths.has(path) || (dirtyPaths?.has(path) ?? false);
 
   const runFind = (q: string, step?: "next" | "prev") => {
     const handle = activeHandle();
@@ -421,7 +527,10 @@ export function ProjectFilesDialog({
         onPointerDownCapture={(e) => {
           pointerRef.current = { x: e.clientX, y: e.clientY };
         }}
-        className="flex h-[82vh] w-[76rem] max-w-[calc(100vw-3rem)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-[calc(100vw-3rem)]"
+        // 默认接近铺满,但四周留一圈 —— 顶到边会盖住应用自己的标题栏,两条
+        // 标题叠在一起分不清哪个是哪个。右下角能拖着改。
+        style={size ? { width: size.w, height: size.h } : undefined}
+        className="flex h-[88vh] w-[92vw] max-w-none flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-none"
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
           <HugeiconsIcon
@@ -732,13 +841,54 @@ export function ProjectFilesDialog({
                             </div>
                           }
                         >
-                          <EditorPane
-                            ref={handleRefFor(path)}
-                            path={path}
-                            onJumpToSymbol={(word, mode) =>
-                              void jumpTo(word, mode)
-                            }
-                          />
+                          <div className="relative h-full">
+                            {/* 编辑器始终挂着,预览只是盖在上面 —— 卸载它会
+                                把没保存的改动和滚动位置一起丢掉 */}
+                            <div
+                              className={cn(
+                                "absolute inset-0",
+                                isPreviewing(path) &&
+                                  "invisible pointer-events-none",
+                              )}
+                            >
+                              {hasRenderedView(path) && (
+                                <ViewToggle
+                                  mode="raw"
+                                  onChange={(mode) => setView(path, mode)}
+                                  renderedDisabled={isUnsaved(path)}
+                                  renderedHint="保存后才能预览"
+                                />
+                              )}
+                              <EditorPane
+                                ref={handleRefFor(path)}
+                                path={path}
+                                onDirtyChange={(dirty) => setDirty(path, dirty)}
+                                onJumpToSymbol={(word, mode) =>
+                                  void jumpTo(word, mode)
+                                }
+                              />
+                            </div>
+                            {/* 弹框外面没有 .zoom-content,这一层是补给
+                                EditorPane 的 .zoom-exempt 抵消用的;预览没有
+                                那层,得自己再抵消回 100% */}
+                            {isPreviewing(path) && (
+                              <div className="zoom-exempt absolute inset-0">
+                                {isMarkdownPath(path) ? (
+                                  <MarkdownPreviewPane
+                                    path={path}
+                                    visible={path === active}
+                                    onSetView={(mode) => setView(path, mode)}
+                                  />
+                                ) : (
+                                  <HtmlPreviewPane
+                                    path={path}
+                                    visible={path === active}
+                                    onSetView={(mode) => setView(path, mode)}
+                                  />
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </Suspense>
                       </div>
                     ))
@@ -1000,6 +1150,7 @@ export function ProjectFilesDialog({
             </div>
           </>
         )}
+        <ResizeGrip onResize={(w, h) => setSize({ w, h })} />
       </DialogContent>
     </Dialog>
   );
