@@ -816,15 +816,16 @@ export default function App() {
       const line = `cd ${quoteShellArg(path)} && ${command}\r`;
       // Install the OSC 777 notification hook first, same as the built-in
       // agent launcher does — without it the agent only ever emits `started`
-      // and the status dot stays stuck on 🟡 working forever.
-      const hooksReady = invoke("agent_enable_hooks", { agent }).catch(
-        (error) => {
-          console.warn(
-            `[terax] could not enable ${agent} notifications:`,
-            error,
-          );
-        },
-      );
+      // and the status dot stays stuck on 🟡 working forever. 没钩子的那几个
+      // (Qoder…)直接跳过:后端认不出这个名字,只会往控制台扔一条 warn。
+      const hooksReady = findAgentLauncher(agent).supportsHooks
+        ? invoke("agent_enable_hooks", { agent }).catch((error) => {
+            console.warn(
+              `[terax] could not enable ${agent} notifications:`,
+              error,
+            );
+          })
+        : Promise.resolve();
       const current =
         activeLeafId !== null ? terminalRefs.current.get(activeLeafId) : null;
       if (current) {

@@ -14,6 +14,16 @@ export const AGENT_LAUNCHERS = [
     supportsHooks: true,
   },
   {
+    id: "qoder",
+    label: "Qoder",
+    // 分发脚本,不是 CLI 本体;CLI 真身在 ~/.qoder-cn/bin/qoderclicn。
+    defaultCommand: "qodercn",
+    // 通知钩子先不装:Qoder CN 的 settings.json 长得跟 Claude 一样,但它到底认
+    // 不认 hooks / terminalSequence 没核过,照着抄上去只会静默失灵。状态灯不受
+    // 影响 —— 那条走的是 OSC 133 里的命令名匹配。
+    supportsHooks: false,
+  },
+  {
     id: "gemini",
     label: "Gemini",
     defaultCommand: "gemini",

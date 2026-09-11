@@ -1,3 +1,5 @@
+import { QoderMark } from "@/modules/agents/lib/agentIcon";
+
 /** Claude (Anthropic) brand mark. */
 function ClaudeMark() {
   return (
@@ -31,6 +33,9 @@ function CodexMark() {
 export const AGENT_QUICK_COMMANDS = {
   claude: "claude --permission-mode bypassPermissions",
   codex: "codex --dangerously-bypass-approvals-and-sandbox",
+  // `qodercn` 是 Qoder CN 的分发脚本(~/.qoder-cn/entry/qodercn):带 `-` 开头的
+  // 参数走 CLI,带路径才去开 IDE —— 所以这条一定落在 CLI 上。
+  qoder: "qodercn --dangerously-skip-permissions",
 } as const;
 
 export type QuickAgentId = keyof typeof AGENT_QUICK_COMMANDS;
@@ -41,22 +46,14 @@ type Props = {
   /** Agent already running in the target terminal — launching would type the
    * command straight into its prompt, so the buttons go dead instead. */
   busyAgent?: string | null;
-  onLaunch: (
-    projectRoot: string,
-    command: string,
-    agent: QuickAgentId,
-  ) => void;
+  onLaunch: (projectRoot: string, command: string, agent: QuickAgentId) => void;
 };
 
 const BUTTON =
   "flex size-6 items-center justify-center rounded border border-border text-muted-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:border-border";
 
 /** 一键在当前工程目录开一个已授权的 Claude / Codex 终端。 */
-export function AgentQuickLaunch({
-  projectRoot,
-  busyAgent,
-  onLaunch,
-}: Props) {
+export function AgentQuickLaunch({ projectRoot, busyAgent, onLaunch }: Props) {
   const busy = !!busyAgent;
   const busyTitle = `当前终端里 ${busyAgent} 正在运行,先退出再启动`;
   return (
@@ -88,6 +85,18 @@ export function AgentQuickLaunch({
         className={`${BUTTON} hover:border-foreground/40 hover:text-foreground`}
       >
         <CodexMark />
+      </button>
+      <button
+        type="button"
+        aria-label="Qoder"
+        disabled={busy}
+        title={busy ? busyTitle : "在当前工程开一个 Qoder 终端(已跳过权限确认)"}
+        onClick={() =>
+          onLaunch(projectRoot, AGENT_QUICK_COMMANDS.qoder, "qoder")
+        }
+        className={`${BUTTON} hover:border-foreground/40 hover:text-foreground`}
+      >
+        <QoderMark size={14} />
       </button>
     </span>
   );

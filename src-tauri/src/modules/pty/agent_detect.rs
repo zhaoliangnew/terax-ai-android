@@ -5,7 +5,12 @@ const ST_FINAL: u8 = b'\\';
 
 const OSC_MAX: usize = 2048;
 
-const DEFAULT_AGENTS: &[&str] = &["claude", "codex", "gemini", "pi", "opencode", "grok"];
+const DEFAULT_AGENTS: &[&str] =
+    &["claude", "codex", "gemini", "pi", "opencode", "grok", "qoder"];
+
+// 命令名跟 agent 名对不上的,在这里折过去。`qodercn` 是 Qoder CN 那个分发脚本,
+// 按前缀规则 strip 掉 "qoder" 剩下 "cn",既不是空也不是 `-`,匹配不上。
+const COMMAND_ALIASES: &[(&str, &str)] = &[("qodercn", "qoder"), ("qoderclicn", "qoder")];
 
 // OSC 777 marker our agent hooks emit. Legacy 3-field `notify;Terax;<event>`
 // (Claude) or 4-field `notify;Terax;<agent>;<event>` (Codex/Gemini/Pi).
@@ -248,6 +253,10 @@ impl AgentDetector {
                 continue;
             }
             let base = token.rsplit(['/', '\\']).next().unwrap_or(token);
+            let base = COMMAND_ALIASES
+                .iter()
+                .find(|(cmd, _)| *cmd == base)
+                .map_or(base, |(_, agent)| *agent);
             if let Some(agent) = self.agents.iter().find(|a| {
                 base.strip_prefix(a.as_str())
                     .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'))
@@ -312,6 +321,19 @@ mod tests {
         );
         let mut d2 = AgentDetector::new();
         assert_eq!(run(&mut d2, &osc("133;C;npx claude")), vec![started("claude")]);
+    }
+
+    #[test]
+    fn arms_on_qoder_cli_command_names() {
+        // 命令叫 qodercn / qoderclicn,agent 名统一报成 qoder。
+        for cmd in ["qodercn --dangerously-skip-permissions", "qoderclicn", "qoder"] {
+            let mut d = AgentDetector::new();
+            assert_eq!(
+                run(&mut d, &osc(&format!("133;C;{cmd}"))),
+                vec![started("qoder")],
+                "{cmd}"
+            );
+        }
     }
 
     #[test]
