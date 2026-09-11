@@ -157,12 +157,11 @@ async fn open_settings_window(app: tauri::AppHandle, tab: Option<String>) -> Res
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// 把 panic 的消息和位置写进日志再让它 abort。
+/// 把 panic 的消息和位置写进日志,再交回默认钩子。
 ///
-/// release profile 是 `panic = "abort"`,所以任意一处 panic 都会直接带走整个
-/// 应用 —— 表现是"闪退",而默认的 panic 信息只走 stderr,双击启动的 app 根本
-/// 没人接,日志里一个字都不留。装上这个钩子之后,下次闪退能在
+/// 默认的 panic 信息只走 stderr,双击启动的 app 根本没人接,日志里一个字都不留:
+/// 主线程 panic 表现成"闪退"却查无实据,tokio 任务里的 panic 更是连声都不吭。
+/// 装上这个钩子之后,两种都能在
 /// `~/Library/Logs/com.leniu.androiddev/Android Dev.log` 里看到是哪一行。
 fn install_panic_logger() {
     let previous = std::panic::take_hook();
@@ -186,6 +185,7 @@ fn install_panic_logger() {
     }));
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_panic_logger();
 

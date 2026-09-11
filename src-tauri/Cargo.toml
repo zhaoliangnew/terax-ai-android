@@ -112,7 +112,12 @@ incremental = true
 codegen-units = 1
 lto = "fat"
 opt-level = "s"
-panic = "abort"
+# 这里不能设 panic = "abort"。wry 往 WKURLSchemeTask 回数据时,任务可能刚好被停掉
+# (刷新页面、关弹框而请求还在飞),WebKit 会抛 NSInternalInconsistencyException;
+# 这个竞态在 wry 内部堵不住,它的兜底是把 didReceiveResponse/didReceiveData/didFinish
+# 逐个包进 objc2::exception::catch,而 catch 依赖异常能 unwind 到 C helper 的 @catch。
+# 一旦 panic = "abort",extern "C-unwind" 边界退化成 nounwind,异常还没到 @catch 就被
+# abort guard 拦下 —— 兜底失效,整个应用没了。8/27、8/28、8/31、9/1 四次闪退都是它。
 # 只剥 DWARF,留下符号表:崩溃报告里的栈才有函数名可读。全剥(strip = true)之后
 # 那份 .ips 就只剩一串地址,而 release 的代码布局跟随便重编一个二进制对不上,
 # 事后没法补符号 —— 为这个多出的两三 MB 值。
