@@ -1188,7 +1188,7 @@ export const FileExplorer = memo(
             结果两边都滚不动。所以给一个 45% 的上限,超了才自己滚。 */}
         {onSetAsRoot && pinnedRows.length > 0 && (
           <div className="max-h-[45%] shrink-0 overflow-y-auto overflow-x-hidden border-b border-border pb-1">
-            <div className="sticky top-0 z-20 bg-background px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+            <div className="sticky top-0 z-20 bg-[var(--pane-bg,var(--background))] px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
               置顶
             </div>
             {pinnedRows.map((row) => {
@@ -1210,7 +1210,7 @@ export const FileExplorer = memo(
                   <ContextMenuTrigger asChild>
                     {/* top-6 = 上面那条"置顶"标题的高度,不然目录行会滑到
                         标题底下被盖住 */}
-                    <div className="sticky top-6 z-10 bg-background">
+                    <div className="sticky top-6 z-10 bg-[var(--pane-bg,var(--background))]">
                       {renderRow(row, pinnedRowActions, true)}
                     </div>
                   </ContextMenuTrigger>

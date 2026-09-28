@@ -1,6 +1,6 @@
 import type { Tab } from "@/modules/tabs";
 import type { SearchAddon } from "@xterm/addon-search";
-import { useEffect, useMemo, useRef } from "react";
+import { type ReactNode, useEffect, useMemo, useRef } from "react";
 import { selectLiveTerminals } from "./lib/liveTerminals";
 import { leafIds } from "./lib/panes";
 import { PaneTreeView } from "./PaneTreeView";
@@ -15,6 +15,12 @@ type Props = {
   onCwd: (leafId: number, cwd: string) => void;
   onExit: (leafId: number, code: number) => void;
   onFocusLeaf: (tabId: number, leafId: number) => void;
+  /** 每个窗格底部的附加内容(AI 命令行输入框)。 */
+  renderLeafFooter?: (leafId: number) => ReactNode;
+  /** 盖在每个窗格终端上面的内容(agent 聊天视图)。 */
+  renderLeafOverlay?: (leafId: number) => ReactNode;
+  /** 盖着聊天视图的窗格:终端不抢键盘焦点。 */
+  focusSuppressed?: ReadonlySet<number>;
 };
 
 type Bundle = {
@@ -32,6 +38,9 @@ export function TerminalStack({
   onCwd,
   onExit,
   onFocusLeaf,
+  renderLeafFooter,
+  renderLeafOverlay,
+  focusSuppressed,
 }: Props) {
   const terminals = useMemo(() => selectLiveTerminals(tabs), [tabs]);
 
@@ -98,6 +107,9 @@ export function TerminalStack({
               blocks={t.blocks ?? false}
               onFocusLeaf={(leafId) => onFocusLeaf(t.id, leafId)}
               getBundle={getBundle}
+              renderLeafFooter={renderLeafFooter}
+              renderLeafOverlay={renderLeafOverlay}
+              focusSuppressed={focusSuppressed}
             />
           </div>
         );

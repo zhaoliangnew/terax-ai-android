@@ -20,6 +20,7 @@ import {
   findAgentLauncher,
   nextAttentionTarget,
 } from "@/modules/agents";
+import { useAgentViewStore } from "@/modules/agents/store/agentViewStore";
 import {
   AgentRunBridge,
   AiMiniWindow,
@@ -45,10 +46,10 @@ import {
   ProjectLinksBar,
   type QuickAgentId,
   RepoUrlChip,
-  ToolRail,
   setProjectLink,
   setTaskLink,
   supportsSessionActions,
+  ToolRail,
   UrlPromptDialog,
   useAndroidRunStore,
   useProjectGitInfo,
@@ -154,6 +155,10 @@ import {
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { toast as sonnerToast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
+import {
+  LeafAgentChat,
+  LeafAgentComposer,
+} from "./components/LeafAgentComposer";
 import {
   effectiveRightTab,
   RightPanel,
@@ -722,6 +727,12 @@ export default function App() {
     const ptyId = ptyIdForLeaf(activeLeafId);
     return ptyId === null ? null : (agentByPty[ptyId] ?? null);
   }, [activeLeafId, agentByPty]);
+  // 当前窗格切到了聊天视图:水印和底部整条面包屑栏都收起来,
+  // 底下只留输入框(模型、压缩、新会话这些输入框里都有)
+  const activeLeafMode = useAgentViewStore((s) =>
+    activeLeafId === null ? "terminal" : (s.modes[activeLeafId] ?? "terminal"),
+  );
+  const activeLeafInChat = isTerminalTab && activeLeafMode === "chat";
 
   // 往当前终端里发一条斜杠命令。给底栏那几个按钮用 —— 它们只在当前终端确实
   // 跑着 Claude/Codex 时才显示,所以这里不用再判断打给谁。
@@ -970,6 +981,38 @@ export default function App() {
     androidProjectRoot,
     lastTerminalCwd,
     home ?? null,
+  );
+
+  // 终端窗格可以切成聊天视图(Claude Agent SDK 会话,跑在窗格所在目录),
+  // 聊天视图盖在终端上面,输入框挂在窗格底部
+  const getLeafCwd = useCallback((leafId: number) => {
+    for (const t of tabsRef.current) {
+      if (t.kind !== "terminal") continue;
+      if (!leafIds(t.paneTree).includes(leafId)) continue;
+      return findLeafCwd(t.paneTree, leafId) ?? t.cwd ?? null;
+    }
+    return null;
+  }, []);
+  const renderLeafFooter = useCallback(
+    (leafId: number) => (
+      <LeafAgentComposer leafId={leafId} getCwd={getLeafCwd} />
+    ),
+    [getLeafCwd],
+  );
+  // 切到聊天视图的窗格:终端别抢焦点,不然输入框和菜单一打开就被抢走
+  const leafModes = useAgentViewStore((s) => s.modes);
+  const chatLeaves = useMemo(
+    () =>
+      new Set(
+        Object.entries(leafModes)
+          .filter(([, m]) => m === "chat")
+          .map(([id]) => Number(id)),
+      ),
+    [leafModes],
+  );
+  const renderLeafOverlay = useCallback(
+    (leafId: number) => <LeafAgentChat leafId={leafId} getCwd={getLeafCwd} />,
+    [getLeafCwd],
   );
 
   const activeFilePath = (() => {
@@ -1602,7 +1645,7 @@ export default function App() {
                 }}
               >
                 <div className="h-full min-h-0">
-                  <div className="terax-pane flex h-full min-h-0 flex-col">
+                  <div className="terax-pane terax-pane-sidebar flex h-full min-h-0 flex-col">
                     <div className="min-h-0 flex-1 terax-panel-in">
                       {/* explorer 树常驻挂载(不随 sidebarView 切换重新 key),
                           否则每次切到 git 面板再切回来,虚拟列表滚动位置都会丢。 */}
@@ -1700,7 +1743,7 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-px cursor-col-resize bg-border transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/30" />
+              <ResizableHandle className="w-px cursor-col-resize bg-foreground/[0.16] transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/35" />
               <ResizablePanel id="workspace" defaultSize="50%" minSize="25%">
                 <div className="h-full min-h-0">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
@@ -1776,6 +1819,9 @@ export default function App() {
                         onCwd={handleTerminalCwd}
                         onExit={handleLeafExit}
                         onFocusLeaf={handleFocusLeaf}
+                        renderLeafFooter={renderLeafFooter}
+                        renderLeafOverlay={renderLeafOverlay}
+                        focusSuppressed={chatLeaves}
                         registerEditorHandle={registerEditorHandle}
                         onEditorDirtyChange={handleEditorDirty}
                         onEditorCloseTab={disposeTab}
@@ -1790,9 +1836,11 @@ export default function App() {
                       {/* 终端空白处的水印:纯装饰,pointer-events-none 保证不挡
                           选中/点击,也不参与滚动。字号跟着面板宽度走(cqw),
                           写死的话面板一窄工程名就顶出去被裁。 */}
-                      {isTerminalTab && androidProjectRoot && (
-                        <ProjectWatermark projectRoot={androidProjectRoot} />
-                      )}
+                      {isTerminalTab &&
+                        androidProjectRoot &&
+                        !activeLeafInChat && (
+                          <ProjectWatermark projectRoot={androidProjectRoot} />
+                        )}
                     </div>
 
                     <WorkspaceInputBar
@@ -1808,7 +1856,7 @@ export default function App() {
                     />
                     {/* 跟顶栏同一套:面包屑不给 min-w-0、内容 nowrap,塞不下时
                         被挤到第二行的是按钮那一组,工程名不会先被截。 */}
-                    {androidProjectRoot && (
+                    {androidProjectRoot && !activeLeafInChat && (
                       <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-t border-border px-3 py-1 text-[13px]">
                         <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
                           {/* 路径这几段包成一整块:断行只发生在"路径 | 分支"
@@ -1919,7 +1967,7 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-px cursor-col-resize bg-border transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/30" />
+              <ResizableHandle className="w-px cursor-col-resize bg-foreground/[0.16] transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/35" />
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}

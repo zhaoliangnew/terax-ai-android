@@ -30,7 +30,6 @@ import {
 import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
   Cancel01Icon,
-  Folder01Icon,
   Search01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -458,8 +457,6 @@ export function ProjectFilesPane({
     pathDropTarget,
   };
 
-  const name = rootPath?.split("/").pop() ?? "";
-
   return (
     <div
       ref={rootRef}
@@ -468,38 +465,6 @@ export function ProjectFilesPane({
       }}
       className="relative flex h-full min-h-0 flex-col overflow-hidden"
     >
-      <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
-        <HugeiconsIcon
-          icon={Folder01Icon}
-          size={14}
-          strokeWidth={1.75}
-          className="shrink-0 text-muted-foreground/70"
-        />
-        <span className="shrink-0 text-[12.5px] font-semibold">{name}</span>
-        {active && (
-          <span
-            className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground"
-            title={active}
-          >
-            {relTo(rootPath, active)}
-          </span>
-        )}
-        {/* 跳转用哪套:设置在这儿改就行,不用专门开设置窗口。
-              自动 = 这个文件有语言服务器在跑就用它,没有就退回内置搜索。
-              语言服务器的安装/检测状态在 设置 → Language servers 里。 */}
-        <select
-          value={jumpStrategy}
-          onChange={(e) =>
-            void setSymbolJumpStrategy(e.target.value as SymbolJumpStrategy)
-          }
-          title="⌘点击/F12 跳转用哪套:自动 / 只用语言服务器 / 只用内置搜索"
-          className="ml-auto h-6 shrink-0 cursor-pointer rounded border border-input bg-transparent px-1 text-[11px] outline-none"
-        >
-          <option value="auto">跳转:自动</option>
-          <option value="lsp">跳转:语言服务器</option>
-          <option value="search">跳转:内置搜索</option>
-        </select>
-      </div>
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 w-[clamp(11rem,32%,20rem)] shrink-0 flex-col border-r border-border/60">
           <FileExplorer
@@ -654,10 +619,13 @@ export function ProjectFilesPane({
               </button>
             </div>
           )}
-          {/* 语言服务器状态条:只在"跳转"打算用 LSP 的时候才有意义 */}
-          {jumpStrategy !== "search" && active && (
+          {/* 跳转状态条:原来顶上单独一行的工程名、文件路径跟文件树头、tab
+                重复了,只剩"跳转用哪套"这个下拉,挪到这里跟语言服务器状态放一起 */}
+          {active && (
             <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-2.5 py-1 text-[10.5px] text-muted-foreground">
-              {!preset ? (
+              {jumpStrategy === "search" ? (
+                <span>跳转走内置搜索</span>
+              ) : !preset ? (
                 <span>.{activeExt} 没有预置语言服务器 —— 跳转走内置搜索</span>
               ) : (
                 <>
@@ -706,7 +674,7 @@ export function ProjectFilesPane({
                       在终端里安装
                     </button>
                   )}
-                  <span className="ml-auto shrink-0 text-muted-foreground/70">
+                  <span className="shrink-0 text-muted-foreground/70">
                     {MOD_LABEL}点击=调用 · {MOD_LABEL}⇧点击=定义
                   </span>
                   {presetCommand && (
@@ -720,6 +688,20 @@ export function ProjectFilesPane({
                   )}
                 </>
               )}
+              <select
+                value={jumpStrategy}
+                onChange={(e) =>
+                  void setSymbolJumpStrategy(
+                    e.target.value as SymbolJumpStrategy,
+                  )
+                }
+                title="⌘点击/F12 跳转用哪套:自动 / 只用语言服务器 / 只用内置搜索"
+                className="ml-auto h-5 shrink-0 cursor-pointer rounded bg-transparent px-1 text-[10.5px] text-muted-foreground outline-none hover:bg-foreground/10 hover:text-foreground"
+              >
+                <option value="auto">跳转:自动</option>
+                <option value="lsp">跳转:语言服务器</option>
+                <option value="search">跳转:内置搜索</option>
+              </select>
             </div>
           )}
           {/* 每个开着的文件各留一个 EditorPane 挂着,切 tab 只是显隐 ——

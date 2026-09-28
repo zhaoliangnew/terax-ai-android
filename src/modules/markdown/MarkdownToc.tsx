@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { SidebarLeft01Icon } from "@hugeicons/core-free-icons";
+import { SidebarRight01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -78,7 +78,7 @@ export function MarkdownToc({
   }, [activeIndex]);
 
   return (
-    <nav className="flex w-56 shrink-0 flex-col border-border/60 border-r bg-background/60">
+    <nav className="flex w-56 shrink-0 flex-col border-border/60 border-l bg-background/60">
       <div className="flex h-7 shrink-0 items-center justify-between border-border/60 border-b pr-1 pl-3">
         <span className="text-[10.5px] text-muted-foreground uppercase tracking-wide">
           目录
@@ -91,7 +91,7 @@ export function MarkdownToc({
           className="inline-flex size-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         >
           <HugeiconsIcon
-            icon={SidebarLeft01Icon}
+            icon={SidebarRight01Icon}
             size={12}
             strokeWidth={1.75}
           />

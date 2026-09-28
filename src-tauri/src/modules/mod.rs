@@ -1,4 +1,6 @@
 pub mod agent;
+pub mod claude_chat;
+pub mod codex_chat;
 pub mod control;
 pub mod fs;
 pub mod git;

@@ -1,7 +1,8 @@
 pub mod modules;
 
 use modules::{
-    agent, control, fs, git, history, lsp, net, pty, scrcpy, secrets, shell, vibrancy, workspace,
+    agent, claude_chat, codex_chat, control, fs, git, history, lsp, net, pty, scrcpy, secrets,
+    shell, vibrancy, workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -263,6 +264,8 @@ pub fn run() {
         .manage(secrets::SecretsState::default())
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
+        .manage(claude_chat::ClaudeChatState::default())
+        .manage(codex_chat::CodexChatState::default())
         .manage(lsp::LspState::default())
         .manage(fs::grep::ContentSearchState::default())
         .manage({
@@ -365,6 +368,13 @@ pub fn run() {
             open_settings_window,
             agent::agent_enable_hooks,
             agent::agent_hooks_status,
+            claude_chat::claude_chat_start,
+            claude_chat::claude_chat_send,
+            claude_chat::claude_chat_stop,
+            claude_chat::chat_pick_files,
+            codex_chat::codex_chat_start,
+            codex_chat::codex_chat_send,
+            codex_chat::codex_chat_stop,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,
@@ -387,6 +397,12 @@ pub fn run() {
                 // on process exit; kill explicitly.
                 tauri::RunEvent::Exit => {
                     if let Some(state) = app.try_state::<lsp::LspState>() {
+                        state.kill_all();
+                    }
+                    if let Some(state) = app.try_state::<claude_chat::ClaudeChatState>() {
+                        state.kill_all();
+                    }
+                    if let Some(state) = app.try_state::<codex_chat::CodexChatState>() {
                         state.kill_all();
                     }
                     if let Some(state) = app.try_state::<control::ControlState>() {

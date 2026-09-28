@@ -1,4 +1,3 @@
-import type { ComponentProps } from "react";
 import { cn } from "@/lib/utils";
 import { AiDiffStack, EditorStack, GitDiffStack } from "@/modules/editor";
 import { GitHistoryStack } from "@/modules/git-history";
@@ -7,6 +6,7 @@ import { MarkdownStack } from "@/modules/markdown";
 import { PreviewStack } from "@/modules/preview";
 import type { Tab } from "@/modules/tabs";
 import { TerminalStack } from "@/modules/terminal";
+import type { ComponentProps } from "react";
 
 type TerminalStackProps = ComponentProps<typeof TerminalStack>;
 type EditorStackProps = ComponentProps<typeof EditorStack>;
@@ -23,6 +23,9 @@ type Props = {
   onCwd: TerminalStackProps["onCwd"];
   onExit: TerminalStackProps["onExit"];
   onFocusLeaf: TerminalStackProps["onFocusLeaf"];
+  renderLeafFooter?: TerminalStackProps["renderLeafFooter"];
+  renderLeafOverlay?: TerminalStackProps["renderLeafOverlay"];
+  focusSuppressed?: TerminalStackProps["focusSuppressed"];
   registerEditorHandle: EditorStackProps["registerHandle"];
   onEditorDirtyChange: EditorStackProps["onDirtyChange"];
   onEditorCloseTab: EditorStackProps["onCloseTab"];
@@ -54,6 +57,9 @@ export function WorkspaceSurface({
   onCwd,
   onExit,
   onFocusLeaf,
+  renderLeafFooter,
+  renderLeafOverlay,
+  focusSuppressed,
   registerEditorHandle,
   onEditorDirtyChange,
   onEditorCloseTab,
@@ -93,6 +99,9 @@ export function WorkspaceSurface({
           onCwd={onCwd}
           onExit={onExit}
           onFocusLeaf={onFocusLeaf}
+          renderLeafFooter={renderLeafFooter}
+          renderLeafOverlay={renderLeafOverlay}
+          focusSuppressed={focusSuppressed}
         />
       </div>
       <div

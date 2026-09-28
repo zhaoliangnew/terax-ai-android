@@ -1,0 +1,92 @@
+/** 聊天视图里的一条。 */
+export type ChatItem =
+  | {
+      kind: "user";
+      id: string;
+      text: string;
+      ts: number;
+      /** 随消息附上的文件(绝对路径)。 */
+      attachments?: string[];
+    }
+  | {
+      kind: "assistant";
+      id: string;
+      text: string;
+      ts: number;
+      /** 还在逐字往外流。 */
+      streaming?: boolean;
+    }
+  | {
+      kind: "tool";
+      id: string;
+      name: string;
+      summary: string;
+      input: Record<string, unknown>;
+      result: { text: string; isError: boolean } | null;
+      ts: number;
+    }
+  | { kind: "note"; id: string; text: string; ts: number };
+
+function basename(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p;
+}
+
+/** 工具卡片上那一行说明:命令、文件名、搜索词……认不出就空着。 */
+export function toolSummary(
+  name: string,
+  input: Record<string, unknown>,
+): string {
+  const s = (k: string) => (typeof input[k] === "string" ? input[k] : "");
+  switch (name) {
+    case "Bash":
+      return s("description") || s("command");
+    case "Read":
+    case "Edit":
+    case "MultiEdit":
+    case "Write":
+    case "NotebookEdit":
+      return basename(s("file_path") || s("notebook_path"));
+    case "Grep":
+    case "Glob":
+      return s("pattern");
+    case "WebFetch":
+      return s("url");
+    case "WebSearch":
+      return s("query");
+    default:
+      return s("description");
+  }
+}
+
+/** 左侧导航条上的一格:一问,加上它得到的第一段回答(去掉 Markdown 符号)。 */
+export type ChatTurn = { id: string; question: string; answer: string };
+
+function plain(md: string): string {
+  return md
+    .replace(/```[\s\S]*?```/g, " ")
+    // 只去强调符号;单个下划线常在标识符里(app_x),不能动
+    .replace(/__/g, "")
+    .replace(/[`*#>|]/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function chatTurns(items: readonly ChatItem[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  let current: ChatTurn | null = null;
+  for (const it of items) {
+    if (it.kind === "user") {
+      const names = it.attachments?.map((f) => f.split("/").pop()).join(", ");
+      current = {
+        id: it.id,
+        question: it.text.trim() || (names ? `附件:${names}` : ""),
+        answer: "",
+      };
+      turns.push(current);
+    } else if (it.kind === "assistant" && current && !current.answer) {
+      current.answer = plain(it.text);
+    }
+  }
+  return turns;
+}

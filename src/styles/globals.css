@@ -93,7 +93,7 @@
     /* 深色调参照 Codex:主区 #181818,侧栏/底框 #1d1d1e,浮层 #2d2d2d */
     --background: #181818;
     --foreground: #f7f7f7;
-    --card: #1d1d1e;
+    --card: #1e1e1e;
     --card-foreground: #f7f7f7;
     --popover: #2d2d2d;
     --popover-foreground: #f7f7f7;
@@ -198,15 +198,20 @@
  * surface stay the same color. Both are derived from tokens every theme
  * already declares, so built-in and user themes get the separation for free. */
 :root {
-  --frame: color-mix(in oklab, var(--card) 97%, var(--foreground) 3%);
+  /* 5%:照 Codex,标题栏和工具竖条要比侧栏再亮一档(深色下约 #282a2a) */
+  --frame: color-mix(in oklab, var(--card) 95%, var(--foreground) 5%);
 }
 
 /* Flat panes (Codex-style): no card border, radius or gutter. Panes sit edge
  * to edge and the only divider between them is the 1px resize handle, so a
  * boundary reads as one line instead of border + gutter + border. */
 .terax-pane {
-  background: var(--background);
+  background: var(--pane-bg, var(--background));
   overflow: hidden;
+}
+/* 左侧工程树照 Codex 的侧栏,比主区浅一档(深色下 #1e1e1e 对 #181818) */
+.terax-pane-sidebar {
+  --pane-bg: var(--card);
 }
 
 /* Window vibrancy (macOS NSVisualEffectView / Windows Mica). Only the frame

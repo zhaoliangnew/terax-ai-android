@@ -25,7 +25,12 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
       <TooltipTrigger asChild>
         <span className="flex">{children}</span>
       </TooltipTrigger>
-      <TooltipContent side="right" className="text-[12px]">
+      {/* 照 Codex:深色小圆角标签,贴着图标右边,不要默认那种大号浅色气泡 */}
+      <TooltipContent
+        side="right"
+        sideOffset={4}
+        className="rounded-md border border-border bg-popover px-2 py-1 text-[12px] text-popover-foreground shadow-md"
+      >
         {label}
       </TooltipContent>
     </Tooltip>
@@ -36,7 +41,7 @@ export function ToolRail() {
   return (
     <nav
       aria-label="工具"
-      className="flex w-12 shrink-0 flex-col items-center gap-1 py-1.5"
+      className="flex w-12 shrink-0 flex-col items-center gap-2 py-2"
     >
       <RailTip label="嵌入式组知识库">
         <KnowledgeBaseMenu />

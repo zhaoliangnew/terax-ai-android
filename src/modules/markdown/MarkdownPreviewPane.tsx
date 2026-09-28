@@ -5,7 +5,7 @@ import {
 import { ViewToggle } from "@/components/ViewToggle";
 import { cn } from "@/lib/utils";
 import { currentWorkspaceEnv } from "@/modules/workspace";
-import { SidebarRight01Icon } from "@hugeicons/core-free-icons";
+import { SidebarLeft01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -105,8 +105,47 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
         !visible && "pointer-events-none",
       )}
     >
-      <ViewToggle mode="rendered" onChange={onSetView} />
       <div className="flex min-h-0 flex-1">
+        {/* 切换按钮跟着正文走:目录在右边,钉在整块右上角会压住目录标题 */}
+        <div className="relative min-w-0 flex-1">
+          <ViewToggle mode="rendered" onChange={onSetView} />
+          <div
+            ref={scrollerRef}
+            onScroll={onScroll}
+            className="absolute inset-0 overflow-auto"
+          >
+            <div className="px-8 py-6">
+              {status.kind === "loading" && (
+                <p className="text-[12px] text-muted-foreground">Loading…</p>
+              )}
+              {status.kind === "error" && (
+                <p className="text-[12px] text-destructive">
+                  Failed to read file: {status.message}
+                </p>
+              )}
+              {status.kind === "binary" && (
+                <p className="text-[12px] text-muted-foreground">
+                  Binary file — cannot render as markdown.
+                </p>
+              )}
+              {status.kind === "toolarge" && (
+                <p className="text-[12px] text-muted-foreground">
+                  File is {status.size} bytes; limit {status.limit}.
+                </p>
+              )}
+              {status.kind === "ready" && (
+                <Streamdown
+                  className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+                  components={components}
+                  mode="static"
+                  parseIncompleteMarkdown={false}
+                >
+                  {status.content}
+                </Streamdown>
+              )}
+            </div>
+          </div>
+        </div>
         {entries.length > 1 &&
           (tocOpen ? (
             <MarkdownToc
@@ -121,51 +160,15 @@ export function MarkdownPreviewPane({ path, visible, onSetView }: Props) {
               onClick={() => setTocOpen(true)}
               title="展开目录"
               aria-label="展开目录"
-              className="flex w-7 shrink-0 items-start justify-center border-border/60 border-r pt-2 text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground"
+              className="flex w-7 shrink-0 items-start justify-center border-border/60 border-l pt-2 text-muted-foreground transition-colors hover:bg-accent/30 hover:text-foreground"
             >
               <HugeiconsIcon
-                icon={SidebarRight01Icon}
+                icon={SidebarLeft01Icon}
                 size={12}
                 strokeWidth={1.75}
               />
             </button>
           ))}
-        <div
-          ref={scrollerRef}
-          onScroll={onScroll}
-          className="min-h-0 flex-1 overflow-auto"
-        >
-          <div className="px-8 py-6">
-            {status.kind === "loading" && (
-              <p className="text-[12px] text-muted-foreground">Loading…</p>
-            )}
-            {status.kind === "error" && (
-              <p className="text-[12px] text-destructive">
-                Failed to read file: {status.message}
-              </p>
-            )}
-            {status.kind === "binary" && (
-              <p className="text-[12px] text-muted-foreground">
-                Binary file — cannot render as markdown.
-              </p>
-            )}
-            {status.kind === "toolarge" && (
-              <p className="text-[12px] text-muted-foreground">
-                File is {status.size} bytes; limit {status.limit}.
-              </p>
-            )}
-            {status.kind === "ready" && (
-              <Streamdown
-                className="select-text [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
-                components={components}
-                mode="static"
-                parseIncompleteMarkdown={false}
-              >
-                {status.content}
-              </Streamdown>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );
