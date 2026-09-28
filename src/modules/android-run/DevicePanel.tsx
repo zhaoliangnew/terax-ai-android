@@ -3,6 +3,7 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import { cn } from "@/lib/utils";
 import { native } from "@/modules/ai/lib/native";
 import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -11,6 +12,7 @@ import { DeviceManagerPanel } from "./DeviceManagerPanel";
 import { DeviceMirror } from "./DeviceMirror";
 import LogcatPanel from "./LogcatDock";
 import { highlightSerial } from "./lib/highlightSerial";
+import { useMirrorAnnotate } from "./lib/mirrorAnnotate";
 import {
   useActiveProductConfig,
   useAndroidRunStore,
@@ -25,6 +27,8 @@ export default function DevicePanel() {
     (s) => s.setDeviceManagerOpen,
   );
   const { serial: selectedSerial, mirroring } = useActiveProductConfig();
+  const annotatingSerial = useMirrorAnnotate((s) => s.serial);
+  const toggleAnnotate = useMirrorAnnotate((s) => s.toggle);
   const device = devices.find((d) => d.serial === selectedSerial) ?? null;
   const online = device?.state === "device";
   const anyOnline = devices.some((d) => d.state === "device");
@@ -42,6 +46,21 @@ export default function DevicePanel() {
                 {device.vendor ? `${device.vendor} ` : ""}
                 {device.model} · {highlightSerial(device.serial)}
               </span>
+            )}
+            {online && mirroring && selectedSerial && (
+              <button
+                type="button"
+                onClick={() => toggleAnnotate(selectedSerial)}
+                title="在投屏画面上标注问题,发给聊天里的 AI"
+                className={cn(
+                  "rounded px-2 py-0.5 text-[12px] transition-colors",
+                  annotatingSerial === selectedSerial
+                    ? "bg-[#2c67c5] text-white"
+                    : "border border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                批注
+              </button>
             )}
             <div className="ml-auto flex items-center gap-1">
               {online &&

@@ -384,7 +384,12 @@ export function AgentChatView({
           }
           updateActiveTurn(el);
         }}
-        onMouseUp={() => setTimeout(readSelection, 0)}
+        // 点工具条上的按钮也会冒上来一个 mouseup:那时选区还在,不跳过的话
+        // 刚收起的工具条又被弹出来
+        onMouseUp={(e) => {
+          if ((e.target as HTMLElement).closest("[data-selection-bar]")) return;
+          setTimeout(readSelection, 0);
+        }}
         onMouseDown={(e) => {
           if (!(e.target as HTMLElement).closest("[data-selection-bar]")) {
             setSelection(null);
@@ -414,6 +419,7 @@ export function AgentChatView({
               onClick={() => {
                 void copyToClipboard(selection.text);
                 setSelection(null);
+                window.getSelection()?.removeAllRanges();
               }}
               className="cursor-pointer border-l border-border px-2.5 py-1.5 hover:bg-foreground/10"
             >

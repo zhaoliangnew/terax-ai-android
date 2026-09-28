@@ -291,6 +291,7 @@ export function LeafAgentChat({ leafId, getCwd }: Props) {
 export function LeafAgentComposer({ leafId, getCwd }: Props) {
   const mode = useAgentViewStore((s) => s.modes[leafId] ?? "terminal");
   const quote = useAgentViewStore((s) => s.quotes[leafId] ?? null);
+  const injection = useAgentViewStore((s) => s.injections[leafId] ?? null);
   // 进聊天时一定选定过了(openChat 会记下来)
   const agent = useAgentViewStore((s) => s.agents[leafId] ?? "claude");
   const api = CHAT_APIS[agent];
@@ -304,6 +305,7 @@ export function LeafAgentComposer({ leafId, getCwd }: Props) {
         agent={agent}
         working={session?.working ?? false}
         quote={quote}
+        injection={injection}
         onSend={(text, attachments) => {
           const dir = cwd();
           // 会话结束了再发:接着同一个会话聊,不是新开

@@ -4,6 +4,7 @@ import {
   ArrowDown01Icon,
   ArrowUp02Icon,
   Hold02Icon,
+  Message01Icon,
   MoreHorizontalIcon,
   PencilEdit02Icon,
   PlusSignIcon,
@@ -50,6 +51,13 @@ type Props = {
   onNewChat: () => void;
   /** 从聊天里"添加到对话"过来的引用;n 变了就追加一次。 */
   quote?: { text: string; n: number } | null;
+  /** 从投屏批注等处注入的一条(文字 + 附件);n 变了就并进来一次。 */
+  injection?: {
+    text: string;
+    attachments: string[];
+    items: { thumb: string; note: string }[];
+    n: number;
+  } | null;
   /** Codex 才有:推理强度、快速档。 */
   effort?: string | null;
   serviceTier?: string | null;
@@ -242,6 +250,7 @@ export function AgentComposer({
   onCompact,
   onNewChat,
   quote,
+  injection = null,
   effort = null,
   serviceTier = null,
   onSetEffort,
@@ -320,14 +329,38 @@ export function AgentComposer({
     });
   }, [quote]);
 
+  // 投屏批注:挂成"N 条注释"芯片(不塞进输入框),截图进附件区,发送时并进消息
+  const [annotations, setAnnotations] = useState<{
+    text: string;
+    items: { thumb: string; note: string }[];
+  } | null>(null);
+  const lastInjection = useRef(injection?.n ?? 0);
+  useEffect(() => {
+    if (!injection || injection.n === lastInjection.current) return;
+    lastInjection.current = injection.n;
+    setAnnotations({ text: injection.text, items: injection.items });
+    if (injection.attachments.length) {
+      setAttachments((cur) => [
+        ...cur,
+        ...injection.attachments.filter((p) => !cur.includes(p)),
+      ]);
+    }
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [injection]);
+
   const send = () => {
-    const body = text.trim();
+    const typed = text.trim();
+    const body = annotations
+      ? [annotations.text, typed].filter(Boolean).join("\n\n")
+      : typed;
     if (!body && attachments.length === 0) return;
     onSend(body, attachments);
     setText("");
     setAttachments([]);
+    setAnnotations(null);
   };
-  const canSend = text.trim() !== "" || attachments.length > 0;
+  const canSend =
+    text.trim() !== "" || attachments.length > 0 || annotations !== null;
 
   const stop = onStop;
 
@@ -335,8 +368,53 @@ export function AgentComposer({
 
   return (
     // 整条不透明:输入框本身是半透明的灰,底下不能透出任何东西
-    <div className="shrink-0 bg-background px-6 pt-1 pb-4">
+    <div className="relative z-20 shrink-0 bg-background px-6 pt-1 pb-4">
       <div className="mx-auto flex max-w-3xl flex-col gap-2 rounded-[24px] bg-foreground/[0.12] px-4 pt-3.5 pb-2.5">
+        {annotations && (
+          <div className="flex">
+            {/* 悬停展开成卡片列表(照 Codex):小图 + 说明 */}
+            <span className="group/annot relative flex items-center gap-1.5 rounded-lg bg-foreground/[0.1] py-1 pr-1 pl-2.5 text-[12px]">
+              <HugeiconsIcon
+                icon={Message01Icon}
+                size={13}
+                strokeWidth={1.75}
+              />
+              {annotations.items.length} 条注释
+              <button
+                type="button"
+                aria-label="移除注释"
+                onClick={() => setAnnotations(null)}
+                className="cursor-pointer rounded px-1 text-muted-foreground hover:bg-foreground/15 hover:text-foreground"
+              >
+                ×
+              </button>
+              <div className="pointer-events-none absolute bottom-full left-0 mb-1.5 hidden w-72 flex-col gap-1 rounded-xl border border-border bg-popover p-1.5 shadow-xl group-hover/annot:flex">
+                {annotations.items.map((it, i) => (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: 顺序即身份,说明会重复
+                    key={i}
+                    className="flex items-center gap-2 rounded-lg px-1 py-1"
+                  >
+                    {it.thumb ? (
+                      <img
+                        src={it.thumb}
+                        alt=""
+                        className="size-9 shrink-0 rounded object-cover"
+                      />
+                    ) : (
+                      <span className="flex size-9 shrink-0 items-center justify-center rounded bg-foreground/10 text-[11px]">
+                        {i + 1}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-[12px]">
+                      {it.note.trim() || "(未写说明)"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </span>
+          </div>
+        )}
         {attachments.length > 0 && (
           <div className="flex flex-wrap items-end gap-1.5">
             {attachments.map((f) =>

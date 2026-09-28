@@ -734,6 +734,12 @@ export default function App() {
   );
   const activeLeafInChat = isTerminalTab && activeLeafMode === "chat";
 
+  // 投屏批注要知道往哪个聊天发:当前聊天窗格,不在聊天就没有
+  const setActiveChatLeaf = useAgentViewStore((s) => s.setActiveChatLeaf);
+  useEffect(() => {
+    setActiveChatLeaf(activeLeafInChat ? activeLeafId : null);
+  }, [activeLeafInChat, activeLeafId, setActiveChatLeaf]);
+
   // 往当前终端里发一条斜杠命令。给底栏那几个按钮用 —— 它们只在当前终端确实
   // 跑着 Claude/Codex 时才显示,所以这里不用再判断打给谁。
   //

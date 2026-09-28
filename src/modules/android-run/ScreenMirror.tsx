@@ -1,5 +1,15 @@
+import { useAgentViewStore } from "@/modules/agents/store/agentViewStore";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { CODE_TO_AKEYCODE } from "./lib/keymap";
+import {
+  annotationText,
+  captureAnnotated,
+  cropThumb,
+  letterbox,
+  type Mark,
+  useMirrorAnnotate,
+} from "./lib/mirrorAnnotate";
 import {
   KEY_ACTION_DOWN,
   KEY_ACTION_UP,
@@ -305,6 +315,127 @@ export function ScreenMirror({
     if (id != null) void scrcpyKey(id, keycode);
   };
 
+  // 批注模式(照 Codex):在画面上点一下,当场弹个小框写一句,连同带编号
+  // 的截图发进当前聊天窗格。开关在 DevicePanel 的设备名那行,只主屏参与。
+  // 打开时上面盖一层,触摸不会传给设备。
+  const annotating =
+    useMirrorAnnotate((s) => s.serial === serial) && displayId === 0;
+  const closeStore = useMirrorAnnotate((s) => s.close);
+  const [marks, setMarks] = useState<Mark[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const [sending, setSending] = useState(false);
+  const markId = useRef(0);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const editRef = useRef<HTMLInputElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+
+  // 点完就把光标落到刚弹出的小框里,不用再点一下。等 DOM 出来再聚焦。
+  useEffect(() => {
+    if (editingId == null) return;
+    const t = requestAnimationFrame(() => editRef.current?.focus());
+    return () => cancelAnimationFrame(t);
+  }, [editingId]);
+
+  // 记下批注层的实际尺寸,好把百分比位置换算成屏上像素(视频有黑边留白)
+  useEffect(() => {
+    const el = overlayRef.current;
+    if (!el || !annotating) return;
+    const ro = new ResizeObserver(() => {
+      setBox({ w: el.clientWidth, h: el.clientHeight });
+    });
+    ro.observe(el);
+    setBox({ w: el.clientWidth, h: el.clientHeight });
+    return () => ro.disconnect();
+  }, [annotating]);
+
+  const lb = letterbox(box.w, box.h, sizeRef.current.w, sizeRef.current.h);
+  const markXY = (m: Mark) => ({
+    left: lb.offX + m.xPct * lb.drawW,
+    top: lb.offY + m.yPct * lb.drawH,
+  });
+
+  const closeAnnotate = () => {
+    closeStore();
+    setMarks([]);
+    setEditingId(null);
+    setListOpen(false);
+  };
+
+  // 关掉批注(比如切了设备)时把没发的标注清掉
+  useEffect(() => {
+    if (annotating) return;
+    setMarks([]);
+    setEditingId(null);
+    setListOpen(false);
+  }, [annotating]);
+
+  // 空说明的标注不留:关掉编辑器时顺手清掉没写字的那条
+  const dropEmpty = (id: number) =>
+    setMarks((cur) => cur.filter((m) => m.id !== id || m.note.trim() !== ""));
+
+  const addMark = (e: React.PointerEvent) => {
+    // 正在写某条:这一下是"写完点别处",收起编辑器,不新增
+    if (editingId != null) {
+      dropEmpty(editingId);
+      setEditingId(null);
+      return;
+    }
+    const { w, h } = sizeRef.current;
+    const canvas = canvasRef.current;
+    if (w === 0 || h === 0 || !canvas) return;
+    const px = e.nativeEvent.offsetX - lb.offX;
+    const py = e.nativeEvent.offsetY - lb.offY;
+    if (px < 0 || py < 0 || px > lb.drawW || py > lb.drawH) return; // 点到黑边
+    const xPct = px / lb.drawW;
+    const yPct = py / lb.drawH;
+    markId.current += 1;
+    const id = markId.current;
+    setMarks((cur) => [
+      ...cur,
+      { id, xPct, yPct, note: "", thumb: cropThumb(canvas, xPct, yPct) },
+    ]);
+    setEditingId(id);
+  };
+
+  const setNote = (id: number, note: string) =>
+    setMarks((cur) => cur.map((m) => (m.id === id ? { ...m, note } : m)));
+
+  const removeMark = (id: number) => {
+    setMarks((cur) => cur.filter((m) => m.id !== id));
+    if (editingId === id) setEditingId(null);
+  };
+
+  const sendMarks = async () => {
+    const canvas = canvasRef.current;
+    const kept = marks.filter((m) => m.note.trim() !== "");
+    if (!canvas || kept.length === 0) {
+      toast.error("先在画面上点一下,写句说明");
+      return;
+    }
+    const leafId = useAgentViewStore.getState().activeChatLeaf;
+    if (leafId == null) {
+      toast.error("先在左边的窗格切到聊天,再发批注");
+      return;
+    }
+    setSending(true);
+    try {
+      const path = await captureAnnotated(canvas, kept);
+      useAgentViewStore.getState().injectToChat(
+        leafId,
+        annotationText(kept),
+        [path],
+        kept.map((m) => ({ thumb: m.thumb, note: m.note })),
+      );
+      closeAnnotate();
+      toast.success("批注已加到对话");
+    } catch (err) {
+      toast.error(`发送失败:${String(err)}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
   // Forwards the physical keyboard to the device while the mirror is
   // focused — down/up events with live metaState (not the nav buttons'
   // fixed down+up pair), so held keys, repeat, and shifted symbols work.
@@ -356,6 +487,176 @@ export function ScreenMirror({
               </span>
             )}
             {status === "ended" && "投屏已结束"}
+          </div>
+        )}
+        {/* 批注层:盖在 canvas 上,点一下落一个编号点并当场弹框写说明 */}
+        {annotating && (
+          <div
+            ref={overlayRef}
+            onPointerDown={addMark}
+            className="absolute inset-0 z-10 cursor-crosshair"
+          >
+            {marks.map((m, i) => {
+              const pos = markXY(m);
+              return (
+                <span key={m.id}>
+                  <span
+                    className="-translate-x-1/2 -translate-y-1/2 pointer-events-none absolute flex size-5 items-center justify-center rounded-full border border-white bg-[#2c67c5] text-[11px] text-white shadow"
+                    style={pos}
+                  >
+                    {i + 1}
+                  </span>
+                  {/* 写说明的小框:照 Codex 就贴在点旁边,深色胶囊。
+                      ⏎ 加到列表接着标,⌘⏎ 直接发到对话 */}
+                  {editingId === m.id && (
+                    <div
+                      onPointerDown={(e) => e.stopPropagation()}
+                      className="-translate-y-1/2 absolute z-30 translate-x-3"
+                      style={{ left: pos.left, top: pos.top }}
+                    >
+                      <div className="flex items-center gap-2 rounded-full bg-[#2b2b2b] py-1.5 pr-1.5 pl-3 shadow-xl">
+                        <input
+                          ref={editRef}
+                          value={m.note}
+                          onChange={(e) => setNote(m.id, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                              e.preventDefault();
+                              dropEmpty(m.id);
+                              setEditingId(null);
+                              void sendMarks();
+                            } else if (e.key === "Enter") {
+                              e.preventDefault();
+                              dropEmpty(m.id);
+                              setEditingId(null);
+                            } else if (e.key === "Escape") {
+                              removeMark(m.id);
+                            }
+                          }}
+                          placeholder="添加评论"
+                          className="w-40 bg-transparent text-[12.5px] text-white outline-none placeholder:text-white/40"
+                        />
+                        <button
+                          type="button"
+                          aria-label="添加到列表"
+                          onClick={() => {
+                            dropEmpty(m.id);
+                            setEditingId(null);
+                          }}
+                          className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+                        >
+                          ↑
+                        </button>
+                      </div>
+                      {/* 两个动作:加到列表 / 直接发对话(照 Codex) */}
+                      {m.note.trim() !== "" && (
+                        <div className="absolute top-0 left-full ml-2 flex flex-col gap-0.5 whitespace-nowrap rounded-lg bg-[#2b2b2b] p-1 text-[12px] text-white shadow-xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              dropEmpty(m.id);
+                              setEditingId(null);
+                            }}
+                            className="flex cursor-pointer items-center gap-3 rounded px-2 py-1 hover:bg-white/10"
+                          >
+                            添加
+                            <span className="text-white/45">⏎</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              dropEmpty(m.id);
+                              setEditingId(null);
+                              void sendMarks();
+                            }}
+                            className="flex cursor-pointer items-center gap-3 rounded px-2 py-1 hover:bg-white/10"
+                          >
+                            发送
+                            <span className="text-white/45">⌘⏎</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        )}
+        {/* 批注中浮条(照 Codex):条数、列表、发送、退出 */}
+        {annotating && (
+          <div className="-translate-x-1/2 absolute bottom-3 left-1/2 z-30 flex items-center gap-1 rounded-full bg-[#2b2b2b] px-2 py-1 text-white shadow-xl">
+            <span className="relative">
+              <button
+                type="button"
+                onClick={() => setListOpen((v) => !v)}
+                disabled={marks.length === 0}
+                className="cursor-pointer rounded-full px-2 py-1 text-[12px] hover:bg-white/10 disabled:opacity-50"
+              >
+                批注中 · {marks.length}
+              </button>
+              {/* 批注卡片列表:小图 + 说明 + 编辑/删除 */}
+              {listOpen && marks.length > 0 && (
+                <div className="absolute bottom-full left-0 mb-2 flex w-64 flex-col gap-1 rounded-xl bg-[#2b2b2b] p-1.5 shadow-xl">
+                  {marks.map((m, i) => (
+                    <div
+                      key={m.id}
+                      className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-white/[0.06]"
+                    >
+                      {m.thumb ? (
+                        <img
+                          src={m.thumb}
+                          alt=""
+                          className="size-8 shrink-0 rounded object-cover"
+                        />
+                      ) : (
+                        <span className="flex size-8 shrink-0 items-center justify-center rounded bg-white/10 text-[11px]">
+                          {i + 1}
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-[12px] text-white/90">
+                        {m.note.trim() || "(未写说明)"}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="编辑"
+                        onClick={() => {
+                          setEditingId(m.id);
+                          setListOpen(false);
+                        }}
+                        className="shrink-0 cursor-pointer rounded px-1 text-white/60 hover:text-white"
+                      >
+                        ✎
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="删除"
+                        onClick={() => removeMark(m.id)}
+                        className="shrink-0 cursor-pointer rounded px-1 text-white/60 hover:text-white"
+                      >
+                        🗑
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </span>
+            <button
+              type="button"
+              disabled={sending || marks.every((m) => m.note.trim() === "")}
+              onClick={() => void sendMarks()}
+              className="cursor-pointer rounded-full bg-[#2c67c5] px-3 py-1 text-[12px] hover:bg-[#3572d4] disabled:opacity-45"
+            >
+              {sending ? "发送中…" : "发送"}
+            </button>
+            <button
+              type="button"
+              aria-label="退出批注"
+              onClick={closeAnnotate}
+              className="flex size-6 cursor-pointer items-center justify-center rounded-full text-white/70 hover:bg-white/10 hover:text-white"
+            >
+              ×
+            </button>
           </div>
         )}
       </div>
