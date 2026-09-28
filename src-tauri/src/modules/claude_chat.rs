@@ -63,22 +63,34 @@ pub fn validate_host_line(line: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
-fn bridge_script() -> Result<PathBuf, String> {
-    // Personal build: the sidecar lives in the repo next to src-tauri.
-    let p = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// The installed app ships a single-file bundle of the sidecar
+/// (`pnpm build:bridge`, see tauri.conf.json resources), so it runs on a
+/// machine without the repo. A dev build uses the script in the checkout
+/// instead: the bundle there may be stale.
+fn bridge_script(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("bridge")
         .join("claude")
         .join("bridge.mjs");
-    if p.is_file() {
-        Ok(p)
-    } else {
-        Err(format!("claude bridge not found: {}", p.display()))
+    if cfg!(debug_assertions) && repo.is_file() {
+        return Ok(repo);
+    }
+    let bundled = app.path().resolve(
+        "claude-bridge/bridge.mjs",
+        tauri::path::BaseDirectory::Resource,
+    );
+    match bundled {
+        Ok(p) if p.is_file() => Ok(p),
+        _ if repo.is_file() => Ok(repo),
+        _ => Err("claude bridge not found in the app bundle".into()),
     }
 }
 
 #[tauri::command]
 pub async fn claude_chat_start(
+    app: tauri::AppHandle,
     state: tauri::State<'_, ClaudeChatState>,
     registry: tauri::State<'_, WorkspaceRegistry>,
     cwd: String,
@@ -90,7 +102,7 @@ pub async fn claude_chat_start(
     let workspace = WorkspaceEnv::from_option(None);
     let cwd = authorize_spawn_cwd(&registry, Some(cwd.as_str()), &workspace)?
         .ok_or("claude chat: cwd is required")?;
-    let script = bridge_script()?;
+    let script = bridge_script(&app)?;
     let sessions = Arc::clone(&state.sessions);
     let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
 

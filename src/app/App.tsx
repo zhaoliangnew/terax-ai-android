@@ -1743,7 +1743,9 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-px cursor-col-resize bg-foreground/[0.16] transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/35" />
+              {/* 线用 border 画:界面整体缩放到 95%,1px 的背景条只剩 0.95px,有的位置会被
+                  整条吞掉;边框至少画一个物理像素 */}
+              <ResizableHandle className="w-px shrink-0 cursor-col-resize border-foreground/[0.16] border-l bg-transparent transition-colors duration-[var(--dur-fast)] after:w-3 hover:border-foreground/35" />
               <ResizablePanel id="workspace" defaultSize="50%" minSize="25%">
                 <div className="h-full min-h-0">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
@@ -1967,7 +1969,7 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-px cursor-col-resize bg-foreground/[0.16] transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/35" />
+              <ResizableHandle className="w-px shrink-0 cursor-col-resize border-foreground/[0.16] border-l bg-transparent transition-colors duration-[var(--dur-fast)] after:w-3 hover:border-foreground/35" />
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}

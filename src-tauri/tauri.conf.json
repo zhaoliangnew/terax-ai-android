@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "pnpm build:cli:dev && pnpm dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm build:cli && pnpm build",
+    "beforeBuildCommand": "pnpm build:cli && pnpm build:bridge && pnpm build",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
   },
@@ -163,9 +163,10 @@
         ]
       }
     ],
-    "resources": [
-      "resources/scrcpy-server-v4.1"
-    ]
+    "resources": {
+      "resources/scrcpy-server-v4.1": "resources/scrcpy-server-v4.1",
+      "../bridge/claude/dist/bridge.mjs": "claude-bridge/bridge.mjs"
+    }
   },
   "plugins": {
     "opener": {

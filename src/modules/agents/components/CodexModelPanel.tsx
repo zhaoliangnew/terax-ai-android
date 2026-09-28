@@ -1,3 +1,4 @@
+import { rectToVisualScale } from "@/lib/appZoom";
 import { cn } from "@/lib/utils";
 import {
   ArrowRight01Icon,
@@ -57,8 +58,14 @@ function EffortSlider({
   const pick = (clientX: number) => {
     const el = trackRef.current;
     if (!el) return;
+    // 界面整体缩放过:量出来的矩形是布局坐标,鼠标 clientX 是视觉坐标,
+    // 不换算的话点哪一档都偏,拖起来也跟不上手
+    const z = rectToVisualScale();
     const r = el.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    const ratio = Math.min(
+      1,
+      Math.max(0, (clientX - r.left * z) / (r.width * z)),
+    );
     const next = efforts[Math.round(ratio * last)];
     if (next && next !== value) onChange(next);
   };
@@ -83,6 +90,9 @@ function EffortSlider({
       onPointerUp={() => {
         dragging.current = false;
       }}
+      onPointerCancel={() => {
+        dragging.current = false;
+      }}
       onKeyDown={(e) => {
         if (e.key === "ArrowLeft" && index > 0) onChange(efforts[index - 1]);
         if (e.key === "ArrowRight" && index < last)
@@ -93,7 +103,7 @@ function EffortSlider({
       {/* 圆钮和点都放在去掉两头留白的这一段里,两端的点正好在圆钮中心 */}
       <div ref={trackRef} className="relative h-full">
         <div
-          className="absolute top-0 bottom-0 -left-3.5 rounded-full bg-[#2c67c5] transition-[width] duration-150"
+          className="absolute top-0 bottom-0 -left-3.5 rounded-full bg-[#2c67c5] transition-[width] duration-100"
           style={{ width: `calc(${pct}% + 1.75rem)` }}
         />
         {efforts.map((e, i) => (
@@ -107,7 +117,7 @@ function EffortSlider({
           />
         ))}
         <span
-          className="absolute top-1/2 size-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md transition-[left] duration-150"
+          className="absolute top-1/2 size-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md transition-[left] duration-100"
           style={{ left: `${pct}%` }}
         />
       </div>

@@ -367,7 +367,9 @@ export function AgentComposer({
           title="回车发送,Shift+回车换行"
           className="min-h-[42px] resize-none bg-transparent text-[14px] leading-[21px] outline-none placeholder:text-[#666666]"
         />
-        <div className="flex items-center gap-1">
+        {/* 右边的菜单(模型、更多、用量)以这一行为准贴右边弹出,和发送键对齐
+            (照 Codex);权限菜单仍跟着自己的按钮 */}
+        <div className="relative flex items-center gap-1">
           <button
             type="button"
             title="添加文件或图片(可多选)"
@@ -452,7 +454,7 @@ export function AgentComposer({
             </InlineMenu>
           </div>
           <span className="flex-1" />
-          <div className="relative">
+          <div>
             <button
               type="button"
               title="切换模型"
@@ -520,7 +522,7 @@ export function AgentComposer({
               )}
             </InlineMenu>
           </div>
-          <div className="relative">
+          <div>
             <button
               type="button"
               aria-label="更多"
