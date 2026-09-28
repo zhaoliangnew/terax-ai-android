@@ -90,19 +90,20 @@
 }
 
 .dark {
-    --background: #141414;
+    /* 深色调参照 Codex:主区 #181818,侧栏/底框 #1d1d1e,浮层 #2d2d2d */
+    --background: #181818;
     --foreground: #f7f7f7;
-    --card: #1d1d1d;
+    --card: #1d1d1e;
     --card-foreground: #f7f7f7;
-    --popover: #1d1d1d;
+    --popover: #2d2d2d;
     --popover-foreground: #f7f7f7;
     --primary: #f7f7f7;
-    --primary-foreground: #141414;
-    --secondary: #2a2a2a;
+    --primary-foreground: #181818;
+    --secondary: #303030;
     --secondary-foreground: #f7f7f7;
-    --muted: #1d1d1d;
+    --muted: #1d1d1e;
     --muted-foreground: #a3a3a3;
-    --accent: #2a2a2a;
+    --accent: #303030;
     --accent-foreground: #f7f7f7;
     --destructive: #e35d5d;
     --border: rgba(255, 255, 255, 0.09);
@@ -113,11 +114,11 @@
     --chart-3: #8a8a8a;
     --chart-4: #656565;
     --chart-5: #4a4a4a;
-    --sidebar: #1d1d1d;
+    --sidebar: #1d1d1e;
     --sidebar-foreground: #f7f7f7;
     --sidebar-primary: #f7f7f7;
-    --sidebar-primary-foreground: #141414;
-    --sidebar-accent: #2a2a2a;
+    --sidebar-primary-foreground: #181818;
+    --sidebar-accent: #303030;
     --sidebar-accent-foreground: #f7f7f7;
     --sidebar-border: rgba(255, 255, 255, 0.09);
     --sidebar-ring: #8a8a8a;
@@ -192,28 +193,19 @@
   --editor-font-size: 13px;
 }
 
-/* Floating-pane chrome. `--frame` is the canvas the panes sit on (header,
- * status bar, gutters); a pane keeps `--background` so the xterm canvas and the
- * pane surface stay the same color. Both are derived from tokens every theme
+/* Pane chrome. `--frame` is the canvas around the panes (header, status bar,
+ * tool rail); a pane keeps `--background` so the xterm canvas and the pane
+ * surface stay the same color. Both are derived from tokens every theme
  * already declares, so built-in and user themes get the separation for free. */
 :root {
   --frame: color-mix(in oklab, var(--card) 97%, var(--foreground) 3%);
-  --pane-radius: calc(var(--radius) * 1.4);
-  --pane-shadow: none;
-}
-.dark {
-  --pane-shadow: inset 0 1px 0 oklch(1 0 0 / 0.035);
 }
 
-/* No drop shadow: panes meet the header and the status bar flush, so the only
- * gutter is horizontal and anything cast downward would be clipped anyway
- * (react-resizable-panels clips panel content at the panel box). Separation
- * comes from the border plus the frame/pane tone step. */
+/* Flat panes (Codex-style): no card border, radius or gutter. Panes sit edge
+ * to edge and the only divider between them is the 1px resize handle, so a
+ * boundary reads as one line instead of border + gutter + border. */
 .terax-pane {
-  border-radius: var(--pane-radius);
-  border: 1px solid var(--border);
   background: var(--background);
-  box-shadow: var(--pane-shadow);
   overflow: hidden;
 }
 

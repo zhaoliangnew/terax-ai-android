@@ -10,6 +10,13 @@ import type { QuickLink } from "./quickLinks";
  *   dws wiki node list --workspace oJRz0LwZOvKjAzLZ --limit 50 -f json
  */
 export const KNOWLEDGE_BASE_LINKS: QuickLink[] = [
+  // 不是钉钉知识库节点,是组里自己的内部系统,跟知识库一起常用,钉在最前面
+  {
+    id: "kb-site-kernel-admin",
+    title: "内核管理系统",
+    url: "http://39.100.83.89:40135",
+    kind: "site",
+  },
   {
     id: "kb-6LeBq413JArGkMr1i34BaZ548DOnGvpb",
     title: "无线传感器产品",

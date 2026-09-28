@@ -4,7 +4,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ArrowDown01Icon,
   ArrowDown02Icon,
   ArrowUp02Icon,
   Delete02Icon,
@@ -34,7 +33,7 @@ import {
   MENU_HEAD,
   MENU_NOTE,
   MENU_ROW,
-  MENU_TRIGGER,
+  RAIL_TRIGGER,
 } from "./lib/menuStyles";
 import { MenuRowIcon } from "./MenuRowIcon";
 
@@ -98,15 +97,13 @@ export function DingGroupsMenu() {
         }}
       >
         <DropdownMenuTrigger asChild>
-          <button type="button" title="钉钉直达" className={MENU_TRIGGER}>
-            <HugeiconsIcon icon={Message01Icon} size={13} strokeWidth={1.75} />
-            钉钉直达
-            <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
+          <button type="button" className={RAIL_TRIGGER} aria-label="钉钉直达">
+            <HugeiconsIcon icon={Message01Icon} size={18} strokeWidth={1.6} />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           backdrop
-          side="top"
+          side="right"
           align="start"
           collisionPadding={8}
           className="w-auto p-0"

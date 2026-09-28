@@ -3,10 +3,10 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ArrowDown01Icon, ServerStack01Icon } from "@hugeicons/core-free-icons";
+import { ServerStack01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
-import { MENU_HEAD, MENU_NOTE, MENU_TRIGGER } from "./lib/menuStyles";
+import { MENU_HEAD, MENU_NOTE, RAIL_TRIGGER } from "./lib/menuStyles";
 import { openExternally } from "./lib/openExternally";
 import {
   clearRecentEnvs,
@@ -47,19 +47,13 @@ export function TestEnvMenu() {
   return (
     <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button type="button" title="测试环境直达" className={MENU_TRIGGER}>
-          <HugeiconsIcon
-            icon={ServerStack01Icon}
-            size={13}
-            strokeWidth={1.75}
-          />
-          测试环境
-          <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
+        <button type="button" className={RAIL_TRIGGER} aria-label="测试环境">
+          <HugeiconsIcon icon={ServerStack01Icon} size={18} strokeWidth={1.6} />
         </button>
       </PopoverTrigger>
       <PopoverContent
         backdrop
-        side="top"
+        side="right"
         align="start"
         collisionPadding={8}
         onOpenAutoFocus={(e) => e.preventDefault()}

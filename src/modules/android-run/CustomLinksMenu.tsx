@@ -19,7 +19,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { MENU_ACTION, MENU_HEAD, MENU_TRIGGER } from "./lib/menuStyles";
+import { MENU_ACTION, MENU_HEAD, RAIL_TRIGGER } from "./lib/menuStyles";
 import {
   loadQuickLinks,
   moveQuickLink,
@@ -59,17 +59,16 @@ export function CustomLinksMenu() {
         <PopoverTrigger asChild>
           <button
             type="button"
-            title="收藏夹"
             onClick={() => setLinks(loadQuickLinks())}
-            className={MENU_TRIGGER}
+            className={RAIL_TRIGGER}
+            aria-label="收藏夹"
           >
-            <HugeiconsIcon icon={Bookmark02Icon} size={13} strokeWidth={1.75} />
-            收藏夹
+            <HugeiconsIcon icon={Bookmark02Icon} size={18} strokeWidth={1.6} />
           </button>
         </PopoverTrigger>
         <PopoverContent
           backdrop
-          side="top"
+          side="right"
           align="start"
           collisionPadding={8}
           onOpenAutoFocus={(e) => e.preventDefault()}

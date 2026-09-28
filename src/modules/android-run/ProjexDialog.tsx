@@ -420,7 +420,7 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
       <PopoverAnchor asChild>{anchor}</PopoverAnchor>
       <PopoverContent
         backdrop
-        side="top"
+        side="right"
         align="start"
         collisionPadding={8}
         // 新建/编辑视图是个套在里面的 Dialog,它渲染在 portal 里,

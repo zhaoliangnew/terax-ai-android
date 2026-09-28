@@ -6,7 +6,7 @@ import {
 import { FolderGitTwoIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import { MENU_TRIGGER } from "./lib/menuStyles";
+import { RAIL_TRIGGER } from "./lib/menuStyles";
 import { YunxiaoReposPanel } from "./YunxiaoReposPanel";
 
 /**
@@ -21,17 +21,16 @@ export function YunxiaoReposButton() {
       <PopoverAnchor asChild>
         <button
           type="button"
-          title="云效代码库"
           onClick={() => setOpen((v) => !v)}
-          className={MENU_TRIGGER}
+          className={RAIL_TRIGGER}
+          aria-label="云效代码库"
         >
-          <HugeiconsIcon icon={FolderGitTwoIcon} size={13} strokeWidth={1.75} />
-          云效代码库
+          <HugeiconsIcon icon={FolderGitTwoIcon} size={18} strokeWidth={1.6} />
         </button>
       </PopoverAnchor>
       <PopoverContent
         backdrop
-        side="top"
+        side="right"
         align="start"
         collisionPadding={8}
         // 新建代码库/代码组是套在里面的 Dialog,渲染在另一个 portal 里,

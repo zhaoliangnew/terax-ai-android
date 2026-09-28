@@ -9,8 +9,9 @@ export type QuickLink = {
   id: string;
   title: string;
   url: string;
-  /** 目录节点显示文件夹图标,文档节点显示文档图标;自定义入口不带。 */
-  kind?: "folder" | "doc";
+  /** 目录节点显示文件夹图标,文档节点显示文档图标,内部系统网址显示地球;
+   * 自定义入口不带。 */
+  kind?: "folder" | "doc" | "site";
   /**
    * "app" = url 里存的是 .app 路径,点了唤应用;不填就是网址,浏览器打开。
    * 老数据没有这个字段,当网址处理 —— 收藏夹以前只能存网址。

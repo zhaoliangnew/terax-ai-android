@@ -11,18 +11,17 @@ import {
   projexUrl,
 } from "@/modules/android-run";
 import { WorktreeCountBadge } from "@/modules/android-run/BranchChip";
-import {
-  AndroidIcon,
-  ArrowRight01Icon,
-  CloudIcon,
-  Pin02Icon,
-} from "@hugeicons/core-free-icons";
+import { AndroidIcon, CloudIcon, Pin02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
+import { FolderGlyph } from "./FolderGlyph";
 import { InlineInput } from "./InlineInput";
 import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { fileIconUrl, folderIconUrl, namedIconUrl } from "./lib/iconResolver";
+import { fileIconUrl, namedIconUrl } from "./lib/iconResolver";
+
+/** 每一层缩进多少:12px 时子行名字几乎和父行对齐,层级看不出来。 */
+const INDENT = 18;
 
 const AGENT_STATE_EMOJI: Record<AgentPhaseState, string> = {
   working: "🟡",
@@ -104,8 +103,8 @@ function EntryRowImpl(props: EntryRowProps) {
   } = props;
 
   const asProject = projectKind !== null && !!onOpenProject;
-  const iconUrl = isDir ? folderIconUrl(name, isExpanded) : fileIconUrl(name);
-  const paddingLeft = 6 + depth * 12;
+  const iconUrl = isDir ? null : fileIconUrl(name);
+  const paddingLeft = 6 + depth * INDENT;
   const agentState = useProjectAgentState(
     asProject ? path : null,
     projectPtyIds ?? {},
@@ -114,11 +113,12 @@ function EntryRowImpl(props: EntryRowProps) {
   if (isRenaming) {
     return (
       <div
-        className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
+        className="flex h-7 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
         style={{ paddingLeft }}
       >
-        <span className="size-3.5 shrink-0" />
-        {iconUrl ? (
+        {isDir ? (
+          <FolderGlyph open={isExpanded} />
+        ) : iconUrl ? (
           <img src={iconUrl} alt="" className="size-4 shrink-0" />
         ) : (
           <span className="size-4 shrink-0" />
@@ -147,9 +147,9 @@ function EntryRowImpl(props: EntryRowProps) {
       onClick={handleClick}
       onDoubleClick={() => !isDir && actions.beginRename(path)}
       className={cn(
-        "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
+        "group flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
         isActiveProject
-          ? "bg-emerald-500/15 font-semibold text-emerald-400"
+          ? "font-semibold text-emerald-400"
           : isSelected
             ? "bg-accent text-foreground"
             : gitignored
@@ -159,16 +159,7 @@ function EntryRowImpl(props: EntryRowProps) {
       )}
       style={{ paddingLeft }}
     >
-      <span className="flex size-3.5 shrink-0 items-center justify-center text-muted-foreground">
-        {isDir && !asProject ? (
-          <HugeiconsIcon
-            icon={ArrowRight01Icon}
-            size={12}
-            strokeWidth={2.25}
-            className={cn("transition-transform", isExpanded && "rotate-90")}
-          />
-        ) : null}
-      </span>
+      {/* 不画展开箭头:文件夹图标本身分开/合两种,已经说明了状态 */}
       {asProject ? (
         agentState ? (
           <span
@@ -202,24 +193,38 @@ function EntryRowImpl(props: EntryRowProps) {
             icon={AndroidIcon}
             size={16}
             strokeWidth={1.75}
-            className="size-4 shrink-0 text-emerald-500"
+            // 满屏绿图标等于没标记:只有开着终端的工程才亮
+            className={cn(
+              "size-4 shrink-0",
+              isActiveProject || isOpenedProject
+                ? "text-emerald-500"
+                : "text-muted-foreground/45",
+            )}
           />
         )
+      ) : isDir ? (
+        <FolderGlyph open={isExpanded} />
       ) : iconUrl ? (
         <img src={iconUrl} alt="" className="size-4 shrink-0" />
       ) : (
         <span className="size-4 shrink-0" />
       )}
-      {/* 工程目录分三档:当前选中(绿底已经标出来了)、开着但没选中(白)、
+      {/* 工程目录分三档:当前选中(绿字)、开着但没选中(白)、
           没开过(灰)。绿色只留给选中态,否则满屏绿字等于没标记。 */}
       <span
         className={cn(
           "min-w-0 truncate",
           // 有分支要显示时名字不再撑满,分支紧跟在名字后面而不是被推到最右
-          asProject && branch ? "max-w-[60%] shrink-0" : "flex-1",
+          // 名字也要能缩:以前 shrink-0 + 60%,加上缩进、分支、tree 角标和 ×,
+          // 窄侧栏里整行比树还宽,树被撑得左右乱跳。分支是 flex-1(基准 0),
+          // 位置不够时先让它缩没,再轮到名字截断。
+          asProject && branch ? "max-w-[60%]" : "flex-1",
+          // 工程名比 worktree 子行大半号,主次一眼分开
+          asProject && "text-[13.5px]",
           asProject && !isActiveProject
             ? isOpenedProject
-              ? "font-semibold text-foreground"
+              ? // 不加粗:开着的工程一多满屏粗体,反而分不出主次
+                "text-foreground"
               : "text-muted-foreground/65"
             : !isSelected &&
                 !gitignored &&
@@ -318,14 +323,12 @@ function WorktreeRowImpl({
       title={`worktree · ${path}\n分支 ${branch} · 点击打开(独立终端/投屏)`}
       onClick={() => onOpen?.(path)}
       className={cn(
-        "group flex h-6 w-full min-w-0 cursor-pointer items-center gap-2 rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
-        isActive
-          ? "bg-emerald-500/15 font-semibold text-emerald-400"
-          : "text-foreground/85",
+        // worktree 是子行:字号小一号,和工程行拉开主次
+        "group flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left text-[12.5px] transition-colors hover:bg-accent/70",
+        isActive ? "font-semibold text-emerald-400" : "text-foreground/70",
       )}
-      style={{ paddingLeft: 6 + depth * 12 }}
+      style={{ paddingLeft: 6 + depth * INDENT }}
     >
-      <span className="size-3.5 shrink-0" />
       {agentState ? (
         <span
           title={AGENT_STATE_LABEL[agentState]}
@@ -337,23 +340,24 @@ function WorktreeRowImpl({
           {AGENT_STATE_EMOJI[agentState]}
         </span>
       ) : (
-        <span className="shrink-0 rounded bg-foreground/10 px-1 text-[9.5px] leading-4 text-muted-foreground">
-          tree
-        </span>
+        // 占一个图标位,和工程行的图标对齐;不挂"tree"标签,缩进已经说明它是子行
+        <span className="size-4 shrink-0" />
       )}
       <span
         className={cn(
-          "min-w-0 shrink-0 truncate",
+          "min-w-0 truncate",
+          // worktree 是工程的子行,不能比工程本身还抢眼:不加粗,开着的也只是
+          // 比没开的亮一档
           !isActive &&
-            (isOpened ? "font-semibold text-foreground" : "text-foreground/70"),
+            (isOpened ? "text-foreground/70" : "text-muted-foreground/65"),
         )}
       >
         {name}
       </span>
-      {/* 分支名灰字跟在后面,一眼知道这个 worktree 在干什么。
-          同名也照样显示 —— "分支到底是啥"不该让人猜 */}
-      <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground/60">
-        {branch}
+      {/* 分支名灰字跟在后面,一眼知道这个 worktree 在干什么。和 worktree
+          同名就不重复写一遍(悬停的 title 里还有) */}
+      <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/60">
+        {branch === name ? "" : branch}
       </span>
     </button>
   );
@@ -376,17 +380,18 @@ export function PendingRow({
 }: PendingRowProps) {
   return (
     <div
-      className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
-      style={{ paddingLeft: 6 + depth * 12 }}
+      className="flex h-7 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
+      style={{ paddingLeft: 6 + depth * INDENT }}
     >
-      <span className="size-3.5 shrink-0" />
-      <img
-        src={
-          kind === "dir" ? folderIconUrl("", false) : fileIconUrl("untitled")
-        }
-        alt=""
-        className="size-4 shrink-0 opacity-70"
-      />
+      {kind === "dir" ? (
+        <FolderGlyph className="opacity-70" />
+      ) : (
+        <img
+          src={fileIconUrl("untitled")}
+          alt=""
+          className="size-4 shrink-0 opacity-70"
+        />
+      )}
       <InlineInput
         initial=""
         placeholder={kind === "dir" ? "New folder" : "New file"}
@@ -409,10 +414,10 @@ export function StatusRow({
   return (
     <div
       className={cn(
-        "h-6 truncate px-2 text-[11px] leading-6",
+        "h-7 truncate px-2 text-[11px] leading-7",
         tone === "error" ? "text-destructive" : "text-muted-foreground",
       )}
-      style={{ paddingLeft: 6 + depth * 12 + 18 }}
+      style={{ paddingLeft: 6 + depth * INDENT + 24 }}
     >
       {message}
     </div>

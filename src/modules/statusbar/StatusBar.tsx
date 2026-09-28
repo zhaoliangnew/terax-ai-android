@@ -9,17 +9,6 @@ import {
   AiOpenButton,
   AiStatusBarControls,
 } from "@/modules/ai/components/AiStatusBarControls";
-import {
-  ApifoxMenu,
-  CustomLinksMenu,
-  DingGroupsMenu,
-  JournalButton,
-  KnowledgeBaseMenu,
-  TestEnvMenu,
-  WeChatButton,
-  YunxiaoProjectsButton,
-  YunxiaoReposButton,
-} from "@/modules/android-run";
 import { LspStatusPill } from "@/modules/lsp";
 import type { WorkspaceEnv } from "@/modules/workspace";
 import { IncognitoIcon } from "@hugeicons/core-free-icons";
@@ -53,17 +42,6 @@ export function StatusBar({
     <footer className="flex h-8 shrink-0 items-center justify-between gap-3 pl-3 pr-4 text-[11px]">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <WorkspaceEnvSelector onSelect={onWorkspaceChange} />
-        <KnowledgeBaseMenu />
-        <YunxiaoProjectsButton />
-        {/* 云效代码库:和云效项目挨着才是一组事,而且跟知识库一样往上弹,
-            不占左边的文件树视图。 */}
-        <YunxiaoReposButton />
-        <ApifoxMenu />
-        <TestEnvMenu />
-        <JournalButton />
-        <DingGroupsMenu />
-        <WeChatButton />
-        <CustomLinksMenu />
         <LspStatusPill filePath={filePath ?? null} />
         <DiagnosticsBadge filePath={filePath ?? null} />
         {privateActive ? (

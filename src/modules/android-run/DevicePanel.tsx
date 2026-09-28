@@ -17,7 +17,7 @@ import {
   useMirroringSerials,
 } from "./store";
 
-/** 右侧设备列:上半屏幕镜像(含设备/运行工具栏),下半 Logcat,固定常驻。 */
+/** 右栏"投屏"tab:上半屏幕镜像(含设备/运行工具栏),下半 Logcat。 */
 export default function DevicePanel() {
   const devices = useAndroidRunStore((s) => s.devices);
   const setMirroring = useAndroidRunStore((s) => s.setMirroring);
@@ -37,15 +37,8 @@ export default function DevicePanel() {
       <ResizablePanel id="mirror" defaultSize="65%" minSize="20%">
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2.5 py-1.5">
-            <HugeiconsIcon
-              icon={SmartPhone01Icon}
-              size={13}
-              strokeWidth={1.75}
-              className="text-muted-foreground"
-            />
-            <span className="text-[13px] font-semibold">屏幕镜像</span>
             {device && (
-              <span className="truncate text-[14px] text-muted-foreground">
+              <span className="truncate text-[13px] text-muted-foreground">
                 {device.vendor ? `${device.vendor} ` : ""}
                 {device.model} · {highlightSerial(device.serial)}
               </span>

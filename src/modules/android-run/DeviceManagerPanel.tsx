@@ -8,13 +8,15 @@ import {
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { connectDevice, disconnectDevice } from "./lib/adb";
 import { ipSuffix } from "./lib/highlightSerial";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
 
-/** The single "all devices" surface, rendered inline over the mirror area
- * (not a floating modal) — every device ever seen (online or not, keyed by
+/** The single "all devices" surface, a window-level overlay (portaled to
+ * body so it covers the whole window, not just the narrow right panel) —
+ * every device ever seen (online or not, keyed by
  * SN so it survives an IP change), connect-by-IP, adb path, and per-device
  * notes, all in one place. Click a card to select it (reconnecting first if
  * it's a network device that's currently offline) and start mirroring; ✕
@@ -161,15 +163,17 @@ export function DeviceManagerPanel() {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <>
       {/* biome-ignore lint/a11y/useSemanticElements: click-outside-to-dismiss backdrop, not real page content */}
       {/* biome-ignore lint/a11y/noStaticElementInteractions: same — a decorative click-catcher */}
       <div
-        className="absolute inset-0 z-10 bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
         onClick={() => setOpen(false)}
       />
-      <div className="absolute inset-y-3 right-3 left-[32%] z-20 flex flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-white/10">
+      {/* 窗口正中的大弹框:比右栏里那块宽得多(卡片能排三列左右),又不至于
+          铺满整个窗口。卡片按宽度自动排列 */}
+      <div className="fixed top-1/2 left-1/2 z-50 flex h-[min(680px,80vh)] w-[min(1000px,86vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-white/10">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
           <span className="flex items-center gap-2 text-[13px] font-semibold">
             历史设备
@@ -216,12 +220,12 @@ export function DeviceManagerPanel() {
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-          <div className="grid grid-cols-2 gap-2.5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-2.5">
             {/* biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper only, real controls are inside */}
             {/* biome-ignore lint/a11y/useSemanticElements: contains its own inputs/button, can't be a <button> */}
             <div
               onKeyDown={(e) => e.stopPropagation()}
-              className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed border-border px-3.5 py-2"
+              className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed border-border px-3.5 py-2"
             >
               <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
                 <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
@@ -255,7 +259,7 @@ export function DeviceManagerPanel() {
               )}
             </div>
             {shown.length === 0 && (
-              <div className="col-span-2 px-3 py-6 text-center text-sm text-muted-foreground">
+              <div className="col-span-full px-3 py-6 text-center text-sm text-muted-foreground">
                 {list.length === 0
                   ? "还没有连接过的设备"
                   : "没有在线设备(右上角开关关掉可看离线记录)"}
@@ -465,6 +469,7 @@ export function DeviceManagerPanel() {
           />
         </div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }

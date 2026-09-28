@@ -2,10 +2,11 @@ import { Button } from "@/components/ui/button";
 import { WindowControls } from "@/components/WindowControls";
 import { IS_MAC, USE_CUSTOM_WINDOW_CONTROLS } from "@/lib/platform";
 import { NotificationBell } from "@/modules/agents";
-import type { AgentLaunchRequest } from "@/modules/agents/lib/launcher";
-import type { Tab } from "@/modules/tabs";
-import { TabBar } from "@/modules/tabs";
-import { Settings01Icon, SidebarLeftIcon } from "@hugeicons/core-free-icons";
+import {
+  Settings01Icon,
+  SidebarLeftIcon,
+  SidebarRightIcon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   type ReactNode,
@@ -21,29 +22,9 @@ import {
 } from "./SearchInline";
 
 type Props = {
-  tabs: Tab[];
-  activeId: number;
-  onSelect: (id: number) => void;
-  onNew: () => void;
-  onNewBlock: () => void;
-  onNewPrivate: () => void;
-  onNewPreview: () => void;
-  onNewEditor: () => void;
-  onNewGitGraph: () => void;
-  onLaunchAgents: (request: AgentLaunchRequest) => void;
-  onClose: (id: number) => void;
-  /** Chrome-style: close every tab to the right of the given tab. */
-  onCloseTabsToRight: (id: number) => void;
-  /** Chrome-style: close every tab except the given tab. */
-  onCloseOtherTabs: (id: number) => void;
-  /** Promote a preview (transient) tab to persistent. */
-  onPin: (id: number) => void;
-  /** Set a terminal tab's custom label; empty string resets to default. */
-  onRename: (id: number, title: string) => void;
-  /** Move a dragged tab to a new position (insertion gap index). */
-  onReorder: (fromId: number, toGapIndex: number) => void;
-  onOverrideLanguage?: (id: number, lang: string | null) => void;
   onToggleSidebar: () => void;
+  /** 右栏(投屏/源码/仓库)开合,按钮放在标题栏最右边,照 Codex。 */
+  onToggleRightPanel: () => void;
   /** 命令面板入口。标题栏那颗按钮先隐藏了,这里留着,重新显示时不用再接线。 */
   onOpenCommandPalette: () => void;
   onActivateAgent: (tabId: number, leafId: number) => void;
@@ -58,24 +39,8 @@ type Props = {
 const COMPACT_WIDTH = 720;
 
 export function Header({
-  tabs,
-  activeId,
-  onSelect,
-  onNew,
-  onNewBlock,
-  onNewPrivate,
-  onNewPreview,
-  onNewEditor,
-  onNewGitGraph,
-  onLaunchAgents,
-  onClose,
-  onCloseTabsToRight,
-  onCloseOtherTabs,
-  onPin,
-  onRename,
-  onReorder,
-  onOverrideLanguage,
   onToggleSidebar,
+  onToggleRightPanel,
   onActivateAgent,
   onActivateLocalAgent,
   onOpenSettings,
@@ -151,27 +116,9 @@ export function Header({
         className="flex min-w-0 flex-1 items-center gap-2"
         data-tauri-drag-region
       >
+        {/* 顶部 tab 栏撤了:工程在左边树里点一下就切过去(和 worktree 行
+            一样),这里只留拖动区。 */}
         {spaceSwitcher}
-        <TabBar
-          tabs={tabs}
-          activeId={activeId}
-          onSelect={onSelect}
-          onNew={onNew}
-          onNewBlock={onNewBlock}
-          onNewPrivate={onNewPrivate}
-          onNewPreview={onNewPreview}
-          onNewEditor={onNewEditor}
-          onNewGitGraph={onNewGitGraph}
-          onLaunchAgents={onLaunchAgents}
-          onClose={onClose}
-          onCloseTabsToRight={onCloseTabsToRight}
-          onCloseOtherTabs={onCloseOtherTabs}
-          onPin={onPin}
-          onRename={onRename}
-          onReorder={onReorder}
-          onOverrideLanguage={onOverrideLanguage}
-          compact={compact}
-        />
         <div data-tauri-drag-region className="h-full min-w-2 flex-1" />
       </div>
 
@@ -190,6 +137,17 @@ export function Header({
       )}
 
       {!IS_MAC && settingsButton}
+
+      <Button
+        onClick={onToggleRightPanel}
+        title="显示/隐藏右栏"
+        aria-label="显示/隐藏右栏"
+        variant="ghost"
+        size="icon-sm"
+        className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <HugeiconsIcon icon={SidebarRightIcon} size={18} strokeWidth={1.75} />
+      </Button>
 
       {USE_CUSTOM_WINDOW_CONTROLS && (
         <>

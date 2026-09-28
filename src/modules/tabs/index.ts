@@ -19,6 +19,7 @@ export {
   nextActiveInSpace,
   type PreviewTab,
   planCloseOtherTabs,
+  planCloseTabIds,
   planCloseTabsToRight,
   type Tab,
   type TabPatch,

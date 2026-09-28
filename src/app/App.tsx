@@ -16,11 +16,9 @@ import { useZoom } from "@/lib/useZoom";
 import { cn, isHtmlPath, isMarkdownPath } from "@/lib/utils";
 import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
 import {
-  type AgentLaunchRequest,
   AgentNotificationsBridge,
   findAgentLauncher,
   nextAttentionTarget,
-  validateAgentLaunchCommand,
 } from "@/modules/agents";
 import {
   AgentRunBridge,
@@ -42,12 +40,12 @@ import {
   findProjectRoot,
   getProjectLink,
   getTaskLink,
-  isSupportedProductDir,
   OpenInToolMenu,
   ProductLinkChip,
   ProjectLinksBar,
   type QuickAgentId,
   RepoUrlChip,
+  ToolRail,
   setProjectLink,
   setTaskLink,
   supportsSessionActions,
@@ -65,10 +63,8 @@ import {
   useEditorFileSync,
 } from "@/modules/editor";
 import {
-  EMPTY_PROJECT_FILES,
   FileExplorer,
   type FileExplorerHandle,
-  ProjectFilesDialog,
   type ProjectFilesState,
 } from "@/modules/explorer";
 import type { GitHistorySearchHandle } from "@/modules/git-history";
@@ -125,7 +121,6 @@ import {
   type TerminalPaneHandle,
   useAgentActivityStore,
   useTerminalFileDrop,
-  whenSessionReady,
   writeToSession,
 } from "@/modules/terminal";
 import {
@@ -149,8 +144,6 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { SearchAddon } from "@xterm/addon-search";
 import {
-  lazy,
-  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -161,9 +154,12 @@ import {
 import type { PanelImperativeHandle } from "react-resizable-panels";
 import { toast as sonnerToast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
-
-const DevicePanel = lazy(() => import("@/modules/android-run/DevicePanel"));
-
+import {
+  effectiveRightTab,
+  RightPanel,
+  type RightTab,
+  usePanelRoot,
+} from "./components/RightPanel";
 import {
   TOGGLE_BLOCK_INPUT_EVENT,
   WorkspaceInputBar,
@@ -173,6 +169,8 @@ import { useAppCloseGuard } from "./hooks/useAppCloseGuard";
 import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
+const RIGHT_TAB_KEY = "terax.rightPanel.tab";
+
 export default function App() {
   const {
     tabs,
@@ -181,21 +179,17 @@ export default function App() {
     allocId,
     booted,
     replaceTabs,
-    reorderTabByGap,
     markBooted,
     setActiveSpaceForNewTabs,
     newTab,
     newBlockTab,
     newAgentTab,
-    newAgentGroupTab,
     newPrivateTab,
     openFileTab,
-    pinTab,
     newPreviewTab,
     newMarkdownTab,
     newHtmlTab,
     setFileView,
-    setOverrideLanguage,
     openAiDiffTab,
     closeAiDiffTab,
     openGitDiffTab,
@@ -419,36 +413,32 @@ export default function App() {
     : null;
   const displayProjectRoot = worktreeMatch?.[1] ?? androidProjectRoot;
   const activeWorktreeName = worktreeMatch?.[2] ?? null;
-  // 只有真正的 Android/Flutter 工程才值得多开一块产品文件区,普通 gradle
-  // 工程(没有 AndroidManifest,也不是 Flutter)不算,避免误判。
-  const [productDirSupported, setProductDirSupported] = useState(false);
-  useEffect(() => {
-    if (!androidProjectRoot) {
-      setProductDirSupported(false);
-      return;
-    }
-    let cancelled = false;
-    void isSupportedProductDir(androidProjectRoot).then((ok) => {
-      if (!cancelled) setProductDirSupported(ok);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [androidProjectRoot]);
-  // 右侧设备栏只对安卓/Flutter 工程有意义。普通目录(文档、资料夹)里它只会
-  // 显示"没有在线设备",白占半屏 —— 折叠掉而不是卸载,这样投屏会话还活着,
-  // 切回工程 tab 立刻就在,不用重连。
+  // 右栏 tab:投屏 / 源码 / 仓库。三个 tab 共用一个宽度,切 tab 不动宽度,
+  // 拖到多宽就是多宽(跟着整体布局一起记住)。
+  const [rightTab, setRightTab] = useState<RightTab>(() => {
+    try {
+      const v = localStorage.getItem(RIGHT_TAB_KEY);
+      if (v === "device" || v === "source" || v === "repo") return v;
+    } catch {}
+    return "device";
+  });
+  const currentRightTab = effectiveRightTab(rightTab, !!androidProjectRoot);
   const devicePanelRef = useRef<PanelImperativeHandle | null>(null);
-  useEffect(() => {
+  const toggleRightPanel = useCallback(() => {
     const p = devicePanelRef.current;
     if (!p) return;
-    const collapsed = p.getSize().asPercentage <= 0;
-    if (androidProjectRoot) {
-      if (collapsed) p.resize("44%");
-    } else if (!collapsed) {
-      p.collapse();
-    }
-  }, [androidProjectRoot]);
+    if (p.isCollapsed()) p.expand();
+    else p.collapse();
+  }, []);
+  const selectRightTab = useCallback((tab: RightTab) => {
+    setRightTab(tab);
+    try {
+      localStorage.setItem(RIGHT_TAB_KEY, tab);
+    } catch {}
+    // 右栏被拖到收起时,点入口要先把它展开
+    const p = devicePanelRef.current;
+    if (p?.isCollapsed()) p.expand();
+  }, []);
 
   // 右键工程 → 填"当前云效需求"。跟目录级的云效项目分开:这个跟着仓库走,不继承。
   const [taskDir, setTaskDir] = useState<string | null>(null);
@@ -482,28 +472,11 @@ export default function App() {
     explorerRef.current?.revealPath(wt ? wt[1] : androidProjectRoot);
   }, [androidProjectRoot]);
 
-  // 产品目录文件走单独弹框(左树右文),不再钉在侧栏右半边 —— 工程一深
-  // 两棵树挤一起,看代码只剩一条窄缝。弹框不做启动记忆:它是"翻一下"的
-  // 入口,开着启动没意义。
-  const [productPaneOpen, setProductPaneOpen] = useState(false);
-  // 快捷键回调里要读它的最新值(那个回调不跟着它重建)
-  const productPaneOpenRef = useRef(false);
-  useEffect(() => {
-    productPaneOpenRef.current = productPaneOpen;
-  }, [productPaneOpen]);
-  // 每个工程各记各的:开着哪些文件、当前是哪个。关掉弹框、切到别的工程再
-  // 回来还是原样 —— 弹框本身一关就卸载,状态放它里面等于每次都从头开始。
+  // 每个工程各记各的:源码 tab 里开着哪些文件、当前是哪个。切到别的工程
+  // 再回来还是原样。
   const [projectFilesByRoot, setProjectFilesByRoot] = useState<
     Record<string, ProjectFilesState>
   >({});
-  const toggleProductPane = useCallback(() => {
-    setProductPaneOpen((open) => !open);
-  }, []);
-  // 进产品后工具栏多一个入口,打开这个工程自己的文件树。
-  const showProductPane =
-    androidProjectRoot !== null &&
-    androidProjectRoot !== (activeSpaceRoot ?? explorerRoot) &&
-    productDirSupported;
 
   useWindowTitle(activeTab, explorerRoot);
 
@@ -554,8 +527,7 @@ export default function App() {
     pendingCloseMany,
     closeManyConfirming,
     handleClose,
-    handleCloseTabsToRight,
-    handleCloseOtherTabs,
+    handleCloseTabIds,
     confirmClose,
     cancelClose,
     confirmTerminalClose,
@@ -726,45 +698,6 @@ export default function App() {
     newBlockTab(inheritedCwdForNewTab());
   }, [newBlockTab, inheritedCwdForNewTab]);
 
-  const launchAgentGroup = useCallback(
-    (request: AgentLaunchRequest) => {
-      const command = validateAgentLaunchCommand(request.command);
-      if (!command.ok) return;
-      const launcher = findAgentLauncher(request.agent);
-      const title =
-        request.instances === 1
-          ? launcher.label
-          : `${launcher.label} × ${request.instances}`;
-      const { leafIds: agentLeafIds } = newAgentGroupTab(
-        inheritedCwdForNewTab(),
-        title,
-        request.instances,
-      );
-      const hooksReady = launcher.supportsHooks
-        ? invoke("agent_enable_hooks", {
-            agent: request.agent,
-          }).catch((error) => {
-            console.warn(
-              `[terax] could not enable ${request.agent} notifications:`,
-              error,
-            );
-          })
-        : Promise.resolve();
-
-      for (const leafId of agentLeafIds) {
-        void (async () => {
-          await Promise.all([whenSessionReady(leafId), hooksReady]);
-          if (!writeToSession(leafId, `${command.command}\r`)) {
-            console.error(
-              `[terax] agent terminal ${leafId} closed before launch`,
-            );
-          }
-        })();
-      }
-    },
-    [inheritedCwdForNewTab, newAgentGroupTab],
-  );
-
   // 强制新开一个终端(右键「Open New Terminal」),不去重。
   const openNewTerminalAt = useCallback(
     (path: string) => {
@@ -864,12 +797,17 @@ export default function App() {
   const [projectPtyIds, setProjectPtyIds] = useState<Record<string, number[]>>(
     {},
   );
+  // 工程根 → 它的终端 tab。顶部 tab 栏撤了,树上"关闭终端"靠它找要关哪些
+  const [projectTabIds, setProjectTabIds] = useState<Record<string, number[]>>(
+    {},
+  );
   useEffect(() => {
     const terminalTabs = tabs.filter((t) => t.kind === "terminal");
     let cancelled = false;
     void (async () => {
       const roots = new Set<string>();
       const ptyIdsByRoot: Record<string, number[]> = {};
+      const tabIdsByRoot: Record<string, number[]> = {};
       for (const t of terminalTabs) {
         const cwd = findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd ?? null;
         if (!cwd) continue;
@@ -886,10 +824,12 @@ export default function App() {
           if (id !== null) ptyIds.push(id);
         }
         (ptyIdsByRoot[root] ??= []).push(...ptyIds);
+        (tabIdsByRoot[root] ??= []).push(t.id);
       }
       if (!cancelled) {
         setOpenedProjectPaths(roots);
         setProjectPtyIds(ptyIdsByRoot);
+        setProjectTabIds(tabIdsByRoot);
       }
     })();
     return () => {
@@ -897,24 +837,32 @@ export default function App() {
     };
   }, [tabs]);
 
+  const closeProjectTerminals = useCallback(
+    (root: string) => {
+      const ids = projectTabIds[root] ?? [];
+      if (ids.length === 0) return;
+      if (!handleCloseTabIds(ids)) {
+        sonnerToast.info("这是最后一个终端,先打开别的工程再关");
+      }
+    },
+    [projectTabIds, handleCloseTabIds],
+  );
+
   const cdInNewTab = useCallback(
     (path: string) => {
-      // 安卓工程目录去重:目标(或其上层工程根)已有终端 tab 就切过去,不重复开;
-      // 非安卓目录保持原样,可以开多个。
+      // 顶部 tab 栏撤了,切工程全靠树:目标目录(安卓工程还认它的工程根)
+      // 已有终端 tab 就切过去,不重复开。要多开一个走右键"新终端"。
       void (async () => {
         const projectRoot = await findProjectRoot(path);
-        if (projectRoot) {
-          const existing = tabsRef.current.find((t) => {
-            if (t.kind !== "terminal" || t.spaceId !== activeSpaceIdRef.current)
-              return false;
-            const cwd =
-              findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd ?? null;
-            return cwd === path || cwd === projectRoot;
-          });
-          if (existing) {
-            setActiveId(existing.id);
-            return;
-          }
+        const existing = tabsRef.current.find((t) => {
+          if (t.kind !== "terminal" || t.spaceId !== activeSpaceIdRef.current)
+            return false;
+          const cwd = findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd ?? null;
+          return cwd === path || (projectRoot !== null && cwd === projectRoot);
+        });
+        if (existing) {
+          setActiveId(existing.id);
+          return;
         }
         openNewTerminalAt(path);
       })();
@@ -1012,6 +960,18 @@ export default function App() {
     void setAndroidProjectRoot(activeTerminalLeafCwd);
   }, [activeTerminalLeafCwd, setAndroidProjectRoot]);
 
+  // 右栏源码/仓库跟着"最后一个终端"走,切到编辑器 tab 不变
+  const [lastTerminalCwd, setLastTerminalCwd] = useState<string | null>(null);
+  useEffect(() => {
+    if (activeTerminalLeafCwd !== null)
+      setLastTerminalCwd(activeTerminalLeafCwd);
+  }, [activeTerminalLeafCwd]);
+  const rightPanelRoot = usePanelRoot(
+    androidProjectRoot,
+    lastTerminalCwd,
+    home ?? null,
+  );
+
   const activeFilePath = (() => {
     if (activeTab?.kind === "editor") return activeTab.path;
     if (activeTab?.kind === "git-diff") {
@@ -1076,19 +1036,19 @@ export default function App() {
     (s) => s.explorerGitDecorations,
   );
 
-  // 工程的终端 tab 全关了,才把它在"产品目录文件"里开着的那几个文件忘掉。
+  // 工程的终端 tab 全关了,才把它在源码 tab 里开着的那几个文件忘掉。
   // 当前这个工程留着不动 —— worktree 之类的根不一定在 openedProjectPaths 里。
   useEffect(() => {
     setProjectFilesByRoot((cur) => {
       const stale = Object.keys(cur).filter(
-        (root) => root !== androidProjectRoot && !openedProjectPaths.has(root),
+        (root) => root !== rightPanelRoot && !openedProjectPaths.has(root),
       );
       if (stale.length === 0) return cur;
       const next = { ...cur };
       for (const root of stale) delete next[root];
       return next;
     });
-  }, [openedProjectPaths, androidProjectRoot]);
+  }, [openedProjectPaths, rightPanelRoot]);
 
   const openPreviewTab = useCallback(
     (url: string) => {
@@ -1293,11 +1253,18 @@ export default function App() {
       ) {
         return !(activeTab?.kind === "terminal" && activeTab.blocks === true);
       }
-      // 产品目录文件弹框开着时,⌘F 应该是"在这个文件里找",不是全局搜索;
-      // ⌘B 那些跳转键也归弹框里的编辑器。全局这套是 window 捕获 +
-      // stopImmediatePropagation,不在这儿让开的话弹框根本收不到键。
-      if (productPaneOpenRef.current) {
-        if (id === "search.focus" || id === "explorer.focus") return true;
+      // 焦点在右栏源码里时,⌘F 应该是"在这个文件里找",不是全局搜索;
+      // ⌘B 那些跳转键也归那里的编辑器。全局这套是 window 捕获 +
+      // stopImmediatePropagation,不在这儿让开的话源码 tab 根本收不到键。
+      if (id === "search.focus" || id === "explorer.focus") {
+        const target =
+          (e.target as HTMLElement | null) ?? document.activeElement;
+        if (
+          (target as HTMLElement | null)?.closest?.(
+            '[data-right-pane="source"]',
+          )
+        )
+          return true;
       }
       if (id === "sidebar.toggle") {
         // Ctrl+B is also Claude Code's "run in background" key. While a terminal
@@ -1403,11 +1370,6 @@ export default function App() {
 
   const handleEditorDirty = useCallback(
     (id: number, dirty: boolean) => updateTab(id, { dirty }),
-    [updateTab],
-  );
-
-  const handleRenameTab = useCallback(
-    (id: number, title: string) => updateTab(id, { customTitle: title.trim() }),
     [updateTab],
   );
 
@@ -1595,23 +1557,8 @@ export default function App() {
         <div className="relative flex h-screen flex-col overflow-hidden bg-frame text-foreground">
           {!zenMode && (
             <Header
-              tabs={spaceTabs}
-              activeId={activeId}
-              onSelect={setActiveId}
-              onNew={openNewTab}
-              onNewBlock={openNewBlockTab}
-              onNewPrivate={openNewPrivateTab}
-              onNewPreview={() => openPreviewTab("")}
-              onNewEditor={() => setNewEditorOpen(true)}
-              onNewGitGraph={openGitGraphFromContext}
-              onLaunchAgents={launchAgentGroup}
-              onClose={handleClose}
-              onCloseTabsToRight={handleCloseTabsToRight}
-              onCloseOtherTabs={handleCloseOtherTabs}
-              onPin={pinTab}
-              onRename={handleRenameTab}
-              onReorder={reorderTabByGap}
               onToggleSidebar={toggleSidebar}
+              onToggleRightPanel={toggleRightPanel}
               onOpenCommandPalette={() => openCommandPalette("commands")}
               onActivateAgent={onActivateAgent}
               onActivateLocalAgent={onActivateLocalAgent}
@@ -1619,11 +1566,11 @@ export default function App() {
               spaceSwitcher={null}
               searchTarget={searchTarget}
               searchRef={searchInlineRef}
-              onOverrideLanguage={setOverrideLanguage}
             />
           )}
 
-          <main className="zoom-content flex min-h-0 flex-1 flex-col">
+          <main className="zoom-content flex min-h-0 flex-1">
+            {!zenMode && <ToolRail />}
             <ResizablePanelGroup
               orientation="horizontal"
               className="min-h-0 flex-1"
@@ -1654,7 +1601,7 @@ export default function App() {
                   persistSidebarCollapsed(size.inPixels <= 0);
                 }}
               >
-                <div className="h-full min-h-0 pl-2 pr-0.5">
+                <div className="h-full min-h-0">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     <div className="min-h-0 flex-1 terax-panel-in">
                       {/* explorer 树常驻挂载(不随 sidebarView 切换重新 key),
@@ -1672,6 +1619,7 @@ export default function App() {
                             <FileExplorer
                               ref={explorerRef}
                               rootPath={activeSpaceRoot ?? explorerRoot}
+                              hideHeaderActions
                               gitStatus={
                                 explorerGitDecorations
                                   ? sourceControl.status
@@ -1696,6 +1644,7 @@ export default function App() {
                               onOpenGitHistory={handleOpenGitHistoryForPath}
                               onAttachToAgent={handleAttachFileToAgent}
                               onSetAsRoot={handleSetSpaceRoot}
+                              onCloseProjectTerminals={closeProjectTerminals}
                               onLinkYunxiaoTask={setTaskDir}
                               onLinkYunxiaoProject={setProjectLinkDir}
                               onUnlinkYunxiaoProject={(p) => {
@@ -1751,9 +1700,9 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-border/45 transition-colors duration-[var(--dur-fast)] after:w-5 hover:bg-border" />
+              <ResizableHandle className="w-px cursor-col-resize bg-border transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/30" />
               <ResizablePanel id="workspace" defaultSize="50%" minSize="25%">
-                <div className="h-full min-h-0 px-0.5">
+                <div className="h-full min-h-0">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
                     {/* 换行交给 flex-wrap 自己判断,但换的是**面包屑里面**:
                         名字那一组自己 flex-wrap,摆不下时先掉下去的是排在最后的
@@ -1769,12 +1718,12 @@ export default function App() {
                           {/* 产品目录文件的入口摆在这条最前面:它跟着的是
                               "当前这个工程",和右边那排外部工具(AS/访达)不是
                               一回事,排在分支前面更顺手 */}
-                          {showProductPane && (
+                          {rightPanelRoot && (
                             <button
                               type="button"
-                              aria-label="产品目录文件"
-                              title="产品目录文件(左树右文,不占 tab)"
-                              onClick={toggleProductPane}
+                              aria-label="源码"
+                              title="在右栏看源码"
+                              onClick={() => selectRightTab("source")}
                               className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded border border-border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
                             >
                               <HugeiconsIcon
@@ -1791,6 +1740,7 @@ export default function App() {
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             onOpenDiff={openGitDiffTab}
+                            onOpenPanel={() => selectRightTab("repo")}
                             /* 不再按 max-w-40 死切:分支名摆不下时整条会掉到
                                第二行,那一行是空的,再截就是白截。真比一整行
                                还长才截(chip 自己有 truncate)。 */
@@ -1869,9 +1819,8 @@ export default function App() {
                               上单挂一个按钮好找 */}
                             <button
                               type="button"
-                              title="产品目录文件"
-                              disabled={!showProductPane}
-                              onClick={toggleProductPane}
+                              title="在右栏看源码"
+                              onClick={() => selectRightTab("source")}
                               className="shrink-0 cursor-pointer rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground/70"
                             >
                               <HugeiconsIcon
@@ -1918,6 +1867,7 @@ export default function App() {
                           <BranchChip
                             projectRoot={androidProjectRoot}
                             onOpenDiff={openGitDiffTab}
+                            onOpenPanel={() => selectRightTab("repo")}
                             /* 不再按 max-w-40 死切:分支名摆不下时整条会掉到
                                第二行,那一行是空的,再截就是白截。真比一整行
                                还长才截(chip 自己有 truncate)。 */
@@ -1969,7 +1919,7 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-1 cursor-col-resize rounded-full bg-border/45 transition-colors duration-[var(--dur-fast)] after:w-5 hover:bg-border" />
+              <ResizableHandle className="w-px cursor-col-resize bg-border transition-colors duration-[var(--dur-fast)] after:w-3 hover:bg-foreground/30" />
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}
@@ -1978,11 +1928,41 @@ export default function App() {
                 collapsible
                 collapsedSize={0}
               >
-                <div className="h-full min-h-0 pl-0.5 pr-2">
+                <div className="h-full min-h-0">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
-                    <Suspense fallback={null}>
-                      <DevicePanel />
-                    </Suspense>
+                    <RightPanel
+                      tab={currentRightTab}
+                      onTabChange={selectRightTab}
+                      hasDevice={!!androidProjectRoot}
+                      root={rightPanelRoot}
+                      filesState={
+                        rightPanelRoot
+                          ? projectFilesByRoot[rightPanelRoot]
+                          : undefined
+                      }
+                      onFilesStateChange={(root, next) =>
+                        setProjectFilesByRoot((cur) => ({
+                          ...cur,
+                          [root]: next,
+                        }))
+                      }
+                      onOpenDiff={openGitDiffTab}
+                      sourceProps={{
+                        gitStatus: explorerGitDecorations
+                          ? sourceControl.status
+                          : null,
+                        dirtyPaths: dirtyFilePaths,
+                        onPathRenamed: handlePathRenamed,
+                        onPathDeleted: handlePathDeleted,
+                        onRevealInTerminal: cdInNewTab,
+                        onOpenNewTerminal: openNewTerminalAt,
+                        onOpenInSourceControl:
+                          handleOpenRepositoryInSourceControl,
+                        onOpenGitHistory: handleOpenGitHistoryForPath,
+                        onAttachToAgent: handleAttachFileToAgent,
+                        pathDropTarget: terminalPathDropTarget,
+                      }}
+                    />
                   </div>
                 </div>
               </ResizablePanel>
@@ -2076,34 +2056,6 @@ export default function App() {
             open={changedFilesOpen}
             onOpenChange={setChangedFilesOpen}
             repoRoot={sourceControl.status?.repoRoot ?? null}
-          />
-
-          <ProjectFilesDialog
-            open={productPaneOpen}
-            onOpenChange={setProductPaneOpen}
-            rootPath={showProductPane ? androidProjectRoot : null}
-            state={
-              (androidProjectRoot
-                ? projectFilesByRoot[androidProjectRoot]
-                : null) ?? EMPTY_PROJECT_FILES
-            }
-            onStateChange={(next) => {
-              if (!androidProjectRoot) return;
-              setProjectFilesByRoot((cur) => ({
-                ...cur,
-                [androidProjectRoot]: next,
-              }));
-            }}
-            gitStatus={explorerGitDecorations ? sourceControl.status : null}
-            dirtyPaths={dirtyFilePaths}
-            onPathRenamed={handlePathRenamed}
-            onPathDeleted={handlePathDeleted}
-            onRevealInTerminal={cdInNewTab}
-            onOpenNewTerminal={openNewTerminalAt}
-            onOpenInSourceControl={handleOpenRepositoryInSourceControl}
-            onOpenGitHistory={handleOpenGitHistoryForPath}
-            onAttachToAgent={handleAttachFileToAgent}
-            pathDropTarget={terminalPathDropTarget}
           />
 
           <NewEditorDialog

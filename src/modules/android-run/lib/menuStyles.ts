@@ -4,7 +4,11 @@
  * 别让人凑近了瞄准。
  */
 
-/** 底栏上的触发按钮。 */
+/** 左侧工具竖条上的按钮:只放图标,名字在悬停提示里。36px 见方,好点。 */
+export const RAIL_TRIGGER =
+  "flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground";
+
+/** 工具栏上带文字的触发按钮。 */
 export const MENU_TRIGGER =
   "flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded border border-border px-2 py-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground";
 

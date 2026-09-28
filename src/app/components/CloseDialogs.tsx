@@ -111,6 +111,8 @@ function closeManyMessage(pending: CloseManyPending, tabs: Tab[]): string {
   }
   const process =
     busyCount === 1 ? "A process is" : `${busyCount} processes are`;
+  if (kind === "project")
+    return `这个工程的终端里还有 ${busyCount} 个进程在跑,关闭会把它们结束掉。确定关闭?`;
   return kind === "right"
     ? `${process} running in ${busyCount === 1 ? "a tab" : "tabs"} to the right. Closing will terminate ${busyCount === 1 ? "it" : "them"}. Close anyway?`
     : `${process} running in ${busyCount === 1 ? "another tab" : "other tabs"}. Closing will terminate ${busyCount === 1 ? "it" : "them"}. Close anyway?`;
@@ -259,7 +261,9 @@ export function CloseDialogs({
             <AlertDialogTitle>
               {pendingCloseMany?.kind === "right"
                 ? "Close Tabs to the Right"
-                : "Close Other Tabs"}
+                : pendingCloseMany?.kind === "project"
+                  ? "关闭工程终端"
+                  : "Close Other Tabs"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingCloseMany ? closeManyMessage(pendingCloseMany, tabs) : ""}

@@ -4,7 +4,7 @@ import { BubbleChatIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { toast } from "sonner";
 import { findApp, openApp } from "./lib/apps";
-import { MENU_TRIGGER } from "./lib/menuStyles";
+import { RAIL_TRIGGER } from "./lib/menuStyles";
 
 /**
  * 微信只是切过去,不做别的。
@@ -33,12 +33,11 @@ export function WeChatButton() {
   return (
     <button
       type="button"
-      title="打开微信"
       onClick={() => void openWeChat()}
-      className={MENU_TRIGGER}
+      className={RAIL_TRIGGER}
+      aria-label="微信"
     >
-      <HugeiconsIcon icon={BubbleChatIcon} size={13} strokeWidth={1.75} />
-      微信
+      <HugeiconsIcon icon={BubbleChatIcon} size={18} strokeWidth={1.6} />
     </button>
   );
 }

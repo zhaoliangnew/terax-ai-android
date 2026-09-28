@@ -45,6 +45,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { branchSearchKey, matchesBranchQuery } from "./lib/branchFilter";
 import { shellQuote } from "./lib/openExternally";
 
 type RepoInfo = { repoRoot: string; branch: string };
@@ -476,6 +477,12 @@ type Props = {
   bare?: boolean;
   /** 点改动文件打开它的 diff(git-diff tab)。 */
   onOpenDiff?: (input: GitDiffOpenInput) => void;
+  /** panel = 不画 chip,仓库内容直接铺在右栏"仓库"tab 里。 */
+  variant?: "chip" | "panel";
+  /** panel 模式下 tab 是否正露着:藏起来时不读分支/日志。 */
+  visible?: boolean;
+  /** chip 点击改为打开右栏仓库 tab,不再弹框。 */
+  onOpenPanel?: () => void;
 };
 
 /**
@@ -490,9 +497,21 @@ export function BranchChip({
   className,
   bare,
   onOpenDiff,
+  variant = "chip",
+  visible = false,
+  onOpenPanel,
 }: Props) {
   const repo = useProjectRepo(projectRoot);
-  const [open, setOpen] = useState(false);
+  const isPanel = variant === "panel";
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // 右栏里的仓库 tab 没有"关"这回事,切走了只是不再读数据
+  const open = isPanel ? visible : dialogOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!isPanel) setDialogOpen(next);
+    },
+    [isPanel],
+  );
   const [branches, setBranches] = useState<GitBranchEntry[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   // 有未提交改动时被拦下的那次切换:记住目标分支,等提交完成后继续
@@ -560,6 +579,8 @@ export function BranchChip({
   // (几十上百个,全摊开会把分支挤到看不见,而且窄栏放不下备注)
   const [tags, setTags] = useState<GitTagEntry[] | null>(null);
   const [tagsOpen, setTagsOpen] = useState(false);
+  // 左栏分支搜索:原文、全拼、拼音首字母都认
+  const [branchQuery, setBranchQuery] = useState("");
   // 正在删的标签名(禁用重复点)
   const [tagBusy, setTagBusy] = useState<string | null>(null);
   // 删标签的两步确认:值是 `local:名字` / `remote:名字`
@@ -714,6 +735,38 @@ export function BranchChip({
     () => branches?.filter((b) => b.kind === "remote") ?? [],
     [branches],
   );
+  // 拼音只在分支列表变了时算一次,按键时只做子串比较
+  const branchKeys = useMemo(
+    () =>
+      new Map((branches ?? []).map((b) => [b.name, branchSearchKey(b.name)])),
+    [branches],
+  );
+  const branchQueryActive = branchQuery.trim() !== "";
+  const shownLocalBranches = useMemo(
+    () =>
+      branchQueryActive
+        ? localBranches.filter((b) => {
+            const key = branchKeys.get(b.name);
+            return key ? matchesBranchQuery(key, branchQuery) : false;
+          })
+        : localBranches,
+    [localBranches, branchKeys, branchQuery, branchQueryActive],
+  );
+  const shownRemoteBranches = useMemo(
+    () =>
+      branchQueryActive
+        ? remoteBranches.filter((b) => {
+            const key = branchKeys.get(b.name);
+            return key ? matchesBranchQuery(key, branchQuery) : false;
+          })
+        : remoteBranches,
+    [remoteBranches, branchKeys, branchQuery, branchQueryActive],
+  );
+  // 换了仓库,上一个仓库的搜索词没意义
+  // biome-ignore lint/correctness/useExhaustiveDependencies: repoRoot 是重置信号
+  useEffect(() => {
+    setBranchQuery("");
+  }, [repoRoot]);
   // 下半改动区的数据源:选了"未提交的更改"就是工作区,否则是那条提交。
   // 两边字段对不上(工作区没有增删行数,提交没有 untracked),这里抹平成
   // 一份行模型,省得下面两套几乎一样的 JSX。
@@ -1246,7 +1299,7 @@ export function BranchChip({
         setCheckingOut(false);
       }
     },
-    [repoRoot, setDiscardArmed],
+    [repoRoot, setDiscardArmed, setOpen],
   );
 
   const commitAndSwitch = useCallback(
@@ -1326,7 +1379,13 @@ export function BranchChip({
     }
   }, [repoRoot, pendingSwitch]);
 
-  if (!repo) return null;
+  if (!repo) {
+    return isPanel ? (
+      <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
+        这里不是 git 仓库
+      </div>
+    ) : null;
+  }
 
   if (bare) {
     return (
@@ -1342,13 +1401,1037 @@ export function BranchChip({
     );
   }
 
-  return (
+  // 常用操作钉在左上角(和右上角的关闭 X 对称);只作用于当前
+  // 分支,右边看别的分支提交记录时就藏起来,免得会错意
+  const actions = selected?.isHead && (
+    // 右上角、关闭 X 左边 —— 跟 SourceTree 工具栏一个位置
+    <div
+      className={cn(
+        "flex items-center gap-1.5",
+        isPanel ? "ml-auto" : "absolute top-4 right-14",
+      )}
+    >
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={busyAction !== null}
+        title="暂存并提交当前分支的全部改动"
+        onClick={() => {
+          setCommitMsg("");
+          setCommitOnlyOpen(true);
+        }}
+        className="h-7 gap-1 px-2 text-xs"
+      >
+        <HugeiconsIcon
+          icon={CheckmarkCircle01Icon}
+          size={13}
+          strokeWidth={1.75}
+        />
+        提交
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={syncBusy !== null}
+        title="git pull --ff-only(仅快进)"
+        onClick={() => void runSync("pull")}
+        className="h-7 gap-1 px-2 text-xs"
+      >
+        {syncBusy === "pull" ? (
+          <Spinner className="size-3" />
+        ) : (
+          <HugeiconsIcon icon={Download01Icon} size={13} strokeWidth={1.75} />
+        )}
+        拉取
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={syncBusy !== null}
+        title="git push"
+        onClick={() => void runSync("push")}
+        className="h-7 gap-1 px-2 text-xs"
+      >
+        {syncBusy === "push" ? (
+          <Spinner className="size-3" />
+        ) : (
+          <HugeiconsIcon icon={ArrowUp01Icon} size={13} strokeWidth={1.75} />
+        )}
+        推送
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={syncBusy !== null}
+        title="git fetch(只更新远程分支,不动工作区)"
+        onClick={() => void runSync("fetch")}
+        className="h-7 gap-1 px-2 text-xs"
+      >
+        {syncBusy === "fetch" ? (
+          <Spinner className="size-3" />
+        ) : (
+          <HugeiconsIcon
+            icon={Download01Icon}
+            size={13}
+            strokeWidth={1.75}
+            className="opacity-60"
+          />
+        )}
+        抓取
+      </Button>
+    </div>
+  );
+
+  const content = (
+    <>
+      {/* 读取中/出错也占满最终尺寸(左 18rem + gap 1rem + 右 64rem):
+              弹框宽高是 w-max 按内容算的,先摆一个小小的"正在读取…"再换成
+              完整内容,开框时就会闪一下、跳一次。 */}
+      {branches == null && listError == null ? (
+        <div
+          className={cn(
+            "flex items-center justify-center gap-2 text-[11px] text-muted-foreground",
+            isPanel ? "min-h-0 flex-1" : "h-[72vh] w-[83rem] max-w-full",
+          )}
+        >
+          <Spinner className="size-3" />
+          正在读取分支…
+        </div>
+      ) : listError ? (
+        <div
+          className={cn(
+            "flex items-center justify-center px-3 text-[11px] leading-snug text-destructive",
+            isPanel ? "min-h-0 flex-1" : "h-[72vh] w-[83rem] max-w-full",
+          )}
+        >
+          {listError}
+        </div>
+      ) : (
+        <div
+          className={cn(
+            "flex min-h-0 min-w-0",
+            isPanel ? "flex-1 gap-3" : "gap-4",
+          )}
+        >
+          {/* 左:分支单列列表。单击选中看提交记录,双击才切换 */}
+          <div
+            className={cn(
+              "shrink-0 overflow-y-auto pr-1",
+              isPanel ? "h-full w-56" : "h-[72vh] w-72",
+            )}
+          >
+            {/* 搜索框钉在列表顶上,滚到下面也能直接改搜索词 */}
+            <div className="sticky top-0 z-10 bg-background pb-1">
+              <input
+                value={branchQuery}
+                onChange={(e) => setBranchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && branchQuery) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setBranchQuery("");
+                  }
+                }}
+                placeholder="搜索分支(支持拼音首字母)"
+                aria-label="搜索分支"
+                spellCheck={false}
+                className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-[12px] outline-none placeholder:text-muted-foreground/60 focus:border-foreground/30"
+              />
+            </div>
+            {branchQueryActive &&
+              shownLocalBranches.length === 0 &&
+              shownRemoteBranches.length === 0 && (
+                <div className="px-2 py-2 text-[11.5px] text-muted-foreground">
+                  没有匹配的分支
+                </div>
+              )}
+            {/* 标签钉在最上面,而且只露最新那一个 —— 找"线上是哪一版"
+                    十次有九次就是看它;要翻历史版本点"全部"开单独的弹框
+                    (标签名/时间/备注/提交号四列,这条 18rem 的窄栏放不下)。
+                    标签不给双击 checkout —— 那是 detached HEAD,要用就右键
+                    基于它开分支/worktree。 */}
+            {!branchQueryActive && tags != null && tags.length > 0 && (
+              <>
+                <div className="flex w-full items-center justify-between px-2 py-1.5">
+                  <span className="text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
+                    标签
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setTagsOpen(true)}
+                    className="cursor-pointer rounded px-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
+                  >
+                    全部 {tags.length} 个
+                  </button>
+                </div>
+                {tags.slice(0, 1).map((t) => (
+                  <ContextMenu key={t.name}>
+                    <ContextMenuTrigger asChild>
+                      <button
+                        type="button"
+                        title={`${t.name} · ${t.shortSha} · ${formatCommitTime(t.timestampSecs)}${t.subject ? `\n${t.subject}` : ""}`}
+                        onClick={() =>
+                          selectBranch({
+                            display: t.name,
+                            // 用全名限定,免得和同名分支撞上
+                            refName: `refs/tags/${t.name}`,
+                            checkoutName: t.name,
+                            isHead: false,
+                          })
+                        }
+                        className={cn(
+                          "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
+                          selected?.refName === `refs/tags/${t.name}` &&
+                            "bg-foreground/10",
+                        )}
+                      >
+                        <span className="size-3.5 shrink-0" />
+                        {/* 标签名用琥珀色 —— 和提交行上那个标签角标同一个
+                                颜色,一眼能对上是同一样东西 */}
+                        <span className="min-w-0 truncate text-amber-500">
+                          {t.name}
+                        </span>
+                        {/* 列宽只有 18rem,这里只放到日期;完整时间在 title 里 */}
+                        <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70">
+                          {formatCommitDate(t.timestampSecs)}
+                        </span>
+                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
+                          {t.shortSha}
+                        </span>
+                      </button>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="min-w-52 max-w-96">
+                      <ContextMenuItem
+                        className="text-[12px]"
+                        onSelect={() =>
+                          setPendingNewBranch({
+                            baseRef: `refs/tags/${t.name}`,
+                            label: `标签 ${t.name}`,
+                          })
+                        }
+                      >
+                        基于此标签新建分支…
+                      </ContextMenuItem>
+                      {!inWorktree && (
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() =>
+                            setPendingWorktree({
+                              baseRef: `refs/tags/${t.name}`,
+                              shortName: t.name,
+                              label: `标签 ${t.name}`,
+                            })
+                          }
+                        >
+                          为此标签创建 worktree…
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        className="text-[12px]"
+                        onSelect={() => {
+                          void copyToClipboard(t.name);
+                          toast.success("已复制标签名", {
+                            description: t.name,
+                          });
+                        }}
+                      >
+                        复制标签名
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        className="text-[12px]"
+                        onSelect={() => {
+                          void copyToClipboard(t.sha);
+                          toast.success("已复制标签指向的提交", {
+                            description: t.sha,
+                          });
+                        }}
+                      >
+                        复制提交 SHA
+                      </ContextMenuItem>
+                      {tagDeleteItems(t)}
+                    </ContextMenuContent>
+                  </ContextMenu>
+                ))}
+              </>
+            )}
+            {shownLocalBranches.length > 0 && (
+              <div className="px-2 py-1.5 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
+                本地分支
+              </div>
+            )}
+            {shownLocalBranches.map((b) => (
+              <ContextMenu key={b.name}>
+                <ContextMenuTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      selectBranch({
+                        display: b.name,
+                        refName: b.name,
+                        checkoutName: b.name,
+                        isHead: b.isHead,
+                      })
+                    }
+                    onDoubleClick={() => {
+                      if (b.isHead || checkingOut) return;
+                      if (b.kind === "worktree") {
+                        // 分支同时只能被一个工作区 checkout,主工作区切不了
+                        toast.error(
+                          `${b.name} 已挂在 worktree 上,请直接打开对应目录使用`,
+                        );
+                        return;
+                      }
+                      void handleCheckout(b.name);
+                    }}
+                    className={cn(
+                      "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
+                      selected?.refName === b.name && "bg-foreground/10",
+                    )}
+                  >
+                    {b.isHead ? (
+                      <HugeiconsIcon
+                        icon={Tick02Icon}
+                        size={14}
+                        strokeWidth={2}
+                        className="shrink-0 text-emerald-500"
+                      />
+                    ) : (
+                      <span className="size-3.5 shrink-0" />
+                    )}
+                    <span
+                      className={cn(
+                        "min-w-0 truncate",
+                        b.isHead && "font-semibold text-emerald-500",
+                      )}
+                    >
+                      {b.name}
+                    </span>
+                    {b.kind === "worktree" && (
+                      <span
+                        title={`这个分支检出在平行工作目录里${b.worktreePath ? `:\n${b.worktreePath}\n` : ","}一个分支同时只能被一个工作区检出,这里切不了 —— 去左侧项目树点对应的 worktree 子行使用`}
+                        className="shrink-0 rounded bg-foreground/10 px-1 text-[9.5px] text-muted-foreground"
+                      >
+                        worktree
+                      </span>
+                    )}
+                    {/* 相对上游的领先/落后,和 SourceTree 的 2↑ 一个意思 */}
+                    {(b.ahead > 0 || b.behind > 0) && (
+                      <span className="ml-auto shrink-0 rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground tabular-nums">
+                        {b.ahead > 0 && `${b.ahead}↑`}
+                        {b.ahead > 0 && b.behind > 0 && " "}
+                        {b.behind > 0 && `${b.behind}↓`}
+                      </span>
+                    )}
+                  </button>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="min-w-52 max-w-96">
+                  {/* 双击也能切,但双击这事儿没人猜得到,菜单里给一份 */}
+                  {!b.isHead && b.kind === "local" && (
+                    <>
+                      <ContextMenuItem
+                        className="text-[12px]"
+                        disabled={checkingOut}
+                        onSelect={() => void handleCheckout(b.name)}
+                      >
+                        <span className="min-w-0 truncate">检出 {b.name}</span>
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                    </>
+                  )}
+                  {/* 合并方向最容易搞反,菜单上把两个分支名都写全 */}
+                  {!b.isHead && currentBranch && (
+                    <ContextMenuItem
+                      className="text-[12px]"
+                      onSelect={() =>
+                        setPendingMerge({
+                          ref: b.name,
+                          display: `分支 ${b.name}`,
+                        })
+                      }
+                    >
+                      <span className="min-w-0 truncate">
+                        合并 {b.name} 到 {currentBranch}…
+                      </span>
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuItem
+                    className="text-[12px]"
+                    onSelect={() =>
+                      setPendingNewBranch({
+                        baseRef: b.name,
+                        label: `分支 ${b.name}`,
+                      })
+                    }
+                  >
+                    基于此分支新建分支…
+                  </ContextMenuItem>
+                  {!inWorktree && (
+                    <ContextMenuItem
+                      className="text-[12px]"
+                      onSelect={() =>
+                        setPendingWorktree({
+                          baseRef: b.name,
+                          shortName: b.name,
+                          label: `分支 ${b.name}`,
+                        })
+                      }
+                    >
+                      为此分支创建 worktree…
+                    </ContextMenuItem>
+                  )}
+                  {/* 推到远端同名分支:不用先切过去,git 允许推没检出
+                          的分支。没有上游会顺手建立跟踪 */}
+                  <ContextMenuItem
+                    className="text-[12px]"
+                    disabled={pushingBranch !== null}
+                    onSelect={() => void pushBranch(b.name)}
+                  >
+                    <span className="min-w-0 truncate">
+                      推送到远端同名分支
+                      {b.ahead > 0 ? `(${b.ahead} 个提交)` : ""}
+                    </span>
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    className="text-[12px]"
+                    onSelect={() => {
+                      void copyToClipboard(b.name);
+                      toast.success("已复制分支名", {
+                        description: b.name,
+                      });
+                    }}
+                  >
+                    复制分支名
+                  </ContextMenuItem>
+                  {/* 当前分支和被 worktree 占用的分支 git 都不让删 */}
+                  {b.kind === "local" && !b.isHead && (
+                    <>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        className="text-[12px] text-destructive focus:text-destructive"
+                        onSelect={() =>
+                          setPendingDelete({
+                            branch: b.name,
+                            remote: null,
+                            display: `本地分支 ${b.name}`,
+                          })
+                        }
+                      >
+                        删除分支…
+                      </ContextMenuItem>
+                    </>
+                  )}
+                </ContextMenuContent>
+              </ContextMenu>
+            ))}
+            {shownRemoteBranches.length > 0 && (
+              <>
+                <div className="px-2 py-1.5 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
+                  远程分支
+                </div>
+                {shownRemoteBranches.map((b) => (
+                  <ContextMenu key={b.name}>
+                    <ContextMenuTrigger asChild>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          selectBranch({
+                            display: b.name,
+                            refName: b.name,
+                            checkoutName: remoteShortName(b.name),
+                            isHead: false,
+                          })
+                        }
+                        onDoubleClick={() => {
+                          if (!checkingOut) {
+                            void handleCheckout(remoteShortName(b.name));
+                          }
+                        }}
+                        className={cn(
+                          "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
+                          selected?.refName === b.name && "bg-foreground/10",
+                        )}
+                      >
+                        <span className="size-3.5 shrink-0" />
+                        <span className="min-w-0 truncate">{b.name}</span>
+                      </button>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="min-w-52 max-w-96">
+                      {/* 检出远程分支 = 建一个跟踪它的同名本地分支;
+                              本地已经有同名分支时 git 直接切过去 */}
+                      <ContextMenuItem
+                        className="text-[12px]"
+                        disabled={checkingOut}
+                        onSelect={() =>
+                          void handleCheckout(remoteShortName(b.name))
+                        }
+                      >
+                        <span className="min-w-0 truncate">
+                          检出为本地分支 {remoteShortName(b.name)}
+                        </span>
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      {currentBranch && (
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() =>
+                            setPendingMerge({
+                              ref: b.name,
+                              display: `远程分支 ${b.name}`,
+                            })
+                          }
+                        >
+                          <span className="min-w-0 truncate">
+                            合并 {b.name} 到 {currentBranch}…
+                          </span>
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuItem
+                        className="text-[12px]"
+                        onSelect={() =>
+                          setPendingNewBranch({
+                            baseRef: b.name,
+                            label: `远程分支 ${b.name}`,
+                          })
+                        }
+                      >
+                        基于此分支新建分支…
+                      </ContextMenuItem>
+                      {!inWorktree && (
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() =>
+                            setPendingWorktree({
+                              baseRef: b.name,
+                              shortName: remoteShortName(b.name),
+                              label: `远程分支 ${b.name}`,
+                            })
+                          }
+                        >
+                          为此分支创建 worktree…
+                        </ContextMenuItem>
+                      )}
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        className="text-[12px]"
+                        onSelect={() => {
+                          void copyToClipboard(b.name);
+                          toast.success("已复制分支名", {
+                            description: b.name,
+                          });
+                        }}
+                      >
+                        复制分支名
+                      </ContextMenuItem>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        className="text-[12px] text-destructive focus:text-destructive"
+                        onSelect={() =>
+                          setPendingDelete({
+                            branch: remoteShortName(b.name),
+                            remote: b.name.split("/")[0] ?? "origin",
+                            display: `远程分支 ${b.name}`,
+                          })
+                        }
+                      >
+                        删除远程分支…
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+                ))}
+              </>
+            )}
+          </div>
+          {/* 右:上半提交记录,下半选中提交的改动(照 SourceTree 那套
+                  上下分区 —— diff 通栏比挤在窄的第三栏里好读得多) */}
+          <div
+            className={cn(
+              "flex min-w-0 flex-col border-l border-border",
+              isPanel ? "h-full flex-1 pl-3" : "h-[72vh] w-[64rem] pl-4",
+            )}
+          >
+            {/* 上:提交记录。开着改动区时让出下面一大半 */}
+            <div
+              className={cn(
+                "flex min-h-0 flex-col",
+                openCommit ? "h-[38%]" : "flex-1",
+              )}
+            >
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                {/* 工作区有没提交的改动就顶一行上去(照 SourceTree 的
+                        "Uncommitted changes"):点它下面看的是工作区 diff。
+                        只在当前分支上有意义 —— 别的分支的提交记录跟工作区
+                        不是一回事 */}
+                {selected?.isHead && (workingFiles?.length ?? 0) > 0 && (
+                  // biome-ignore lint/a11y/useSemanticElements: 和下面的提交行结构保持一致
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    title="点击查看工作区里还没提交的改动"
+                    onClick={() => {
+                      setWorkingOpen(true);
+                      setWorkingFile(workingFiles?.[0] ?? null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setWorkingOpen(true);
+                        setWorkingFile(workingFiles?.[0] ?? null);
+                      }
+                    }}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2 border-b border-border/40 px-1 py-1.5 transition-colors hover:bg-foreground/[0.06]",
+                      workingOpen && "sticky top-0 z-10 bg-popover",
+                    )}
+                  >
+                    {/* 和下面的提交行对齐:那边最前面是时间列 */}
+                    <span className="w-28 shrink-0 text-[10.5px] text-muted-foreground/50">
+                      现在
+                    </span>
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 break-words text-[12px] leading-snug font-medium",
+                        workingOpen && "text-emerald-500/75",
+                      )}
+                    >
+                      未提交的更改
+                    </span>
+                    <span className="shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
+                      {workingFiles?.length} 个文件
+                    </span>
+                    <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/50">
+                      ·
+                    </span>
+                  </div>
+                )}
+                {logError ? (
+                  <div className="px-1 py-2 text-[11px] leading-snug text-destructive">
+                    {logError}
+                  </div>
+                ) : logEntries == null ? (
+                  <div className="flex items-center gap-2 px-1 py-2 text-[11px] text-muted-foreground">
+                    <Spinner className="size-3" />
+                    正在读取提交记录…
+                  </div>
+                ) : logEntries.length === 0 ? (
+                  <div className="px-1 py-2 text-[11px] text-muted-foreground">
+                    没有提交记录
+                  </div>
+                ) : (
+                  logEntries.map((c) => (
+                    <ContextMenu key={c.sha}>
+                      <ContextMenuTrigger asChild>
+                        {/* biome-ignore lint/a11y/useSemanticElements: 行里还要放右键菜单和多段文本,<button> 会把结构挤坏 */}
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          title="点击查看这次提交改了什么"
+                          onClick={() => {
+                            setWorkingOpen(false);
+                            setOpenCommit(c);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              setWorkingOpen(false);
+                              setOpenCommit(c);
+                            }
+                          }}
+                          className={cn(
+                            "flex cursor-pointer items-center gap-2 border-b border-border/40 px-1 py-1.5 transition-colors last:border-b-0 hover:bg-foreground/[0.06]",
+                            // 选中的那条钉在列表顶上:列表一滚,下面
+                            // 那片 diff 到底是哪个提交的就看不见了
+                            !workingOpen &&
+                              openCommit?.sha === c.sha &&
+                              "sticky top-0 z-10 bg-popover",
+                          )}
+                        >
+                          {/* 时间放最前面:按时间找提交比按说明找快,
+                                  一列对齐了扫起来也省事 */}
+                          <span className="w-28 shrink-0 text-[10.5px] text-muted-foreground tabular-nums">
+                            {formatCommitTime(c.timestampSecs)}
+                          </span>
+                          {/* 说明完整显示,超长折行而不是截断。右边 diff
+                                是哪条提交的,靠这行文字变绿来认 —— 比当前
+                                分支那个绿淡一档,免得跟"你在这个分支上"
+                                抢注意力 */}
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 break-words text-[12px] leading-snug",
+                              !workingOpen &&
+                                openCommit?.sha === c.sha &&
+                                "text-emerald-500/75",
+                            )}
+                          >
+                            {c.subject}
+                          </span>
+                          {/* 这个提交上打了标签就摆出来 —— 找"哪一版发的"
+                                全靠它,比翻左边标签列表快 */}
+                          {c.tags.map((t) => (
+                            <span
+                              key={t}
+                              title={`标签 ${t}`}
+                              className="max-w-40 shrink-0 truncate rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-500"
+                            >
+                              {t}
+                            </span>
+                          ))}
+                          <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
+                            {c.shortSha}
+                          </span>
+                          <span className="shrink-0 text-[10.5px] text-muted-foreground">
+                            {c.author}
+                          </span>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent className="min-w-52">
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() => setOpenCommit(c)}
+                        >
+                          查看改动…
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() => {
+                            void copyToClipboard(c.sha);
+                            toast.success("已复制完整 SHA", {
+                              description: c.sha,
+                            });
+                          }}
+                        >
+                          复制 SHA
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() =>
+                            setPendingNewBranch({
+                              baseRef: c.sha,
+                              label: `提交 ${c.shortSha}(${c.subject})`,
+                            })
+                          }
+                        >
+                          基于此提交新建分支…
+                        </ContextMenuItem>
+                        <ContextMenuItem
+                          className="text-[12px]"
+                          onSelect={() =>
+                            setPendingWorktree({
+                              baseRef: c.sha,
+                              shortName: c.shortSha,
+                              label: `提交 ${c.shortSha}(${c.subject})`,
+                            })
+                          }
+                        >
+                          基于此提交创建 worktree…
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  ))
+                )}
+              </div>
+            </div>
+            {/* 下:选中的改动 —— 左文件清单+说明,右 diff,通栏铺开。
+                    数据源可能是某个提交,也可能是工作区(未提交的更改) */}
+            {(openCommit || workingOpen) && (
+              <div className="mt-2 flex min-h-0 flex-1 flex-col border-t border-border pt-2">
+                <div className="flex min-h-0 flex-1 gap-3">
+                  <div
+                    className={cn(
+                      "flex shrink-0 flex-col",
+                      isPanel ? "w-52" : "w-72",
+                    )}
+                  >
+                    <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                      {changeRows == null ? (
+                        <div className="flex items-center gap-2 px-1 py-2 text-[11px] text-muted-foreground">
+                          <Spinner className="size-3" />
+                          正在读取改动…
+                        </div>
+                      ) : changeRowsError ? (
+                        <div className="px-1 py-2 text-[11px] leading-snug text-destructive">
+                          {changeRowsError}
+                        </div>
+                      ) : changeRows.length === 0 ? (
+                        <div className="px-1 py-2 text-[11px] text-muted-foreground">
+                          {workingOpen
+                            ? "工作区没有未提交的改动"
+                            : "这次提交没有文件改动(空提交或合并提交)"}
+                        </div>
+                      ) : (
+                        changeRows.map((r) => (
+                          <button
+                            key={r.key}
+                            type="button"
+                            title={
+                              r.originalPath
+                                ? `${r.originalPath} → ${r.path}`
+                                : r.path
+                            }
+                            onClick={r.onPick}
+                            className={cn(
+                              "flex w-full min-w-0 cursor-pointer flex-col items-start gap-0.5 rounded px-1.5 py-1 text-left transition-colors hover:bg-foreground/10",
+                              r.selected && "bg-foreground/10",
+                            )}
+                          >
+                            <span className="flex w-full min-w-0 items-center gap-2">
+                              <span
+                                title={r.label}
+                                className={cn(
+                                  "shrink-0 text-[10px] uppercase",
+                                  r.tone,
+                                )}
+                              >
+                                {r.letter}
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-[12px]">
+                                {fileBasename(r.path)}
+                              </span>
+                              {/* 二进制没有行数可言,别摆 +0/−0 误导;
+                                      工作区那份 git 没给行数,也不摆 */}
+                              {r.isBinary ? (
+                                <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                                  binary
+                                </span>
+                              ) : r.added !== null || r.removed !== null ? (
+                                <span className="shrink-0 text-[10px] tabular-nums">
+                                  {(r.added ?? 0) > 0 && (
+                                    <span className="text-emerald-500">
+                                      +{r.added}
+                                    </span>
+                                  )}
+                                  {(r.added ?? 0) > 0 &&
+                                    (r.removed ?? 0) > 0 &&
+                                    " "}
+                                  {(r.removed ?? 0) > 0 && (
+                                    <span className="text-red-400">
+                                      −{r.removed}
+                                    </span>
+                                  )}
+                                </span>
+                              ) : null}
+                            </span>
+                            {/* 同名文件常见(不同模块的 build.gradle) */}
+                            <span className="w-full truncate pl-5 text-[10.5px] text-muted-foreground/60">
+                              {r.path}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                    {/* 提交说明全文 + 元信息:摆在文件清单下面,和
+                          SourceTree 一个位置。正文常有好几段,保留换行 */}
+                    <div className="mt-2 max-h-[45%] shrink-0 overflow-y-auto border-t border-border pt-2 pr-1">
+                      {workingOpen ? (
+                        <div className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
+                          <span className="font-medium text-foreground">
+                            工作区未提交的改动
+                          </span>
+                          <span className="text-[10.5px]">
+                            共 {workingFiles?.length ?? 0} 个文件 · 分支{" "}
+                            {repo.branch}
+                          </span>
+                          <span className="text-[10.5px] text-muted-foreground/70">
+                            要提交的话用左上角的「提交」按钮
+                          </span>
+                        </div>
+                      ) : (
+                        openCommit && (
+                          <>
+                            <div className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed">
+                              {commitMeta?.subject ?? openCommit.subject}
+                              {commitMeta?.body ? `\n\n${commitMeta.body}` : ""}
+                            </div>
+                            <div className="mt-2 flex flex-col gap-0.5 text-[10.5px] text-muted-foreground">
+                              <span className="flex gap-1.5">
+                                <span className="shrink-0 text-muted-foreground/60">
+                                  提交
+                                </span>
+                                <button
+                                  type="button"
+                                  title="点击复制完整 SHA"
+                                  onClick={() => {
+                                    void copyToClipboard(openCommit.sha);
+                                    toast.success("已复制完整 SHA", {
+                                      description: openCommit.sha,
+                                    });
+                                  }}
+                                  className="min-w-0 cursor-pointer truncate text-left font-mono hover:text-foreground hover:underline"
+                                >
+                                  {openCommit.sha}
+                                </button>
+                              </span>
+                              {(commitMeta?.parents.length ?? 0) > 0 && (
+                                <span className="flex gap-1.5">
+                                  <span className="shrink-0 text-muted-foreground/60">
+                                    父级
+                                  </span>
+                                  <span className="min-w-0 truncate font-mono">
+                                    {commitMeta?.parents
+                                      .map((x) => x.slice(0, 7))
+                                      .join(" ")}
+                                  </span>
+                                </span>
+                              )}
+                              <span className="flex gap-1.5">
+                                <span className="shrink-0 text-muted-foreground/60">
+                                  作者
+                                </span>
+                                <span className="min-w-0 truncate">
+                                  {commitMeta
+                                    ? `${commitMeta.author} <${commitMeta.authorEmail}>`
+                                    : openCommit.author}
+                                </span>
+                              </span>
+                              <span className="flex gap-1.5">
+                                <span className="shrink-0 text-muted-foreground/60">
+                                  日期
+                                </span>
+                                <span className="min-w-0 truncate">
+                                  {formatCommitTime(openCommit.timestampSecs)}
+                                </span>
+                              </span>
+                              {(commitMeta?.refs.length ?? 0) > 0 && (
+                                <span className="flex gap-1.5">
+                                  <span className="shrink-0 text-muted-foreground/60">
+                                    标签
+                                  </span>
+                                  <span className="min-w-0 break-words">
+                                    {commitMeta?.refs.join(", ")}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                          </>
+                        )
+                      )}
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1 overflow-hidden border-l border-border pl-3">
+                    {diffSource ? (
+                      <GitDiffPane
+                        key={diffKey}
+                        active
+                        chipLabel={diffChipLabel}
+                        hideRepoPath
+                        source={diffSource}
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
+                        {changeRows?.length ? "选个文件看改动" : ""}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {branches != null && (
+        <div
+          className={cn(
+            "border-t border-border pt-3",
+            isPanel && "max-h-40 shrink-0 overflow-y-auto",
+          )}
+        >
+          <div className="mb-1 px-2 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
+            Worktree
+          </div>
+          {worktrees.map((w) => {
+            const wtPath = w.worktreePath;
+            return (
+              <div
+                key={wtPath ?? w.name}
+                className="flex items-center gap-2 rounded-lg px-2 py-1 text-[12px] hover:bg-foreground/5"
+              >
+                <HugeiconsIcon
+                  icon={GitBranchIcon}
+                  size={12}
+                  strokeWidth={1.75}
+                  className="shrink-0 text-muted-foreground"
+                />
+                <span className="max-w-48 shrink-0 truncate">{w.name}</span>
+                <span
+                  className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70"
+                  title={wtPath ?? ""}
+                >
+                  {wtPath}
+                </span>
+                {wtPath && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[11px]"
+                      onClick={() => void revealInFinder(wtPath)}
+                    >
+                      打开目录
+                    </Button>
+                    <Button
+                      variant={wtRemoveArm === wtPath ? "destructive" : "ghost"}
+                      size="sm"
+                      disabled={wtBusy}
+                      className={cn(
+                        "h-6 gap-1 px-2 text-[11px]",
+                        wtRemoveArm !== wtPath &&
+                          "text-destructive hover:text-destructive",
+                      )}
+                      onClick={() => {
+                        if (wtRemoveArm === wtPath) {
+                          void removeWorktree(wtPath);
+                        } else {
+                          setWtRemoveArm(wtPath);
+                        }
+                      }}
+                    >
+                      {wtBusy && wtRemoveArm === wtPath && (
+                        <Spinner className="size-3" />
+                      )}
+                      {wtRemoveArm === wtPath ? "再点一次确认删除" : "删除"}
+                    </Button>
+                  </>
+                )}
+              </div>
+            );
+          })}
+          {worktrees.length === 0 && (
+            <div className="px-2 py-1 text-[11px] text-muted-foreground">
+              暂无 worktree · 右键分支或提交即可创建
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  const main = isPanel ? (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border px-3 py-1.5 text-[12.5px]">
+        <HugeiconsIcon
+          icon={GitBranchIcon}
+          size={13}
+          strokeWidth={1.75}
+          className="shrink-0 text-muted-foreground"
+        />
+        <span className="min-w-0 truncate font-semibold">{repo.branch}</span>
+        {actions}
+        <RepoUrlChip
+          projectRoot={projectRoot}
+          className="basis-full font-mono text-[11px]"
+        />
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-3 p-3">{content}</div>
+    </div>
+  ) : (
     <>
       <button
         type="button"
         disabled={checkingOut}
         title={`当前分支 · ${repo.branch} · 点击切换`}
-        onClick={() => setOpen(true)}
+        onClick={() => (onOpenPanel ? onOpenPanel() : setOpen(true))}
         className={cn(
           "flex min-w-0 shrink cursor-pointer items-center gap-1 rounded text-muted-foreground transition-colors hover:text-foreground disabled:cursor-default disabled:opacity-70",
           className,
@@ -1395,958 +2478,16 @@ export function BranchChip({
               className="max-w-full font-mono text-[11px]"
             />
           </DialogHeader>
-          {/* 常用操作钉在左上角(和右上角的关闭 X 对称);只作用于当前
-              分支,右边看别的分支提交记录时就藏起来,免得会错意 */}
-          {selected?.isHead && (
-            // 右上角、关闭 X 左边 —— 跟 SourceTree 工具栏一个位置
-            <div className="absolute top-4 right-14 flex items-center gap-1.5">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={busyAction !== null}
-                title="暂存并提交当前分支的全部改动"
-                onClick={() => {
-                  setCommitMsg("");
-                  setCommitOnlyOpen(true);
-                }}
-                className="h-7 gap-1 px-2 text-xs"
-              >
-                <HugeiconsIcon
-                  icon={CheckmarkCircle01Icon}
-                  size={13}
-                  strokeWidth={1.75}
-                />
-                提交
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={syncBusy !== null}
-                title="git pull --ff-only(仅快进)"
-                onClick={() => void runSync("pull")}
-                className="h-7 gap-1 px-2 text-xs"
-              >
-                {syncBusy === "pull" ? (
-                  <Spinner className="size-3" />
-                ) : (
-                  <HugeiconsIcon
-                    icon={Download01Icon}
-                    size={13}
-                    strokeWidth={1.75}
-                  />
-                )}
-                拉取
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={syncBusy !== null}
-                title="git push"
-                onClick={() => void runSync("push")}
-                className="h-7 gap-1 px-2 text-xs"
-              >
-                {syncBusy === "push" ? (
-                  <Spinner className="size-3" />
-                ) : (
-                  <HugeiconsIcon
-                    icon={ArrowUp01Icon}
-                    size={13}
-                    strokeWidth={1.75}
-                  />
-                )}
-                推送
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={syncBusy !== null}
-                title="git fetch(只更新远程分支,不动工作区)"
-                onClick={() => void runSync("fetch")}
-                className="h-7 gap-1 px-2 text-xs"
-              >
-                {syncBusy === "fetch" ? (
-                  <Spinner className="size-3" />
-                ) : (
-                  <HugeiconsIcon
-                    icon={Download01Icon}
-                    size={13}
-                    strokeWidth={1.75}
-                    className="opacity-60"
-                  />
-                )}
-                抓取
-              </Button>
-            </div>
-          )}
-          {/* 读取中/出错也占满最终尺寸(左 18rem + gap 1rem + 右 64rem):
-              弹框宽高是 w-max 按内容算的,先摆一个小小的"正在读取…"再换成
-              完整内容,开框时就会闪一下、跳一次。 */}
-          {branches == null && listError == null ? (
-            <div className="flex h-[72vh] w-[83rem] max-w-full items-center justify-center gap-2 text-[11px] text-muted-foreground">
-              <Spinner className="size-3" />
-              正在读取分支…
-            </div>
-          ) : listError ? (
-            <div className="flex h-[72vh] w-[83rem] max-w-full items-center justify-center px-3 text-[11px] leading-snug text-destructive">
-              {listError}
-            </div>
-          ) : (
-            <div className="flex min-h-0 min-w-0 gap-4">
-              {/* 左:分支单列列表。单击选中看提交记录,双击才切换 */}
-              <div className="h-[72vh] w-72 shrink-0 overflow-y-auto pr-1">
-                {/* 标签钉在最上面,而且只露最新那一个 —— 找"线上是哪一版"
-                    十次有九次就是看它;要翻历史版本点"全部"开单独的弹框
-                    (标签名/时间/备注/提交号四列,这条 18rem 的窄栏放不下)。
-                    标签不给双击 checkout —— 那是 detached HEAD,要用就右键
-                    基于它开分支/worktree。 */}
-                {tags != null && tags.length > 0 && (
-                  <>
-                    <div className="flex w-full items-center justify-between px-2 py-1.5">
-                      <span className="text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
-                        标签
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setTagsOpen(true)}
-                        className="cursor-pointer rounded px-1 text-[10px] text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
-                      >
-                        全部 {tags.length} 个
-                      </button>
-                    </div>
-                    {tags.slice(0, 1).map((t) => (
-                      <ContextMenu key={t.name}>
-                        <ContextMenuTrigger asChild>
-                          <button
-                            type="button"
-                            title={`${t.name} · ${t.shortSha} · ${formatCommitTime(t.timestampSecs)}${t.subject ? `\n${t.subject}` : ""}`}
-                            onClick={() =>
-                              selectBranch({
-                                display: t.name,
-                                // 用全名限定,免得和同名分支撞上
-                                refName: `refs/tags/${t.name}`,
-                                checkoutName: t.name,
-                                isHead: false,
-                              })
-                            }
-                            className={cn(
-                              "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
-                              selected?.refName === `refs/tags/${t.name}` &&
-                                "bg-foreground/10",
-                            )}
-                          >
-                            <span className="size-3.5 shrink-0" />
-                            {/* 标签名用琥珀色 —— 和提交行上那个标签角标同一个
-                                颜色,一眼能对上是同一样东西 */}
-                            <span className="min-w-0 truncate text-amber-500">
-                              {t.name}
-                            </span>
-                            {/* 列宽只有 18rem,这里只放到日期;完整时间在 title 里 */}
-                            <span className="ml-auto shrink-0 text-[10px] text-muted-foreground/70">
-                              {formatCommitDate(t.timestampSecs)}
-                            </span>
-                            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/70">
-                              {t.shortSha}
-                            </span>
-                          </button>
-                        </ContextMenuTrigger>
-                        <ContextMenuContent className="min-w-52 max-w-96">
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() =>
-                              setPendingNewBranch({
-                                baseRef: `refs/tags/${t.name}`,
-                                label: `标签 ${t.name}`,
-                              })
-                            }
-                          >
-                            基于此标签新建分支…
-                          </ContextMenuItem>
-                          {!inWorktree && (
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() =>
-                                setPendingWorktree({
-                                  baseRef: `refs/tags/${t.name}`,
-                                  shortName: t.name,
-                                  label: `标签 ${t.name}`,
-                                })
-                              }
-                            >
-                              为此标签创建 worktree…
-                            </ContextMenuItem>
-                          )}
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() => {
-                              void copyToClipboard(t.name);
-                              toast.success("已复制标签名", {
-                                description: t.name,
-                              });
-                            }}
-                          >
-                            复制标签名
-                          </ContextMenuItem>
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() => {
-                              void copyToClipboard(t.sha);
-                              toast.success("已复制标签指向的提交", {
-                                description: t.sha,
-                              });
-                            }}
-                          >
-                            复制提交 SHA
-                          </ContextMenuItem>
-                          {tagDeleteItems(t)}
-                        </ContextMenuContent>
-                      </ContextMenu>
-                    ))}
-                  </>
-                )}
-                <div className="px-2 py-1.5 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
-                  本地分支
-                </div>
-                {localBranches.map((b) => (
-                  <ContextMenu key={b.name}>
-                    <ContextMenuTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          selectBranch({
-                            display: b.name,
-                            refName: b.name,
-                            checkoutName: b.name,
-                            isHead: b.isHead,
-                          })
-                        }
-                        onDoubleClick={() => {
-                          if (b.isHead || checkingOut) return;
-                          if (b.kind === "worktree") {
-                            // 分支同时只能被一个工作区 checkout,主工作区切不了
-                            toast.error(
-                              `${b.name} 已挂在 worktree 上,请直接打开对应目录使用`,
-                            );
-                            return;
-                          }
-                          void handleCheckout(b.name);
-                        }}
-                        className={cn(
-                          "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
-                          selected?.refName === b.name && "bg-foreground/10",
-                        )}
-                      >
-                        {b.isHead ? (
-                          <HugeiconsIcon
-                            icon={Tick02Icon}
-                            size={14}
-                            strokeWidth={2}
-                            className="shrink-0 text-emerald-500"
-                          />
-                        ) : (
-                          <span className="size-3.5 shrink-0" />
-                        )}
-                        <span
-                          className={cn(
-                            "min-w-0 truncate",
-                            b.isHead && "font-semibold text-emerald-500",
-                          )}
-                        >
-                          {b.name}
-                        </span>
-                        {b.kind === "worktree" && (
-                          <span
-                            title={`这个分支检出在平行工作目录里${b.worktreePath ? `:\n${b.worktreePath}\n` : ","}一个分支同时只能被一个工作区检出,这里切不了 —— 去左侧项目树点对应的 worktree 子行使用`}
-                            className="shrink-0 rounded bg-foreground/10 px-1 text-[9.5px] text-muted-foreground"
-                          >
-                            worktree
-                          </span>
-                        )}
-                        {/* 相对上游的领先/落后,和 SourceTree 的 2↑ 一个意思 */}
-                        {(b.ahead > 0 || b.behind > 0) && (
-                          <span className="ml-auto shrink-0 rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground tabular-nums">
-                            {b.ahead > 0 && `${b.ahead}↑`}
-                            {b.ahead > 0 && b.behind > 0 && " "}
-                            {b.behind > 0 && `${b.behind}↓`}
-                          </span>
-                        )}
-                      </button>
-                    </ContextMenuTrigger>
-                    <ContextMenuContent className="min-w-52 max-w-96">
-                      {/* 双击也能切,但双击这事儿没人猜得到,菜单里给一份 */}
-                      {!b.isHead && b.kind === "local" && (
-                        <>
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            disabled={checkingOut}
-                            onSelect={() => void handleCheckout(b.name)}
-                          >
-                            <span className="min-w-0 truncate">
-                              检出 {b.name}
-                            </span>
-                          </ContextMenuItem>
-                          <ContextMenuSeparator />
-                        </>
-                      )}
-                      {/* 合并方向最容易搞反,菜单上把两个分支名都写全 */}
-                      {!b.isHead && currentBranch && (
-                        <ContextMenuItem
-                          className="text-[12px]"
-                          onSelect={() =>
-                            setPendingMerge({
-                              ref: b.name,
-                              display: `分支 ${b.name}`,
-                            })
-                          }
-                        >
-                          <span className="min-w-0 truncate">
-                            合并 {b.name} 到 {currentBranch}…
-                          </span>
-                        </ContextMenuItem>
-                      )}
-                      <ContextMenuItem
-                        className="text-[12px]"
-                        onSelect={() =>
-                          setPendingNewBranch({
-                            baseRef: b.name,
-                            label: `分支 ${b.name}`,
-                          })
-                        }
-                      >
-                        基于此分支新建分支…
-                      </ContextMenuItem>
-                      {!inWorktree && (
-                        <ContextMenuItem
-                          className="text-[12px]"
-                          onSelect={() =>
-                            setPendingWorktree({
-                              baseRef: b.name,
-                              shortName: b.name,
-                              label: `分支 ${b.name}`,
-                            })
-                          }
-                        >
-                          为此分支创建 worktree…
-                        </ContextMenuItem>
-                      )}
-                      {/* 推到远端同名分支:不用先切过去,git 允许推没检出
-                          的分支。没有上游会顺手建立跟踪 */}
-                      <ContextMenuItem
-                        className="text-[12px]"
-                        disabled={pushingBranch !== null}
-                        onSelect={() => void pushBranch(b.name)}
-                      >
-                        <span className="min-w-0 truncate">
-                          推送到远端同名分支
-                          {b.ahead > 0 ? `(${b.ahead} 个提交)` : ""}
-                        </span>
-                      </ContextMenuItem>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem
-                        className="text-[12px]"
-                        onSelect={() => {
-                          void copyToClipboard(b.name);
-                          toast.success("已复制分支名", {
-                            description: b.name,
-                          });
-                        }}
-                      >
-                        复制分支名
-                      </ContextMenuItem>
-                      {/* 当前分支和被 worktree 占用的分支 git 都不让删 */}
-                      {b.kind === "local" && !b.isHead && (
-                        <>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            className="text-[12px] text-destructive focus:text-destructive"
-                            onSelect={() =>
-                              setPendingDelete({
-                                branch: b.name,
-                                remote: null,
-                                display: `本地分支 ${b.name}`,
-                              })
-                            }
-                          >
-                            删除分支…
-                          </ContextMenuItem>
-                        </>
-                      )}
-                    </ContextMenuContent>
-                  </ContextMenu>
-                ))}
-                {remoteBranches.length > 0 && (
-                  <>
-                    <div className="px-2 py-1.5 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
-                      远程分支
-                    </div>
-                    {remoteBranches.map((b) => (
-                      <ContextMenu key={b.name}>
-                        <ContextMenuTrigger asChild>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              selectBranch({
-                                display: b.name,
-                                refName: b.name,
-                                checkoutName: remoteShortName(b.name),
-                                isHead: false,
-                              })
-                            }
-                            onDoubleClick={() => {
-                              if (!checkingOut) {
-                                void handleCheckout(remoteShortName(b.name));
-                              }
-                            }}
-                            className={cn(
-                              "flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-foreground/10",
-                              selected?.refName === b.name &&
-                                "bg-foreground/10",
-                            )}
-                          >
-                            <span className="size-3.5 shrink-0" />
-                            <span className="min-w-0 truncate">{b.name}</span>
-                          </button>
-                        </ContextMenuTrigger>
-                        <ContextMenuContent className="min-w-52 max-w-96">
-                          {/* 检出远程分支 = 建一个跟踪它的同名本地分支;
-                              本地已经有同名分支时 git 直接切过去 */}
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            disabled={checkingOut}
-                            onSelect={() =>
-                              void handleCheckout(remoteShortName(b.name))
-                            }
-                          >
-                            <span className="min-w-0 truncate">
-                              检出为本地分支 {remoteShortName(b.name)}
-                            </span>
-                          </ContextMenuItem>
-                          <ContextMenuSeparator />
-                          {currentBranch && (
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() =>
-                                setPendingMerge({
-                                  ref: b.name,
-                                  display: `远程分支 ${b.name}`,
-                                })
-                              }
-                            >
-                              <span className="min-w-0 truncate">
-                                合并 {b.name} 到 {currentBranch}…
-                              </span>
-                            </ContextMenuItem>
-                          )}
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() =>
-                              setPendingNewBranch({
-                                baseRef: b.name,
-                                label: `远程分支 ${b.name}`,
-                              })
-                            }
-                          >
-                            基于此分支新建分支…
-                          </ContextMenuItem>
-                          {!inWorktree && (
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() =>
-                                setPendingWorktree({
-                                  baseRef: b.name,
-                                  shortName: remoteShortName(b.name),
-                                  label: `远程分支 ${b.name}`,
-                                })
-                              }
-                            >
-                              为此分支创建 worktree…
-                            </ContextMenuItem>
-                          )}
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            className="text-[12px]"
-                            onSelect={() => {
-                              void copyToClipboard(b.name);
-                              toast.success("已复制分支名", {
-                                description: b.name,
-                              });
-                            }}
-                          >
-                            复制分支名
-                          </ContextMenuItem>
-                          <ContextMenuSeparator />
-                          <ContextMenuItem
-                            className="text-[12px] text-destructive focus:text-destructive"
-                            onSelect={() =>
-                              setPendingDelete({
-                                branch: remoteShortName(b.name),
-                                remote: b.name.split("/")[0] ?? "origin",
-                                display: `远程分支 ${b.name}`,
-                              })
-                            }
-                          >
-                            删除远程分支…
-                          </ContextMenuItem>
-                        </ContextMenuContent>
-                      </ContextMenu>
-                    ))}
-                  </>
-                )}
-              </div>
-              {/* 右:上半提交记录,下半选中提交的改动(照 SourceTree 那套
-                  上下分区 —— diff 通栏比挤在窄的第三栏里好读得多) */}
-              <div className="flex h-[72vh] w-[64rem] min-w-0 flex-col border-l border-border pl-4">
-                {/* 上:提交记录。开着改动区时让出下面一大半 */}
-                <div
-                  className={cn(
-                    "flex min-h-0 flex-col",
-                    openCommit ? "h-[38%]" : "flex-1",
-                  )}
-                >
-                  <div className="min-h-0 flex-1 overflow-y-auto">
-                    {/* 工作区有没提交的改动就顶一行上去(照 SourceTree 的
-                        "Uncommitted changes"):点它下面看的是工作区 diff。
-                        只在当前分支上有意义 —— 别的分支的提交记录跟工作区
-                        不是一回事 */}
-                    {selected?.isHead && (workingFiles?.length ?? 0) > 0 && (
-                      // biome-ignore lint/a11y/useSemanticElements: 和下面的提交行结构保持一致
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        title="点击查看工作区里还没提交的改动"
-                        onClick={() => {
-                          setWorkingOpen(true);
-                          setWorkingFile(workingFiles?.[0] ?? null);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setWorkingOpen(true);
-                            setWorkingFile(workingFiles?.[0] ?? null);
-                          }
-                        }}
-                        className={cn(
-                          "flex cursor-pointer items-center gap-2 border-b border-border/40 px-1 py-1.5 transition-colors hover:bg-foreground/[0.06]",
-                          workingOpen && "sticky top-0 z-10 bg-popover",
-                        )}
-                      >
-                        {/* 和下面的提交行对齐:那边最前面是时间列 */}
-                        <span className="w-28 shrink-0 text-[10.5px] text-muted-foreground/50">
-                          现在
-                        </span>
-                        <span
-                          className={cn(
-                            "min-w-0 flex-1 break-words text-[12px] leading-snug font-medium",
-                            workingOpen && "text-emerald-500/75",
-                          )}
-                        >
-                          未提交的更改
-                        </span>
-                        <span className="shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
-                          {workingFiles?.length} 个文件
-                        </span>
-                        <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/50">
-                          ·
-                        </span>
-                      </div>
-                    )}
-                    {logError ? (
-                      <div className="px-1 py-2 text-[11px] leading-snug text-destructive">
-                        {logError}
-                      </div>
-                    ) : logEntries == null ? (
-                      <div className="flex items-center gap-2 px-1 py-2 text-[11px] text-muted-foreground">
-                        <Spinner className="size-3" />
-                        正在读取提交记录…
-                      </div>
-                    ) : logEntries.length === 0 ? (
-                      <div className="px-1 py-2 text-[11px] text-muted-foreground">
-                        没有提交记录
-                      </div>
-                    ) : (
-                      logEntries.map((c) => (
-                        <ContextMenu key={c.sha}>
-                          <ContextMenuTrigger asChild>
-                            {/* biome-ignore lint/a11y/useSemanticElements: 行里还要放右键菜单和多段文本,<button> 会把结构挤坏 */}
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              title="点击查看这次提交改了什么"
-                              onClick={() => {
-                                setWorkingOpen(false);
-                                setOpenCommit(c);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  setWorkingOpen(false);
-                                  setOpenCommit(c);
-                                }
-                              }}
-                              className={cn(
-                                "flex cursor-pointer items-center gap-2 border-b border-border/40 px-1 py-1.5 transition-colors last:border-b-0 hover:bg-foreground/[0.06]",
-                                // 选中的那条钉在列表顶上:列表一滚,下面
-                                // 那片 diff 到底是哪个提交的就看不见了
-                                !workingOpen &&
-                                  openCommit?.sha === c.sha &&
-                                  "sticky top-0 z-10 bg-popover",
-                              )}
-                            >
-                              {/* 时间放最前面:按时间找提交比按说明找快,
-                                  一列对齐了扫起来也省事 */}
-                              <span className="w-28 shrink-0 text-[10.5px] text-muted-foreground tabular-nums">
-                                {formatCommitTime(c.timestampSecs)}
-                              </span>
-                              {/* 说明完整显示,超长折行而不是截断。右边 diff
-                                是哪条提交的,靠这行文字变绿来认 —— 比当前
-                                分支那个绿淡一档,免得跟"你在这个分支上"
-                                抢注意力 */}
-                              <span
-                                className={cn(
-                                  "min-w-0 flex-1 break-words text-[12px] leading-snug",
-                                  !workingOpen &&
-                                    openCommit?.sha === c.sha &&
-                                    "text-emerald-500/75",
-                                )}
-                              >
-                                {c.subject}
-                              </span>
-                              {/* 这个提交上打了标签就摆出来 —— 找"哪一版发的"
-                                全靠它,比翻左边标签列表快 */}
-                              {c.tags.map((t) => (
-                                <span
-                                  key={t}
-                                  title={`标签 ${t}`}
-                                  className="max-w-40 shrink-0 truncate rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-500"
-                                >
-                                  {t}
-                                </span>
-                              ))}
-                              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
-                                {c.shortSha}
-                              </span>
-                              <span className="shrink-0 text-[10.5px] text-muted-foreground">
-                                {c.author}
-                              </span>
-                            </div>
-                          </ContextMenuTrigger>
-                          <ContextMenuContent className="min-w-52">
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() => setOpenCommit(c)}
-                            >
-                              查看改动…
-                            </ContextMenuItem>
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() => {
-                                void copyToClipboard(c.sha);
-                                toast.success("已复制完整 SHA", {
-                                  description: c.sha,
-                                });
-                              }}
-                            >
-                              复制 SHA
-                            </ContextMenuItem>
-                            <ContextMenuSeparator />
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() =>
-                                setPendingNewBranch({
-                                  baseRef: c.sha,
-                                  label: `提交 ${c.shortSha}(${c.subject})`,
-                                })
-                              }
-                            >
-                              基于此提交新建分支…
-                            </ContextMenuItem>
-                            <ContextMenuItem
-                              className="text-[12px]"
-                              onSelect={() =>
-                                setPendingWorktree({
-                                  baseRef: c.sha,
-                                  shortName: c.shortSha,
-                                  label: `提交 ${c.shortSha}(${c.subject})`,
-                                })
-                              }
-                            >
-                              基于此提交创建 worktree…
-                            </ContextMenuItem>
-                          </ContextMenuContent>
-                        </ContextMenu>
-                      ))
-                    )}
-                  </div>
-                </div>
-                {/* 下:选中的改动 —— 左文件清单+说明,右 diff,通栏铺开。
-                    数据源可能是某个提交,也可能是工作区(未提交的更改) */}
-                {(openCommit || workingOpen) && (
-                  <div className="mt-2 flex min-h-0 flex-1 flex-col border-t border-border pt-2">
-                    <div className="flex min-h-0 flex-1 gap-3">
-                      <div className="flex w-72 shrink-0 flex-col">
-                        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-                          {changeRows == null ? (
-                            <div className="flex items-center gap-2 px-1 py-2 text-[11px] text-muted-foreground">
-                              <Spinner className="size-3" />
-                              正在读取改动…
-                            </div>
-                          ) : changeRowsError ? (
-                            <div className="px-1 py-2 text-[11px] leading-snug text-destructive">
-                              {changeRowsError}
-                            </div>
-                          ) : changeRows.length === 0 ? (
-                            <div className="px-1 py-2 text-[11px] text-muted-foreground">
-                              {workingOpen
-                                ? "工作区没有未提交的改动"
-                                : "这次提交没有文件改动(空提交或合并提交)"}
-                            </div>
-                          ) : (
-                            changeRows.map((r) => (
-                              <button
-                                key={r.key}
-                                type="button"
-                                title={
-                                  r.originalPath
-                                    ? `${r.originalPath} → ${r.path}`
-                                    : r.path
-                                }
-                                onClick={r.onPick}
-                                className={cn(
-                                  "flex w-full min-w-0 cursor-pointer flex-col items-start gap-0.5 rounded px-1.5 py-1 text-left transition-colors hover:bg-foreground/10",
-                                  r.selected && "bg-foreground/10",
-                                )}
-                              >
-                                <span className="flex w-full min-w-0 items-center gap-2">
-                                  <span
-                                    title={r.label}
-                                    className={cn(
-                                      "shrink-0 text-[10px] uppercase",
-                                      r.tone,
-                                    )}
-                                  >
-                                    {r.letter}
-                                  </span>
-                                  <span className="min-w-0 flex-1 truncate text-[12px]">
-                                    {fileBasename(r.path)}
-                                  </span>
-                                  {/* 二进制没有行数可言,别摆 +0/−0 误导;
-                                      工作区那份 git 没给行数,也不摆 */}
-                                  {r.isBinary ? (
-                                    <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                                      binary
-                                    </span>
-                                  ) : r.added !== null || r.removed !== null ? (
-                                    <span className="shrink-0 text-[10px] tabular-nums">
-                                      {(r.added ?? 0) > 0 && (
-                                        <span className="text-emerald-500">
-                                          +{r.added}
-                                        </span>
-                                      )}
-                                      {(r.added ?? 0) > 0 &&
-                                        (r.removed ?? 0) > 0 &&
-                                        " "}
-                                      {(r.removed ?? 0) > 0 && (
-                                        <span className="text-red-400">
-                                          −{r.removed}
-                                        </span>
-                                      )}
-                                    </span>
-                                  ) : null}
-                                </span>
-                                {/* 同名文件常见(不同模块的 build.gradle) */}
-                                <span className="w-full truncate pl-5 text-[10.5px] text-muted-foreground/60">
-                                  {r.path}
-                                </span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                        {/* 提交说明全文 + 元信息:摆在文件清单下面,和
-                          SourceTree 一个位置。正文常有好几段,保留换行 */}
-                        <div className="mt-2 max-h-[45%] shrink-0 overflow-y-auto border-t border-border pt-2 pr-1">
-                          {workingOpen ? (
-                            <div className="flex flex-col gap-1 text-[11.5px] text-muted-foreground">
-                              <span className="font-medium text-foreground">
-                                工作区未提交的改动
-                              </span>
-                              <span className="text-[10.5px]">
-                                共 {workingFiles?.length ?? 0} 个文件 · 分支{" "}
-                                {repo.branch}
-                              </span>
-                              <span className="text-[10.5px] text-muted-foreground/70">
-                                要提交的话用左上角的「提交」按钮
-                              </span>
-                            </div>
-                          ) : (
-                            openCommit && (
-                              <>
-                                <div className="whitespace-pre-wrap break-words text-[11.5px] leading-relaxed">
-                                  {commitMeta?.subject ?? openCommit.subject}
-                                  {commitMeta?.body
-                                    ? `\n\n${commitMeta.body}`
-                                    : ""}
-                                </div>
-                                <div className="mt-2 flex flex-col gap-0.5 text-[10.5px] text-muted-foreground">
-                                  <span className="flex gap-1.5">
-                                    <span className="shrink-0 text-muted-foreground/60">
-                                      提交
-                                    </span>
-                                    <button
-                                      type="button"
-                                      title="点击复制完整 SHA"
-                                      onClick={() => {
-                                        void copyToClipboard(openCommit.sha);
-                                        toast.success("已复制完整 SHA", {
-                                          description: openCommit.sha,
-                                        });
-                                      }}
-                                      className="min-w-0 cursor-pointer truncate text-left font-mono hover:text-foreground hover:underline"
-                                    >
-                                      {openCommit.sha}
-                                    </button>
-                                  </span>
-                                  {(commitMeta?.parents.length ?? 0) > 0 && (
-                                    <span className="flex gap-1.5">
-                                      <span className="shrink-0 text-muted-foreground/60">
-                                        父级
-                                      </span>
-                                      <span className="min-w-0 truncate font-mono">
-                                        {commitMeta?.parents
-                                          .map((x) => x.slice(0, 7))
-                                          .join(" ")}
-                                      </span>
-                                    </span>
-                                  )}
-                                  <span className="flex gap-1.5">
-                                    <span className="shrink-0 text-muted-foreground/60">
-                                      作者
-                                    </span>
-                                    <span className="min-w-0 truncate">
-                                      {commitMeta
-                                        ? `${commitMeta.author} <${commitMeta.authorEmail}>`
-                                        : openCommit.author}
-                                    </span>
-                                  </span>
-                                  <span className="flex gap-1.5">
-                                    <span className="shrink-0 text-muted-foreground/60">
-                                      日期
-                                    </span>
-                                    <span className="min-w-0 truncate">
-                                      {formatCommitTime(
-                                        openCommit.timestampSecs,
-                                      )}
-                                    </span>
-                                  </span>
-                                  {(commitMeta?.refs.length ?? 0) > 0 && (
-                                    <span className="flex gap-1.5">
-                                      <span className="shrink-0 text-muted-foreground/60">
-                                        标签
-                                      </span>
-                                      <span className="min-w-0 break-words">
-                                        {commitMeta?.refs.join(", ")}
-                                      </span>
-                                    </span>
-                                  )}
-                                </div>
-                              </>
-                            )
-                          )}
-                        </div>
-                      </div>
-                      <div className="min-w-0 flex-1 overflow-hidden border-l border-border pl-3">
-                        {diffSource ? (
-                          <GitDiffPane
-                            key={diffKey}
-                            active
-                            chipLabel={diffChipLabel}
-                            hideRepoPath
-                            source={diffSource}
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
-                            {changeRows?.length ? "选个文件看改动" : ""}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          {branches != null && (
-            <div className="border-t border-border pt-3">
-              <div className="mb-1 px-2 text-[10.5px] font-semibold tracking-[0.12em] text-muted-foreground/85 uppercase">
-                Worktree
-              </div>
-              {worktrees.map((w) => {
-                const wtPath = w.worktreePath;
-                return (
-                  <div
-                    key={wtPath ?? w.name}
-                    className="flex items-center gap-2 rounded-lg px-2 py-1 text-[12px] hover:bg-foreground/5"
-                  >
-                    <HugeiconsIcon
-                      icon={GitBranchIcon}
-                      size={12}
-                      strokeWidth={1.75}
-                      className="shrink-0 text-muted-foreground"
-                    />
-                    <span className="max-w-48 shrink-0 truncate">{w.name}</span>
-                    <span
-                      className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70"
-                      title={wtPath ?? ""}
-                    >
-                      {wtPath}
-                    </span>
-                    {wtPath && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-[11px]"
-                          onClick={() => void revealInFinder(wtPath)}
-                        >
-                          打开目录
-                        </Button>
-                        <Button
-                          variant={
-                            wtRemoveArm === wtPath ? "destructive" : "ghost"
-                          }
-                          size="sm"
-                          disabled={wtBusy}
-                          className={cn(
-                            "h-6 gap-1 px-2 text-[11px]",
-                            wtRemoveArm !== wtPath &&
-                              "text-destructive hover:text-destructive",
-                          )}
-                          onClick={() => {
-                            if (wtRemoveArm === wtPath) {
-                              void removeWorktree(wtPath);
-                            } else {
-                              setWtRemoveArm(wtPath);
-                            }
-                          }}
-                        >
-                          {wtBusy && wtRemoveArm === wtPath && (
-                            <Spinner className="size-3" />
-                          )}
-                          {wtRemoveArm === wtPath ? "再点一次确认删除" : "删除"}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-              {worktrees.length === 0 && (
-                <div className="px-2 py-1 text-[11px] text-muted-foreground">
-                  暂无 worktree · 右键分支或提交即可创建
-                </div>
-              )}
-            </div>
-          )}
+          {actions}
+          {content}
         </DialogContent>
       </Dialog>
+    </>
+  );
+
+  return (
+    <>
+      {main}
 
       {/* 全部标签:左栏那条 18rem 的窄栏摆不下"名字 + 时间 + 备注 + 提交号"
           四样,单开一个框列全 —— 找历史版本本来就是"翻一遍"的动作。 */}

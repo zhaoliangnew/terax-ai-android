@@ -14,7 +14,6 @@ export {
   RepoUrlChip,
   WorktreeCountBadge,
 } from "./BranchChip";
-export { CopyProjectDialog } from "./CopyProjectDialog";
 export { CustomLinksMenu } from "./CustomLinksMenu";
 export { DingGroupsMenu } from "./DingGroupsMenu";
 export { JournalButton } from "./JournalButton";
@@ -54,6 +53,7 @@ export { ProductLinkChip } from "./ProductLinkChip";
 export { ProjectLinksBar } from "./ProjectLinksBar";
 export { useActiveProductConfig, useAndroidRunStore } from "./store";
 export { TestEnvMenu } from "./TestEnvMenu";
+export { ToolRail } from "./ToolRail";
 export { UrlPromptDialog } from "./UrlPromptDialog";
 export { WeChatButton } from "./WeChatButton";
 export { YunxiaoProjectPickerDialog } from "./YunxiaoProjectPickerDialog";

@@ -5,7 +5,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   ApiIcon,
-  ArrowDown01Icon,
   ArrowDown02Icon,
   ArrowUp02Icon,
   Delete02Icon,
@@ -27,7 +26,7 @@ import {
   MENU_ACTION,
   MENU_HEAD,
   MENU_ROW,
-  MENU_TRIGGER,
+  RAIL_TRIGGER,
 } from "./lib/menuStyles";
 import { openExternally } from "./lib/openExternally";
 import { newLinkId, type QuickLink } from "./lib/quickLinks";
@@ -55,17 +54,15 @@ export function ApifoxMenu() {
         <DropdownMenuTrigger asChild>
           <button
             type="button"
-            title="Apifox 接口文档"
-            className={MENU_TRIGGER}
+            className={RAIL_TRIGGER}
+            aria-label="Apifox"
           >
-            <HugeiconsIcon icon={ApiIcon} size={13} strokeWidth={1.75} />
-            Apifox
-            <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
+            <HugeiconsIcon icon={ApiIcon} size={18} strokeWidth={1.6} />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           backdrop
-          side="top"
+          side="right"
           align="start"
           collisionPadding={8}
           className="w-72 p-0"

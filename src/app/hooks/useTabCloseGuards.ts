@@ -11,6 +11,7 @@ import {
   type CloseTabsPlan,
   nextActiveInSpace,
   planCloseOtherTabs,
+  planCloseTabIds,
   planCloseTabsToRight,
   type Tab,
 } from "@/modules/tabs";
@@ -119,9 +120,8 @@ export function useTabCloseGuards({
     [],
   );
 
-  const handleCloseMany = useCallback(
-    async (kind: CloseManyKind, anchorId: number) => {
-      const plan = planCloseMany(kind, anchorId);
+  const runCloseMany = useCallback(
+    async (kind: CloseManyKind, anchorId: number, plan: CloseTabsPlan) => {
       if (plan.closeIds.length === 0) return;
       const requestId = ++closeManyRequestRef.current;
       const hazards = await evaluateCloseMany(plan.closeIds);
@@ -132,7 +132,31 @@ export function useTabCloseGuards({
       }
       disposeTabs(anchorId, withCurrentActive(plan));
     },
-    [disposeTabs, evaluateCloseMany, planCloseMany, withCurrentActive],
+    [disposeTabs, evaluateCloseMany, withCurrentActive],
+  );
+
+  const handleCloseMany = useCallback(
+    (kind: "right" | "other", anchorId: number) =>
+      runCloseMany(kind, anchorId, planCloseMany(kind, anchorId)),
+    [runCloseMany, planCloseMany],
+  );
+
+  /**
+   * 关掉指定的一组 tab(树上"关闭这个工程的终端")。会把 space 关空时拒绝,
+   * 返回 false 让调用方提示。
+   */
+  const handleCloseTabIds = useCallback(
+    (ids: number[]): boolean => {
+      const { anchorId, plan } = planCloseTabIds(
+        tabsRef.current,
+        ids,
+        activeIdRef.current,
+      );
+      if (anchorId === null) return false;
+      void runCloseMany("project", anchorId, plan);
+      return true;
+    },
+    [runCloseMany],
   );
 
   const handleCloseTabsToRight = useCallback(
@@ -231,6 +255,7 @@ export function useTabCloseGuards({
     handleClose,
     handleCloseTabsToRight,
     handleCloseOtherTabs,
+    handleCloseTabIds,
     confirmClose,
     cancelClose,
     confirmTerminalClose,

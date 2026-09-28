@@ -16,7 +16,6 @@ import { useArmedConfirm } from "@/lib/useArmedConfirm";
 import { cn } from "@/lib/utils";
 import { type GitStatusSnapshot, native } from "@/modules/ai/lib/native";
 import {
-  CopyProjectDialog,
   getProjectLink,
   getTaskLink,
   listProjectLinkDirs,
@@ -24,6 +23,7 @@ import {
   type ProjectKind,
   type ProjectWorktree,
 } from "@/modules/android-run";
+import { GIT_BRANCH_CHANGED_EVENT } from "@/modules/android-run/BranchChip";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { useGlobalShortcuts } from "@/modules/shortcuts";
 import { ChangedFilesDialog } from "@/modules/source-control/ChangedFilesDialog";
@@ -58,6 +58,7 @@ import {
   ExplorerHeaderActions,
 } from "./ExplorerHeaderActions";
 import { ExplorerSearch, type ExplorerSearchHandle } from "./ExplorerSearch";
+import { FolderGlyph } from "./FolderGlyph";
 import { InlineInput } from "./InlineInput";
 import {
   copyToClipboard,
@@ -65,7 +66,7 @@ import {
   revealInFinder,
 } from "./lib/contextActions";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
+import { fileIconUrl } from "./lib/iconResolver";
 import { COMPACT_CONTENT, COMPACT_ITEM } from "./lib/menuItemClass";
 import {
   loadPinnedDirs,
@@ -125,6 +126,10 @@ type Props = {
   /** 额外塞进头部按钮行的动作(比如产品文件区的开合开关)。排在自带按钮后面,
    * 也就是宽度不够时比它们更早被收进 ⋯ 菜单。 */
   headerActions?: ExplorerHeaderAction[];
+  /** 头部那排按钮只留上一级、刷新和"只看已打开的工程"(搜索走快捷键,新建走右键菜单)。 */
+  hideHeaderActions?: boolean;
+  /** 关掉某个工程的全部终端 tab(右键菜单"关闭终端")。 */
+  onCloseProjectTerminals?: (path: string) => void;
   /** 给这个工程填"当前云效需求"地址(跟着仓库走,不继承)。 */
   onLinkYunxiaoTask?: (path: string) => void;
   /** 给这个产品目录绑云效项目(底下的工程继承)。 */
@@ -180,7 +185,10 @@ type Row =
       depth: number;
     };
 
-const ROW_HEIGHT = 24;
+const ROW_HEIGHT = 28;
+/** 左栏那棵树头部只留这几个按钮(按这个顺序)。"上一级"不能省:设过根目录
+ * 之后,这是唯一退回去的路。 */
+const LEFT_TREE_ACTIONS = ["up", "refresh", "filter"] as const;
 const OVERSCAN = 8;
 
 function basename(path: string): string {
@@ -337,6 +345,8 @@ export const FileExplorer = memo(
       onAttachToAgent,
       onSetAsRoot,
       headerActions,
+      hideHeaderActions,
+      onCloseProjectTerminals,
       onLinkYunxiaoTask,
       onLinkYunxiaoProject,
       onUnlinkYunxiaoProject,
@@ -518,12 +528,20 @@ export const FileExplorer = memo(
     const [changedOpen, setChangedOpen] = useState(false);
 
     // 光过滤还不够:父目录没展开就看不到里面的工程,而展开又是加载子节点的
-    // 触发点,所以这里真去展开,而不是画的时候假装展开。
+    // 触发点,所以这里真去展开,而不是画的时候假装展开。每个目录只自动展开
+    // 一次(开过滤时、或者新开了个工程多出来的祖先),之后收起就是用户说了
+    // 算 —— 以前每次展开状态一变就全部重新撑开,目录根本关不上。
+    const autoExpandedRef = useRef(new Set<string>());
     useEffect(() => {
-      if (!openedKeep) return;
+      if (!openedKeep) {
+        autoExpandedRef.current.clear();
+        return;
+      }
       for (const p of openedKeep) {
-        if (!openedProjectPaths?.has(p) && !tree.expanded.has(p))
-          tree.toggle(p);
+        if (openedProjectPaths?.has(p) || autoExpandedRef.current.has(p))
+          continue;
+        autoExpandedRef.current.add(p);
+        if (!tree.expanded.has(p)) tree.toggle(p);
       }
     }, [openedKeep, openedProjectPaths, tree.expanded, tree.toggle]);
 
@@ -651,11 +669,9 @@ export const FileExplorer = memo(
       path: string;
       name: string;
       isDir: boolean;
+      /** worktree 子行:不是树里的普通目录,只给终端相关的几项 */
+      worktree?: boolean;
     } | null>(null);
-    // 右键"复制到项目目录…"选中的来源工程
-    const [copyProjectSource, setCopyProjectSource] = useState<string | null>(
-      null,
-    );
     const [deleteConfirm, setDeleteConfirm] = useArmedConfirm<true>();
     // Bumped on every right-click so the menu content remounts and the popper
     // re-anchors to the new cursor (floating-ui won't reposition on an anchor
@@ -1055,8 +1071,16 @@ export const FileExplorer = memo(
       id: "refresh",
       icon: Refresh01Icon,
       label: "刷新",
+      tooltip: "刷新(重读展开的目录和工程分支)",
       iconSize: 12,
-      onClick: () => tree.refresh(rootPath),
+      // 以前只重读根目录:展开的子目录里新建的东西、在终端里切的分支都
+      // 看不到。展开着的目录全部重读,再广播一次分支变更,树上的分支、
+      // worktree 子行、底栏分支 chip 跟着一起更新。
+      onClick: () => {
+        tree.refresh(rootPath);
+        for (const dir of tree.expanded) tree.refresh(dir);
+        window.dispatchEvent(new Event(GIT_BRANCH_CHANGED_EVENT));
+      },
     });
     // 只有左栏(能设根目录的那个)才需要"上一级",否则设错了就退不回来。
     if (onSetAsRoot && parentDir(rootPath)) {
@@ -1105,13 +1129,7 @@ export const FileExplorer = memo(
                   title={`${rootPath} · 点击切换盘符`}
                   className="flex min-w-0 flex-1 cursor-pointer items-center truncate rounded text-left text-xs font-medium text-foreground/80 hover:bg-accent/60"
                 >
-                  <img
-                    src={folderIconUrl(basename(rootPath), false)}
-                    alt=""
-                    height={15}
-                    width={15}
-                    className="mx-1.5 shrink-0"
-                  />
+                  <FolderGlyph className="mx-1.5" />
                   <span className="truncate">{basename(rootPath)}</span>
                   <HugeiconsIcon
                     icon={ArrowDown01Icon}
@@ -1146,18 +1164,21 @@ export const FileExplorer = memo(
               className="flex min-w-0 flex-1 items-center truncate text-xs font-medium text-foreground/80"
               title={rootPath}
             >
-              <img
-                src={folderIconUrl(basename(rootPath), false)}
-                alt=""
-                height={15}
-                width={15}
-                className="mx-1.5 shrink-0"
-              />
+              <FolderGlyph className="mx-1.5" />
               <span className="truncate">{basename(rootPath)}</span>
             </span>
           )}
 
-          <ExplorerHeaderActions actions={actions} width={headerWidth} />
+          <ExplorerHeaderActions
+            actions={
+              hideHeaderActions
+                ? LEFT_TREE_ACTIONS.flatMap((id) =>
+                    actions.filter((a) => a.id === id),
+                  )
+                : actions
+            }
+            width={headerWidth}
+          />
         </div>
 
         {/* 置顶区:钉住的目录统一列在树顶上,树里的位置不动。点一下 ——
@@ -1291,10 +1312,24 @@ export const FileExplorer = memo(
                     const idx =
                       path != null ? entryIndexByPath.get(path) : undefined;
                     const row = idx !== undefined ? rows[idx] : undefined;
+                    const wt =
+                      row || path == null
+                        ? undefined
+                        : rows.find(
+                            (r): r is Extract<Row, { kind: "worktree" }> =>
+                              r.kind === "worktree" && r.path === path,
+                          );
                     setMenuTarget(
                       row && row.kind === "entry"
                         ? { path: row.path, name: row.name, isDir: row.isDir }
-                        : null,
+                        : wt
+                          ? {
+                              path: wt.path,
+                              name: wt.name,
+                              isDir: true,
+                              worktree: true,
+                            }
+                          : null,
                     );
                     setDeleteConfirm(null);
                     setMenuNonce((n) => n + 1);
@@ -1304,19 +1339,18 @@ export const FileExplorer = memo(
                 >
                   {pendingAtRoot ? (
                     <div
-                      className="flex h-6 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
+                      className="flex h-7 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"
                       style={{ paddingLeft: 6 }}
                     >
-                      <span className="size-3.5 shrink-0" />
-                      <img
-                        src={
-                          pendingAtRoot.kind === "dir"
-                            ? folderIconUrl("", false)
-                            : fileIconUrl("untitled")
-                        }
-                        alt=""
-                        className="size-4 shrink-0 opacity-70"
-                      />
+                      {pendingAtRoot.kind === "dir" ? (
+                        <FolderGlyph className="opacity-70" />
+                      ) : (
+                        <img
+                          src={fileIconUrl("untitled")}
+                          alt=""
+                          className="size-4 shrink-0 opacity-70"
+                        />
+                      )}
                       <InlineInput
                         initial=""
                         placeholder={
@@ -1379,7 +1413,91 @@ export const FileExplorer = memo(
                 if (tree.renaming || tree.pendingCreate) e.preventDefault();
               }}
             >
-              {menuTarget ? (
+              {menuTarget?.worktree ? (
+                <>
+                  {onOpenNewTerminal && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => onOpenNewTerminal(menuTarget.path)}
+                    >
+                      新开终端
+                    </ContextMenuItem>
+                  )}
+                  {onCloseProjectTerminals &&
+                    openedProjectPaths?.has(menuTarget.path) && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() =>
+                          onCloseProjectTerminals(menuTarget.path)
+                        }
+                      >
+                        关闭终端
+                      </ContextMenuItem>
+                    )}
+                </>
+              ) : menuTarget?.isDir && projectDirs.has(menuTarget.path) ? (
+                // 工程行只留常用的几项:点一下就是开终端,搜索/Git/新建这些
+                // 右栏源码、仓库 tab 里都有,不在这儿重复
+                <>
+                  {onOpenNewTerminal && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => onOpenNewTerminal(menuTarget.path)}
+                    >
+                      新开终端
+                    </ContextMenuItem>
+                  )}
+                  {onCloseProjectTerminals &&
+                    openedProjectPaths?.has(menuTarget.path) && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() =>
+                          onCloseProjectTerminals(menuTarget.path)
+                        }
+                      >
+                        关闭终端
+                      </ContextMenuItem>
+                    )}
+                  {/* 工程目录挂"当前需求",跟着这个仓库走 */}
+                  {onLinkYunxiaoTask && (
+                    <ContextMenuItem
+                      className={COMPACT_ITEM}
+                      onSelect={() => onLinkYunxiaoTask(menuTarget.path)}
+                    >
+                      {getTaskLink(menuTarget.path)
+                        ? "修改当前云效需求…"
+                        : "关联当前云效需求…"}
+                    </ContextMenuItem>
+                  )}
+                  <ContextMenuItem
+                    className={COMPACT_ITEM}
+                    onSelect={() => void revealInFinder(menuTarget.path)}
+                  >
+                    在访达中显示
+                  </ContextMenuItem>
+                  <ContextMenuItem
+                    className={COMPACT_ITEM}
+                    onSelect={() => void copyToClipboard(menuTarget.path)}
+                  >
+                    复制路径
+                  </ContextMenuItem>
+                  <ContextMenuSeparator />
+                  <ContextMenuItem
+                    className={COMPACT_ITEM}
+                    variant="destructive"
+                    onSelect={(e) => {
+                      if (deleteConfirm) {
+                        void tree.deletePath(menuTarget.path);
+                      } else {
+                        e.preventDefault();
+                        setDeleteConfirm(true);
+                      }
+                    }}
+                  >
+                    {deleteConfirm ? "再点一次确认删除" : "删除"}
+                  </ContextMenuItem>
+                </>
+              ) : menuTarget ? (
                 <>
                   {!menuTarget.isDir && (
                     <ContextMenuItem
@@ -1438,15 +1556,6 @@ export const FileExplorer = memo(
                       新开终端
                     </ContextMenuItem>
                   )}
-                  {/* 常见流程:从标准版工程复制一份到客户产品目录 */}
-                  {menuTarget.isDir && projectDirs.has(menuTarget.path) && (
-                    <ContextMenuItem
-                      className={COMPACT_ITEM}
-                      onSelect={() => setCopyProjectSource(menuTarget.path)}
-                    >
-                      复制到项目目录…
-                    </ContextMenuItem>
-                  )}
                   {/* 产品目录绑云效项目,底下的工程继承 */}
                   {menuTarget.isDir &&
                     !projectDirs.has(menuTarget.path) &&
@@ -1469,19 +1578,6 @@ export const FileExplorer = memo(
                         onSelect={() => onUnlinkYunxiaoProject(menuTarget.path)}
                       >
                         解除云效项目关联
-                      </ContextMenuItem>
-                    )}
-                  {/* 工程目录挂"当前需求",跟着这个仓库走 */}
-                  {menuTarget.isDir &&
-                    projectDirs.has(menuTarget.path) &&
-                    onLinkYunxiaoTask && (
-                      <ContextMenuItem
-                        className={COMPACT_ITEM}
-                        onSelect={() => onLinkYunxiaoTask(menuTarget.path)}
-                      >
-                        {getTaskLink(menuTarget.path)
-                          ? "修改当前云效需求…"
-                          : "关联当前云效需求…"}
                       </ContextMenuItem>
                     )}
                   {menuTarget.isDir && onSetAsRoot && (
@@ -1646,12 +1742,6 @@ export const FileExplorer = memo(
             </ContextMenuContent>
           </ContextMenu>
         ) : null}
-
-        <CopyProjectDialog
-          sourcePath={copyProjectSource}
-          rootDir={rootPath}
-          onClose={() => setCopyProjectSource(null)}
-        />
 
         <ChangedFilesDialog
           open={changedOpen}

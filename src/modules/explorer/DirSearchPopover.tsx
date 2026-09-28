@@ -6,7 +6,8 @@ import { Pin02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { fileIconUrl, folderIconUrl } from "./lib/iconResolver";
+import { FolderGlyph } from "./FolderGlyph";
+import { fileIconUrl } from "./lib/iconResolver";
 
 type Entry = { name: string; isDir: boolean };
 
@@ -218,9 +219,7 @@ export function DirSearchPopover({
             </div>
           ) : (
             hits.map((e, i) => {
-              const icon = e.isDir
-                ? folderIconUrl(e.name, false)
-                : fileIconUrl(e.name);
+              const icon = e.isDir ? null : fileIconUrl(e.name);
               const path = pathOf(e.name);
               const pinned = e.isDir && isPinned(path);
               return (
@@ -238,7 +237,9 @@ export function DirSearchPopover({
                     onClick={() => pick(e)}
                     className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left"
                   >
-                    {icon ? (
+                    {e.isDir ? (
+                      <FolderGlyph className="size-3.5" />
+                    ) : icon ? (
                       <img src={icon} alt="" className="size-3.5 shrink-0" />
                     ) : (
                       <span className="size-3.5 shrink-0" />

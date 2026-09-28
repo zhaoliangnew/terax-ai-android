@@ -4,11 +4,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ArrowDown01Icon,
   BookOpen01Icon,
   ExternalLinkIcon,
   File01Icon,
   Folder01Icon,
+  Globe02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { KNOWLEDGE_BASE_HOME } from "./lib/knowledgeBase";
@@ -16,7 +16,7 @@ import {
   MENU_ACTION,
   MENU_HEAD,
   MENU_ROW,
-  MENU_TRIGGER,
+  RAIL_TRIGGER,
 } from "./lib/menuStyles";
 import { openExternally } from "./lib/openExternally";
 import { loadQuickLinks } from "./lib/quickLinks";
@@ -31,15 +31,17 @@ export function KnowledgeBaseMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button type="button" title="嵌入式组知识库" className={MENU_TRIGGER}>
-          <HugeiconsIcon icon={BookOpen01Icon} size={13} strokeWidth={1.75} />
-          嵌入式组知识库
-          <HugeiconsIcon icon={ArrowDown01Icon} size={12} strokeWidth={2} />
+        <button
+          type="button"
+          className={RAIL_TRIGGER}
+          aria-label="嵌入式组知识库"
+        >
+          <HugeiconsIcon icon={BookOpen01Icon} size={18} strokeWidth={1.6} />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         backdrop
-        side="top"
+        side="right"
         align="start"
         collisionPadding={8}
         className="w-auto p-0"
@@ -75,7 +77,13 @@ export function KnowledgeBaseMenu() {
                 {i + 1}
               </span>
               <HugeiconsIcon
-                icon={l.kind === "doc" ? File01Icon : Folder01Icon}
+                icon={
+                  l.kind === "site"
+                    ? Globe02Icon
+                    : l.kind === "doc"
+                      ? File01Icon
+                      : Folder01Icon
+                }
                 size={13}
                 strokeWidth={1.75}
                 className="shrink-0 text-muted-foreground/60"

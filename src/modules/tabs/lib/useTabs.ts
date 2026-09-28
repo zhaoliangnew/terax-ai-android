@@ -1,7 +1,7 @@
 import { isHtmlPath, isMarkdownPath } from "@/lib/utils";
 import {
-  createAgentPanePlan,
   type AgentInstanceCount,
+  createAgentPanePlan,
 } from "@/modules/agents/lib/launcher";
 import {
   findLeafCwd,
@@ -416,6 +416,29 @@ export function planCloseOtherTabs(
     closeIds,
     nextActiveId: closeIds.includes(activeId) ? anchorId : activeId,
   };
+}
+
+/**
+ * 关掉一组指定的 tab(比如某个工程的全部终端)。只动当前 space 里的;
+ * 留下来的 tab 里挑一个当锚点:当前 tab 没被关就是它,否则取留下的第一个。
+ * 一个都不剩时返回 anchorId = null —— space 至少要留一个 tab。
+ */
+export function planCloseTabIds(
+  tabs: Tab[],
+  ids: number[],
+  activeId: number,
+): { anchorId: number | null; plan: CloseTabsPlan } {
+  const empty = { closeIds: [], nextActiveId: activeId };
+  const active = tabs.find((t) => t.id === activeId);
+  if (!active) return { anchorId: null, plan: empty };
+  const close = new Set(ids);
+  const sameSpace = tabs.filter((t) => t.spaceId === active.spaceId);
+  const closeIds = sameSpace.filter((t) => close.has(t.id)).map((t) => t.id);
+  const keep = sameSpace.filter((t) => !close.has(t.id));
+  if (closeIds.length === 0 || keep.length === 0)
+    return { anchorId: null, plan: empty };
+  const anchorId = close.has(activeId) ? keep[0].id : activeId;
+  return { anchorId, plan: { closeIds, nextActiveId: anchorId } };
 }
 
 export function applyCloseTabsPlan(

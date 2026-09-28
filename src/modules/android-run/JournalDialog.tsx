@@ -400,7 +400,7 @@ export function JournalDialog({ open, onOpenChange, anchor }: Props) {
     <Popover modal open={open} onOpenChange={onOpenChange}>
       <PopoverAnchor asChild>{anchor}</PopoverAnchor>
       <PopoverContent
-        side="top"
+        side="right"
         align="start"
         collisionPadding={8}
         // Radix 默认把焦点给内容里第一个可聚焦元素(顶栏按钮),
