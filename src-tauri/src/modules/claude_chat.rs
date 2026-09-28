@@ -224,6 +224,44 @@ return out"#;
     }
 }
 
+/// Pasted screenshots are this big at most (a 6K Retina capture is ~20 MB).
+const MAX_PASTED_IMAGE: usize = 32 * 1024 * 1024;
+
+/// Extension for a pasted image, from the `x-ext` header; anything unknown is png.
+pub fn pasted_image_ext(header: Option<&str>) -> &'static str {
+    match header.map(str::to_ascii_lowercase).as_deref() {
+        Some("jpg") | Some("jpeg") => "jpg",
+        Some("gif") => "gif",
+        Some("webp") => "webp",
+        _ => "png",
+    }
+}
+
+/// A screenshot pasted into the chat composer: raw image bytes in the
+/// request body, written to a temp file so it can go out as an attachment
+/// (by path) like any picked file. Returns the file path.
+#[tauri::command]
+pub fn chat_save_image(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw image bytes".into());
+    };
+    if bytes.is_empty() || bytes.len() > MAX_PASTED_IMAGE {
+        return Err(format!("pasted image size {} not accepted", bytes.len()));
+    }
+    let ext = pasted_image_ext(request.headers().get("x-ext").and_then(|v| v.to_str().ok()));
+    let dir = std::env::temp_dir().join("terax-chat");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    static SEQ: AtomicU32 = AtomicU32::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = dir.join(format!("截图-{stamp}-{n}.{ext}"));
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +273,14 @@ mod tests {
         assert!(validate_host_line(r#"{"op":"start","cwd":"/"}"#).is_err());
         assert!(validate_host_line(r#"{"text":"no op"}"#).is_err());
         assert!(validate_host_line("not json").is_err());
+    }
+
+    #[test]
+    fn pasted_image_ext_defaults_to_png() {
+        assert_eq!(pasted_image_ext(Some("JPEG")), "jpg");
+        assert_eq!(pasted_image_ext(Some("webp")), "webp");
+        assert_eq!(pasted_image_ext(Some("exe")), "png");
+        assert_eq!(pasted_image_ext(None), "png");
     }
 
     #[test]

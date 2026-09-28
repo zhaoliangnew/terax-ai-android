@@ -15,9 +15,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { type ChatItem, chatTurns } from "../lib/chatItems";
+import { type ChatItem, chatTurns, isImagePath } from "../lib/chatItems";
 import { useSmoothText } from "../lib/useSmoothText";
 import type { PermissionAsk } from "../store/claudeChatStore";
+import { ImageThumb } from "./ImageLightbox";
 
 type Props = {
   items: ChatItem[];
@@ -455,15 +456,23 @@ export function AgentChatView({
                       )}
                       {item.attachments && (
                         <div className="flex flex-wrap justify-end gap-1">
-                          {item.attachments.map((f) => (
-                            <span
-                              key={f}
-                              title={f}
-                              className="max-w-56 truncate rounded-md bg-foreground/[0.08] px-2 py-0.5 text-[11.5px] text-muted-foreground"
-                            >
-                              {f.split("/").pop()}
-                            </span>
-                          ))}
+                          {item.attachments.map((f) =>
+                            isImagePath(f) ? (
+                              <ImageThumb
+                                key={f}
+                                path={f}
+                                className="max-h-20 max-w-32 rounded-lg border border-border object-cover"
+                              />
+                            ) : (
+                              <span
+                                key={f}
+                                title={f}
+                                className="max-w-56 truncate rounded-md bg-foreground/[0.08] px-2 py-0.5 text-[11.5px] text-muted-foreground"
+                              >
+                                {f.split("/").pop()}
+                              </span>
+                            ),
+                          )}
                         </div>
                       )}
                       {item.text && (

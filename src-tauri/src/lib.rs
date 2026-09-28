@@ -372,6 +372,7 @@ pub fn run() {
             claude_chat::claude_chat_send,
             claude_chat::claude_chat_stop,
             claude_chat::chat_pick_files,
+            claude_chat::chat_save_image,
             codex_chat::codex_chat_start,
             codex_chat::codex_chat_send,
             codex_chat::codex_chat_stop,

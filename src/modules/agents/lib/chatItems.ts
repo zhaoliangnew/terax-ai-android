@@ -27,6 +27,11 @@ export type ChatItem =
     }
   | { kind: "note"; id: string; text: string; ts: number };
 
+/** 能直接给模型看、也能在界面上显示成小图的附件。 */
+export function isImagePath(p: string): boolean {
+  return /\.(png|jpe?g|gif|webp)$/i.test(p);
+}
+
 function basename(p: string): string {
   return p.split(/[\\/]/).pop() ?? p;
 }
@@ -62,14 +67,16 @@ export function toolSummary(
 export type ChatTurn = { id: string; question: string; answer: string };
 
 function plain(md: string): string {
-  return md
-    .replace(/```[\s\S]*?```/g, " ")
-    // 只去强调符号;单个下划线常在标识符里(app_x),不能动
-    .replace(/__/g, "")
-    .replace(/[`*#>|]/g, "")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    md
+      .replace(/```[\s\S]*?```/g, " ")
+      // 只去强调符号;单个下划线常在标识符里(app_x),不能动
+      .replace(/__/g, "")
+      .replace(/[`*#>|]/g, "")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 export function chatTurns(items: readonly ChatItem[]): ChatTurn[] {

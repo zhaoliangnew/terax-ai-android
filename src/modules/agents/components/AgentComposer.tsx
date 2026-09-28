@@ -22,9 +22,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
+import { isImagePath } from "../lib/chatItems";
 import type { UsageInfo } from "../lib/usage";
 import type { ModelOption } from "../store/claudeChatStore";
 import { CodexModelPanel, effortLabel } from "./CodexModelPanel";
+import { ImageThumb } from "./ImageLightbox";
 import { UsagePanel } from "./UsagePanel";
 
 type Props = {
@@ -271,6 +274,21 @@ export function AgentComposer({
     }
     inputRef.current?.focus();
   };
+  const attachPastedImages = async (images: File[]) => {
+    for (const img of images) {
+      try {
+        const ext = img.type.split("/")[1] ?? "png";
+        const path = await invoke<string>(
+          "chat_save_image",
+          new Uint8Array(await img.arrayBuffer()),
+          { headers: { "x-ext": ext } },
+        );
+        setAttachments((cur) => (cur.includes(path) ? cur : [...cur, path]));
+      } catch (e) {
+        toast.error(`截图没贴上:${String(e)}`);
+      }
+    }
+  };
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // 分屏时每个窗格都有一个输入框,label 要对得上各自的那个
   const inputId = useId();
@@ -320,26 +338,46 @@ export function AgentComposer({
     <div className="shrink-0 bg-background px-6 pt-1 pb-4">
       <div className="mx-auto flex max-w-3xl flex-col gap-2 rounded-[24px] bg-foreground/[0.12] px-4 pt-3.5 pb-2.5">
         {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {attachments.map((f) => (
-              <span
-                key={f}
-                title={f}
-                className="flex max-w-64 items-center gap-1 rounded-lg bg-foreground/[0.1] py-0.5 pr-1 pl-2 text-[12px]"
-              >
-                <span className="truncate">{f.split("/").pop()}</span>
-                <button
-                  type="button"
-                  aria-label={`移除 ${f.split("/").pop()}`}
-                  onClick={() =>
-                    setAttachments((cur) => cur.filter((x) => x !== f))
-                  }
-                  className="cursor-pointer rounded px-1 text-muted-foreground hover:bg-foreground/15 hover:text-foreground"
+          <div className="flex flex-wrap items-end gap-1.5">
+            {attachments.map((f) =>
+              isImagePath(f) ? (
+                // 图片(粘贴的截图、选的图)照 Codex 显示成小图,右上角 × 取消
+                <span key={f} title={f} className="group/att relative">
+                  <ImageThumb
+                    path={f}
+                    className="size-14 rounded-lg border border-border object-cover"
+                  />
+                  <button
+                    type="button"
+                    aria-label={`移除 ${f.split("/").pop()}`}
+                    onClick={() =>
+                      setAttachments((cur) => cur.filter((x) => x !== f))
+                    }
+                    className="absolute -top-1.5 -right-1.5 flex size-[18px] cursor-pointer items-center justify-center rounded-full border border-border bg-popover text-[11px] leading-none text-muted-foreground shadow hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                </span>
+              ) : (
+                <span
+                  key={f}
+                  title={f}
+                  className="flex max-w-64 items-center gap-1 rounded-lg bg-foreground/[0.1] py-0.5 pr-1 pl-2 text-[12px]"
                 >
-                  ×
-                </button>
-              </span>
-            ))}
+                  <span className="truncate">{f.split("/").pop()}</span>
+                  <button
+                    type="button"
+                    aria-label={`移除 ${f.split("/").pop()}`}
+                    onClick={() =>
+                      setAttachments((cur) => cur.filter((x) => x !== f))
+                    }
+                    className="cursor-pointer rounded px-1 text-muted-foreground hover:bg-foreground/15 hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                </span>
+              ),
+            )}
           </div>
         )}
         <label htmlFor={inputId} className="sr-only">
@@ -351,6 +389,19 @@ export function AgentComposer({
           rows={1}
           value={text}
           onChange={(e) => setText(e.target.value)}
+          onPaste={(e) => {
+            // 剪贴板里有图(截图)就存成临时文件当附件;同时有文字的(从网页
+            // 复制的图文)文字照常粘进去
+            const images = Array.from(e.clipboardData.items)
+              .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+              .map((i) => i.getAsFile())
+              .filter((f): f is File => f !== null);
+            if (images.length === 0) return;
+            if (!e.clipboardData.types.includes("text/plain")) {
+              e.preventDefault();
+            }
+            void attachPastedImages(images);
+          }}
           onKeyDown={(e) => {
             // 输入法选词时的回车是确认候选,不是发送
             if (e.nativeEvent.isComposing) return;
