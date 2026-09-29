@@ -352,7 +352,14 @@ export function RightPanel({
             页面和登录状态都留着 */}
         {Object.entries(allWebTabs).flatMap(([r, list]) =>
           list.map((wt) => (
-            <div key={wt.id} className="absolute inset-0">
+            // 没选中的整层藏起来:铺满右栏的空壳会挡住投屏/源码/仓库的点击
+            <div
+              key={wt.id}
+              className={cn(
+                "absolute inset-0",
+                (r !== webRoot || activeWeb !== wt.id) && "hidden",
+              )}
+            >
               <Suspense fallback={null}>
                 <WebTab
                   tabId={wt.id}
