@@ -77,6 +77,10 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
   const urlRef = useRef(initialUrl);
   const lastRef = useRef<{ b: Bounds; shown: boolean } | null>(null);
   const [opened, setOpened] = useState(false);
+  // 浮层盖住网页时顶在原处的静态截图(原生网页压在所有界面上面,只能藏起来换成图)
+  const [frame, setFrame] = useState<string | null>(null);
+  const frameRef = useRef<string | null>(null);
+  const freezing = useRef(false);
   const [address, setAddress] = useState(displayUrl(initialUrl));
   const [loading, setLoading] = useState(false);
   const { imeProps, isImeKey } = useImeGuard();
@@ -113,16 +117,47 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
     ) {
       return;
     }
-    if (b) {
-      void invoke("web_set_bounds", { label: tabId, ...b }).catch(() => {});
-    }
-    void invoke("web_set_visible", { label: tabId, visible: shown }).catch(
-      () => {},
-    );
     lastRef.current = {
       b: b ?? last?.b ?? { x: 0, y: 0, width: 1, height: 1 },
       shown,
     };
+    if (b) {
+      void invoke("web_set_bounds", { label: tabId, ...b }).catch(() => {});
+    }
+    const setVisible = () =>
+      invoke("web_set_visible", { label: tabId, visible: shown }).catch(
+        () => {},
+      );
+    if (shown) {
+      void setVisible();
+      showFrame(null);
+      return;
+    }
+    // 被浮层(聊天卡片、菜单)盖住:先拍一张定格顶上,再藏真网页,看着页面还在;
+    // 整个 tab 不可见就直接藏
+    if (!b || !last?.shown || freezing.current) {
+      void setVisible();
+      return;
+    }
+    freezing.current = true;
+    invoke<ArrayBuffer>("web_freeze_frame", { label: tabId })
+      .then((buf) =>
+        showFrame(URL.createObjectURL(new Blob([buf], { type: "image/jpeg" }))),
+      )
+      .catch(() => {})
+      .finally(() => {
+        freezing.current = false;
+        // 拍的这会儿浮层可能已经关了:以最新状态为准
+        if (!lastRef.current?.shown) void setVisible();
+        else showFrame(null);
+      });
+  };
+
+  const showFrame = (url: string | null) => {
+    if (frameRef.current === url) return;
+    if (frameRef.current) URL.revokeObjectURL(frameRef.current);
+    frameRef.current = url;
+    setFrame(url);
   };
   const syncRef = useRef(sync);
   syncRef.current = sync;
@@ -390,6 +425,14 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
       <div ref={areaRef} className="relative min-h-0 flex-1">
         {!opened && (
           <WebStartPage onOpen={(url) => void open(url)} error={error} />
+        )}
+        {frame && (
+          <img
+            src={frame}
+            alt=""
+            draggable={false}
+            className="absolute inset-0 size-full object-cover object-left-top select-none"
+          />
         )}
       </div>
     </div>

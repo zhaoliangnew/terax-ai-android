@@ -100,6 +100,11 @@ fn local_html(path: &str) -> Result<std::path::PathBuf, String> {
 /// `terax-annot://<kind>?d=<json>`, which `on_navigation` intercepts.
 const ANNOTATE_JS: &str = include_str!("browser_annotate.js");
 const ANNOT_SCHEME: &str = "terax-annot";
+/// The minimized chat's round button, put into the page itself (the native
+/// page covers anything the app draws over it). Clicking it navigates to
+/// `terax-annot://chat`.
+const BUBBLE_JS: &str = include_str!("browser_bubble.js");
+const BUBBLE_STOP_JS: &str = "window.__teraxBubble && window.__teraxBubble.stop()";
 /// Upper bound on one annotation report (the URL carries the JSON).
 const MAX_ANNOT_BYTES: usize = 64 * 1024;
 
@@ -259,11 +264,17 @@ impl WebTabsState {
 #[derive(Default)]
 pub struct WebAnnotState {
     armed: Mutex<HashSet<String>>,
+    /// The chat panel is minimized: every tab shows the round chat button.
+    bubble: std::sync::atomic::AtomicBool,
 }
 
 impl WebAnnotState {
     fn is_armed(&self, label: &str) -> bool {
         self.armed.lock().unwrap().contains(label)
+    }
+
+    fn bubble_on(&self) -> bool {
+        self.bubble.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -467,6 +478,16 @@ pub async fn web_open(
             if url.scheme() != ANNOT_SCHEME {
                 return true;
             }
+            // 最小化聊天的小圆钮:只是请 app 把聊天输入框叫回来,页面伪造了也无害
+            if url.host_str() == Some("chat") {
+                if nav_app
+                    .try_state::<WebAnnotState>()
+                    .is_some_and(|s| s.bubble_on())
+                {
+                    let _ = nav_app.emit("web://chat-bubble", nav_label.clone());
+                }
+                return false;
+            }
             // 批注的回报:只收正在批注的 tab;无论收不收,这次跳转都拦下
             let armed = nav_app
                 .try_state::<WebAnnotState>()
@@ -504,6 +525,14 @@ pub async fn web_open(
                     loading: started,
                 },
             );
+            // 聊天最小化着:新页面里也放上小圆钮
+            if !started
+                && load_app
+                    .try_state::<WebAnnotState>()
+                    .is_some_and(|s| s.bubble_on())
+            {
+                let _ = wv.eval(BUBBLE_JS);
+            }
             // 批注中翻页了:新页面没有选择器,重新放进去
             if !started
                 && load_app
@@ -611,6 +640,25 @@ pub fn web_close(
     app.state::<WebTabsState>().closed(&label);
     if let Some(wv) = app.get_webview(&label) {
         wv.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Show or hide the minimized chat's round button in every web tab.
+#[tauri::command]
+pub fn web_chat_bubble(
+    app: AppHandle,
+    state: tauri::State<'_, WebAnnotState>,
+    on: bool,
+) -> Result<(), String> {
+    state
+        .bubble
+        .store(on, std::sync::atomic::Ordering::Relaxed);
+    let js = if on { BUBBLE_JS } else { BUBBLE_STOP_JS };
+    for (label, wv) in app.webviews() {
+        if label.starts_with("web-") {
+            let _ = wv.eval(js);
+        }
     }
     Ok(())
 }

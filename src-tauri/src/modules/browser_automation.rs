@@ -403,3 +403,17 @@ mod tests {
         assert!(normalize_url("file:///etc/passwd").is_err());
     }
 }
+
+/// A still frame of a web tab (JPEG bytes). The native page sits above all
+/// app UI, so while a floating panel (the chat card) covers it the page is
+/// hidden and this frame is shown in its place.
+#[tauri::command]
+pub async fn web_freeze_frame(app: AppHandle, label: String) -> Result<tauri::ipc::Response, String> {
+    // The snapshot callback runs on the main thread; wait for it off of it.
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_, wv) = resolve(&app, Some(&label))?;
+        native::snapshot_jpeg(&wv, Duration::from_secs(3)).map(tauri::ipc::Response::new)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

@@ -3,16 +3,68 @@ import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
   Cancel01Icon,
-  PlusSignIcon,
   Refresh01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { connectDevice, disconnectDevice } from "./lib/adb";
 import { ipSuffix } from "./lib/highlightSerial";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
+
+const KEYWORDS_KEY = "terax.android.deviceKeywords";
+
+/** 筛选关键词:自己加过就用自己的;没加过拿备注里常见的开头垫着。 */
+function loadKeywords(notes: string[]): string[] {
+  try {
+    const raw = localStorage.getItem(KEYWORDS_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return noteTags(notes);
+}
+
+/** 备注的类别:第一个"-"或空格前那段("出入库-王丽" → 出入库)。 */
+function noteTag(note: string): string | null {
+  const head = note
+    .trim()
+    .split(/[-\s·_]/)[0]
+    ?.trim();
+  return head || null;
+}
+
+/** 出现两次以上的备注类别,做成筛选标签;按出现次数排。 */
+function noteTags(notes: string[]): string[] {
+  const count = new Map<string, number>();
+  for (const n of notes) {
+    const t = noteTag(n);
+    if (t) count.set(t, (count.get(t) ?? 0) + 1);
+  }
+  return [...count]
+    .filter(([, c]) => c >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .map(([t]) => t);
+}
+
+/** 设备所在网段(192.168.8.x);USB 连的没有 IP,单独一组。 */
+function subnetOf(serial: string): string {
+  const m = /^(\d+\.\d+\.\d+)\.\d+(?::\d+)?$/.exec(serial);
+  return m ? `${m[1]}.x` : "USB";
+}
+
+/**
+ * 标题前已经有 IP 后两位了,地址行只补它说不清的部分:不是 192.168 网段就给
+ * 完整 IP,端口不是 5555 就带上端口;USB 连的(没有 IP)给序列号。
+ */
+function extraAddress(serial: string): string | null {
+  const m = /^(\d+\.\d+)\.(\d+\.\d+)(?::(\d+))?$/.exec(serial);
+  if (!m) return serial;
+  const [, prefix, tail, port] = m;
+  const host = prefix === "192.168" ? null : `${prefix}.${tail}`;
+  const extraPort = port && port !== "5555" ? `:${port}` : "";
+  if (!host && !extraPort) return null;
+  return `${host ?? tail}${extraPort}`;
+}
 
 /** The single "all devices" surface, a window-level overlay (portaled to
  * body so it covers the whole window, not just the narrow right panel) —
@@ -92,7 +144,37 @@ export function DeviceManagerPanel() {
     if (ipB) return 1;
     return a.serial.localeCompare(b.serial);
   });
-  const shown = hideOffline ? list.filter((d) => isSnOnline(d.sn)) : list;
+  // 筛选:搜索框(备注/型号/IP/SN 任意一段)或点关键词标签(出入库、餐台…)。
+  // 关键词自己加减;没加过时先用备注里常见的开头(出现两次以上的)垫着
+  const [query, setQuery] = useState("");
+  const [tag, setTag] = useState<string | null>(null);
+  const [keywords, setKeywords] = useState<string[]>(() =>
+    loadKeywords(Object.values(useAndroidRunStore.getState().deviceNotes)),
+  );
+  const [addingKeyword, setAddingKeyword] = useState(false);
+  const [keywordInput, setKeywordInput] = useState("");
+  const saveKeywords = (next: string[]) => {
+    setKeywords(next);
+    try {
+      localStorage.setItem(KEYWORDS_KEY, JSON.stringify(next));
+    } catch {}
+  };
+  const matches = (d: (typeof list)[number], word: string) =>
+    [deviceNotes[d.sn] ?? "", d.vendor ?? "", d.model]
+      .join(" ")
+      .toLowerCase()
+      .includes(word.toLowerCase());
+  const q = query.trim().toLowerCase();
+  const shown = list.filter((d) => {
+    if (hideOffline && !isSnOnline(d.sn)) return false;
+    const note = deviceNotes[d.sn] ?? "";
+    if (tag && !matches(d, tag)) return false;
+    if (!q) return true;
+    return [note, d.vendor ?? "", d.model, d.serial, d.sn, d.key ?? ""]
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  });
 
   const onPick = async (sn: string, serial: string) => {
     const live = liveDevices.find((d) => d.sn === sn && d.state === "device");
@@ -161,6 +243,19 @@ export function DeviceManagerPanel() {
     }
   };
 
+  // 窗口高度只长不缩:筛选/只看在线时卡片变少,窗口不跟着变矮(不跳);
+  // 关掉再打开才重新按内容量
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [minH, setMinH] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) {
+      setMinH(0);
+      return;
+    }
+    const h = dialogRef.current?.offsetHeight ?? 0;
+    if (h > minH) setMinH(h);
+  });
+
   if (!open) return null;
 
   return createPortal(
@@ -173,29 +268,48 @@ export function DeviceManagerPanel() {
       />
       {/* 窗口正中的大弹框:比右栏里那块宽得多(卡片能排三列左右),又不至于
           铺满整个窗口。卡片按宽度自动排列 */}
-      <div className="fixed top-1/2 left-1/2 z-50 flex h-[min(680px,80vh)] w-[min(1000px,86vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-white/10">
+      <div
+        ref={dialogRef}
+        style={{ minHeight: minH || undefined }}
+        className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(680px,80vh)] w-[min(1000px,86vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-white/10"
+      >
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
-          <span className="flex items-center gap-2 text-[13px] font-semibold">
-            历史设备
+          {/* 标题后面直接连新设备:输 IP 回车就连 */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper only, real controls are inside */}
+          <div
+            onKeyDown={(e) => e.stopPropagation()}
+            className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1"
+          >
+            <span className="mr-2 text-[13px] font-semibold">设备列表</span>
+            <input
+              value={connectInput}
+              onChange={(e) => setConnectInput(e.target.value)}
+              placeholder="连接新设备:IP 或 IP:端口"
+              title="默认端口 5555"
+              spellCheck={false}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void onConnectNew();
+              }}
+              className="h-7 w-52 min-w-0 rounded-md border border-input bg-transparent px-2 font-mono text-[12.5px] outline-none focus:border-ring"
+            />
+            <Button
+              size="sm"
+              disabled={!connectInput.trim() || connecting}
+              onClick={() => void onConnectNew()}
+              className="h-7 shrink-0 px-2.5 text-xs"
+            >
+              {connecting ? "连接中…" : "连接"}
+            </Button>
             {devicesLoading && (
-              <span className="text-[11px] font-normal text-muted-foreground">
-                刷新中…
+              <span className="text-[11px] text-muted-foreground">刷新中…</span>
+            )}
+            {connectError && (
+              <span className="basis-full whitespace-pre-wrap break-all text-[11px] leading-4 text-red-500">
+                {connectError}
               </span>
             )}
-          </span>
+          </div>
           <div className="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              title={hideOffline ? "当前只显示在线设备" : "隐藏离线设备"}
-              onClick={() => setHideOffline((v) => !v)}
-              className={cn(
-                "h-7 gap-1.5 px-2 text-[12px]",
-                hideOffline && "border-emerald-500/50 text-emerald-500",
-              )}
-            >
-              只看在线
-            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -219,245 +333,360 @@ export function DeviceManagerPanel() {
             </Button>
           </div>
         </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pt-3">
+          {[null, ...keywords].map((t) => (
+            <span key={t ?? "__all"}>
+              <button
+                type="button"
+                onClick={() => setTag(t)}
+                className={cn(
+                  "h-6 cursor-pointer rounded-full border px-2.5 text-[12px] transition-colors",
+                  tag === t
+                    ? "border-foreground/30 bg-foreground/15 text-foreground"
+                    : "border-border text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t ?? "全部"}
+                <span className="ml-1 text-muted-foreground/70">
+                  {t === null
+                    ? list.length
+                    : list.filter((d) => matches(d, t)).length}
+                </span>
+                {/* 删除只在选中的那个上出现,放在标签里面:悬停扫过不会误点 */}
+                {t !== null && tag === t && (
+                  // biome-ignore lint/a11y/useSemanticElements: nested in the chip button, can't be a <button>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`删掉关键词 ${t}`}
+                    title="删掉这个关键词"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      saveKeywords(keywords.filter((k) => k !== t));
+                      setTag(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.stopPropagation();
+                        saveKeywords(keywords.filter((k) => k !== t));
+                        setTag(null);
+                      }
+                    }}
+                    className="-mr-1 ml-1.5 inline-flex size-4 items-center justify-center rounded-full text-[11px] text-muted-foreground hover:bg-foreground/15 hover:text-foreground"
+                  >
+                    ×
+                  </span>
+                )}
+              </button>
+            </span>
+          ))}
+          {addingKeyword ? (
+            // biome-ignore lint/a11y/noAutofocus: opened by an explicit click
+            <input
+              autoFocus
+              value={keywordInput}
+              onChange={(e) => setKeywordInput(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  const k = keywordInput.trim();
+                  if (k && !keywords.includes(k))
+                    saveKeywords([...keywords, k]);
+                  setKeywordInput("");
+                  setAddingKeyword(false);
+                } else if (e.key === "Escape") {
+                  setAddingKeyword(false);
+                }
+              }}
+              onBlur={() => setAddingKeyword(false)}
+              placeholder="关键词,回车添加"
+              className="h-6 w-32 rounded-full border border-input bg-transparent px-2.5 text-[12px] outline-none focus:border-ring"
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAddingKeyword(true)}
+              className="h-6 cursor-pointer rounded-full border border-dashed border-border px-2.5 text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              + 关键词
+            </button>
+          )}
+          {/* 搜索、只看在线和关键词都是筛选,放一行 */}
+          <span className="ml-auto flex items-center gap-1.5">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Escape" && query) {
+                  e.preventDefault();
+                  setQuery("");
+                }
+              }}
+              placeholder="搜备注 / 型号 / IP / SN"
+              spellCheck={false}
+              className="h-7 w-52 rounded-md border border-input bg-transparent px-2 text-[12px] outline-none focus:border-ring"
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              title={hideOffline ? "当前只显示在线设备" : "隐藏离线设备"}
+              onClick={() => setHideOffline((v) => !v)}
+              className={cn(
+                "h-7 gap-1.5 px-2 text-[12px]",
+                hideOffline && "border-emerald-500/50 text-emerald-500",
+              )}
+            >
+              只看在线
+            </Button>
+          </span>
+        </div>
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
           <div className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-2.5">
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper only, real controls are inside */}
-            {/* biome-ignore lint/a11y/useSemanticElements: contains its own inputs/button, can't be a <button> */}
-            <div
-              onKeyDown={(e) => e.stopPropagation()}
-              className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-dashed border-border px-3.5 py-2"
-            >
-              <span className="flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
-                <HugeiconsIcon icon={PlusSignIcon} size={14} strokeWidth={2} />
-                连接新设备
-              </span>
-              <input
-                value={connectInput}
-                onChange={(e) => setConnectInput(e.target.value)}
-                placeholder="192.168.1.100"
-                spellCheck={false}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void onConnectNew();
-                }}
-                className="h-7 min-w-0 flex-1 rounded border border-input bg-transparent px-2 font-mono text-[13px] outline-none focus:border-ring"
-              />
-              <Button
-                size="sm"
-                disabled={!connectInput.trim() || connecting}
-                onClick={() => void onConnectNew()}
-                className="h-7 shrink-0 px-2.5 text-xs"
-              >
-                {connecting ? "连接中…" : "连接"}
-              </Button>
-              <span className="shrink-0 text-[10px] text-muted-foreground/70">
-                IP 或 IP:端口,默认端口 5555
-              </span>
-              {connectError && (
-                <span className="basis-full whitespace-pre-wrap break-all text-[10px] leading-4 text-red-500">
-                  {connectError}
-                </span>
-              )}
-            </div>
             {shown.length === 0 && (
               <div className="col-span-full px-3 py-6 text-center text-sm text-muted-foreground">
                 {list.length === 0
                   ? "还没有连接过的设备"
-                  : "没有在线设备(右上角开关关掉可看离线记录)"}
+                  : q || tag
+                    ? "没有符合筛选的设备"
+                    : "没有在线设备(右上角开关关掉可看离线记录)"}
               </div>
             )}
-            {shown.map((d) => {
+            {shown.map((d, i) => {
               const live = liveDevices.find(
                 (x) => x.sn === d.sn && x.state === "device",
               );
               const isOnline = !!live;
               const isSelected = isOnline && live?.serial === selectedSerial;
               const canReconnect = d.serial.includes(":");
+              // 按网段分组(192.168.8.x / 192.168.9.x …):列表按 IP 排好了,
+              // 网段一变就插一条组标题
+              const net = subnetOf(d.serial);
+              const newGroup = i === 0 || subnetOf(shown[i - 1].serial) !== net;
               return (
-                <div
-                  key={d.sn}
-                  className={cn(
-                    "group relative flex min-w-0 flex-col gap-1.5 rounded-xl border p-3.5 hover:bg-accent/30",
-                    isSelected
-                      ? "border-emerald-500 ring-1 ring-emerald-500/50 hover:border-emerald-500"
-                      : "border-border hover:border-ring/60",
+                <Fragment key={d.sn}>
+                  {newGroup && (
+                    <div className="col-span-full flex items-center gap-2 pt-1.5 text-[12px] text-muted-foreground">
+                      <span className="font-medium text-foreground/80">
+                        {net}
+                      </span>
+                      <span>
+                        {shown.filter((x) => subnetOf(x.serial) === net).length}{" "}
+                        台
+                      </span>
+                      <span className="h-px flex-1 bg-border/70" />
+                    </div>
                   )}
-                >
-                  <div className="absolute top-2 right-2">
-                    <span
-                      className={cn(
-                        "rounded px-1 py-0.5 text-[10px] font-medium leading-none",
-                        isOnline
-                          ? "bg-emerald-500/20 text-emerald-400"
-                          : "bg-muted-foreground/15 text-muted-foreground",
-                      )}
-                    >
-                      {isOnline ? "在线" : "离线"}
-                    </span>
-                  </div>
-                  <div className="absolute bottom-2 right-2.5 flex items-center gap-2.5 rounded bg-background/85 px-1.5 py-0.5 opacity-0 backdrop-blur-[2px] group-hover:opacity-100">
-                    {isOnline && live && (
-                      <button
-                        type="button"
-                        disabled={disconnectingSerial === live.serial}
-                        onClick={() => void onDisconnect(live.serial)}
-                        className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
-                      >
-                        断开连接
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => forgetDevice(d.sn)}
-                      className="text-[11px] text-muted-foreground hover:text-red-400"
-                    >
-                      删除
-                    </button>
-                  </div>
-                  {/* biome-ignore lint/a11y/useSemanticElements: contains its own interactive note editor, can't be a <button> */}
                   <div
-                    role="button"
-                    tabIndex={isOnline || canReconnect ? 0 : -1}
-                    onClick={() => {
-                      if (isOnline || canReconnect) void onPick(d.sn, d.serial);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        if (isOnline || canReconnect)
-                          void onPick(d.sn, d.serial);
-                      }
-                    }}
                     className={cn(
-                      "flex min-w-0 flex-1 flex-col items-start gap-1.5 text-left",
-                      isOnline || canReconnect
-                        ? "cursor-pointer"
-                        : "cursor-default",
-                      !isOnline && "opacity-50",
+                      "group relative flex min-w-0 flex-col gap-1.5 rounded-xl border p-3.5 pb-7 hover:bg-accent/30",
+                      isSelected
+                        ? "border-emerald-500 ring-1 ring-emerald-500/50 hover:border-emerald-500"
+                        : "border-border hover:border-ring/60",
                     )}
                   >
-                    <span className="flex w-full min-w-0 items-center gap-1.5 pr-10">
+                    <div className="absolute top-2 right-2">
                       <span
                         className={cn(
-                          "size-1.5 shrink-0 rounded-full",
+                          "rounded px-1 py-0.5 text-[10px] font-medium leading-none",
                           isOnline
-                            ? "bg-emerald-500"
-                            : "bg-muted-foreground/40",
+                            ? "bg-emerald-500/20 text-emerald-400"
+                            : "bg-muted-foreground/15 text-muted-foreground",
                         )}
-                      />
-                      <span className="truncate text-[15px] font-semibold">
-                        {d.vendor ? `${d.vendor} · ` : ""}
-                        {d.model}
-                      </span>
-                    </span>
-                    <span className="flex w-full min-w-0 items-center gap-2 text-[12px] text-muted-foreground/70">
-                      <button
-                        type="button"
-                        title={`点击复制 · ${d.sn}`}
-                        onClick={(e) => {
-                          // 卡片本身点一下就选中/连接设备,SN 这行要单独接住点击、
-                          // 别让事件冒上去触发那个。
-                          e.stopPropagation();
-                          void copyToClipboard(d.sn);
-                          toast.success("已复制 SN", { description: d.sn });
-                        }}
-                        className="min-w-0 shrink-0 truncate text-left hover:text-foreground hover:underline"
                       >
-                        SN:{d.sn}
-                      </button>
-                      {/* /sdcard/key.txt 的激活 key:在线时刷新,离线显示最后读到的 */}
-                      {d.key && (
+                        {isOnline ? "在线" : "离线"}
+                      </span>
+                    </div>
+                    <div className="absolute bottom-2 right-2.5 flex items-center gap-2.5 rounded bg-background/85 px-1.5 py-0.5 opacity-0 backdrop-blur-[2px] group-hover:opacity-100">
+                      {isOnline && live && (
                         <button
                           type="button"
-                          title={`点击复制 key · ${d.key}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void copyToClipboard(d.key ?? "");
-                            toast.success("已复制 key", { description: d.key });
-                          }}
-                          className="min-w-0 truncate text-left hover:text-foreground hover:underline"
+                          disabled={disconnectingSerial === live.serial}
+                          onClick={() => void onDisconnect(live.serial)}
+                          className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                         >
-                          key:{d.key}
+                          断开连接
                         </button>
                       )}
-                    </span>
-                    <span className="w-full min-w-0 truncate text-[13px] text-muted-foreground">
-                      {d.serial} · Android {d.androidVersion} · API {d.apiLevel}
-                      {connectingSn === d.sn && " · 连接中…"}
-                    </span>
-                    {failedSn === d.sn && (
-                      <span className="text-[11px] text-yellow-500">
-                        连不上这个 IP,设备地址可能变了 ——
-                        用下面"连接新设备"手动连一次
-                      </span>
-                    )}
-                    {editingNote === d.sn ? (
-                      // biome-ignore lint/a11y/noAutofocus: opened by an explicit click to edit
-                      <input
-                        autoFocus
-                        value={noteInput}
-                        onChange={(e) => setNoteInput(e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => {
-                          e.stopPropagation();
-                          if (e.key === "Enter") {
-                            setDeviceNote(d.sn, noteInput);
-                            setEditingNote(null);
-                          } else if (e.key === "Escape") {
-                            setEditingNote(null);
-                          }
-                        }}
-                        onBlur={() => {
-                          setDeviceNote(d.sn, noteInput);
-                          setEditingNote(null);
-                        }}
-                        placeholder="备注"
-                        className="mt-0.5 h-6 w-32 rounded border border-input bg-transparent px-1.5 text-[12px] outline-none focus:border-ring"
-                      />
-                    ) : (
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setNoteInput(deviceNotes[d.sn] ?? "");
-                          setEditingNote(d.sn);
-                        }}
-                        className="mt-0.5 min-w-0 max-w-full"
+                        onClick={() => forgetDevice(d.sn)}
+                        className="text-[11px] text-muted-foreground hover:text-red-400"
                       >
-                        {deviceNotes[d.sn] ? (
+                        删除
+                      </button>
+                    </div>
+                    {/* biome-ignore lint/a11y/useSemanticElements: contains its own interactive note editor, can't be a <button> */}
+                    <div
+                      role="button"
+                      tabIndex={isOnline || canReconnect ? 0 : -1}
+                      onClick={() => {
+                        if (isOnline || canReconnect)
+                          void onPick(d.sn, d.serial);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          if (isOnline || canReconnect)
+                            void onPick(d.sn, d.serial);
+                        }
+                      }}
+                      className={cn(
+                        "flex min-w-0 flex-1 flex-col items-start gap-1 text-left",
+                        isOnline || canReconnect
+                          ? "cursor-pointer"
+                          : "cursor-default",
+                      )}
+                    >
+                      {/* 标题是备注(自己起的名字最好认),没备注才用型号;
+                        点标题旁的铅笔改备注 */}
+                      <span className="flex w-full min-w-0 items-center gap-2 pr-10">
+                        {/* IP 后两位:同一网段几十台设备,靠它和备注认设备;
+                          底色兼当在线状态(绿=在线) */}
+                        {ipSuffix(d.serial) ? (
                           <span
                             className={cn(
-                              "block truncate rounded px-2 py-0.5 text-[12px] font-medium",
-                              // 离线卡片整体已经叠了 opacity-50,这里再用半透明
-                              // 绿字就成 25% 了,根本看不清 —— 离线改灰底 + 正常
-                              // 字色,叠完和旁边 serial 行一个可读度。
+                              "shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[13px] font-bold leading-none",
                               isOnline
                                 ? "bg-emerald-500/20 text-emerald-400"
-                                : "bg-muted-foreground/20 text-foreground",
+                                : "bg-sky-500/15 text-sky-400",
                             )}
                           >
-                            {deviceNotes[d.sn]}
-                            {ipSuffix(d.serial) && ` · ${ipSuffix(d.serial)}`}
+                            {ipSuffix(d.serial)}
                           </span>
                         ) : (
-                          <span className="text-[12px] text-muted-foreground/50 hover:text-muted-foreground">
-                            + 备注
+                          <span
+                            className={cn(
+                              "size-2 shrink-0 rounded-full",
+                              isOnline
+                                ? "bg-emerald-500"
+                                : "bg-muted-foreground/40",
+                            )}
+                          />
+                        )}
+                        {editingNote === d.sn ? (
+                          // biome-ignore lint/a11y/noAutofocus: opened by an explicit click to edit
+                          <input
+                            autoFocus
+                            value={noteInput}
+                            onChange={(e) => setNoteInput(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === "Enter") {
+                                setDeviceNote(d.sn, noteInput);
+                                setEditingNote(null);
+                              } else if (e.key === "Escape") {
+                                setEditingNote(null);
+                              }
+                            }}
+                            onBlur={() => {
+                              setDeviceNote(d.sn, noteInput);
+                              setEditingNote(null);
+                            }}
+                            placeholder="给这台设备起个名字"
+                            className="h-7 min-w-0 flex-1 rounded border border-input bg-transparent px-2 text-[14px] font-medium outline-none focus:border-ring"
+                          />
+                        ) : (
+                          <>
+                            <span
+                              className={cn(
+                                "min-w-0 truncate text-[15px] font-semibold",
+                                isOnline
+                                  ? "text-foreground"
+                                  : "text-foreground/75",
+                              )}
+                            >
+                              {deviceNotes[d.sn] ||
+                                `${d.vendor ? `${d.vendor} · ` : ""}${d.model}`}
+                            </span>
+                            <button
+                              type="button"
+                              title={deviceNotes[d.sn] ? "改备注" : "加备注"}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setNoteInput(deviceNotes[d.sn] ?? "");
+                                setEditingNote(d.sn);
+                              }}
+                              className={cn(
+                                "shrink-0 rounded px-1 text-[12px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                                deviceNotes[d.sn] &&
+                                  "opacity-0 group-hover:opacity-100",
+                              )}
+                            >
+                              {deviceNotes[d.sn] ? "✎" : "+ 备注"}
+                            </button>
+                          </>
+                        )}
+                      </span>
+                      {/* 第二行:型号(有备注时;没备注它就是标题)· 系统版本。IP 后两位
+                        已经在标题前面了,常见的 192.168.x.x:5555 不再重复,
+                        别的网段/端口才补上 */}
+                      <span className="w-full min-w-0 truncate text-[13px] text-muted-foreground">
+                        {extraAddress(d.serial) && (
+                          <span className="text-foreground/85">
+                            {extraAddress(d.serial)} ·{" "}
                           </span>
                         )}
-                      </button>
-                    )}
+                        {deviceNotes[d.sn] &&
+                          `${d.vendor ? `${d.vendor} · ` : ""}${d.model} · `}
+                        Android {d.androidVersion}
+                        {connectingSn === d.sn && " · 连接中…"}
+                      </span>
+                      <span className="flex w-full min-w-0 items-center gap-3 text-[12px] text-muted-foreground/80">
+                        <button
+                          type="button"
+                          title={`点击复制 · ${d.sn}`}
+                          onClick={(e) => {
+                            // 卡片本身点一下就选中/连接设备,SN 这行要单独接住点击、
+                            // 别让事件冒上去触发那个。
+                            e.stopPropagation();
+                            void copyToClipboard(d.sn);
+                            toast.success("已复制 SN", { description: d.sn });
+                          }}
+                          className="min-w-0 shrink truncate text-left hover:text-foreground hover:underline"
+                        >
+                          SN {d.sn}
+                        </button>
+                        {/* /sdcard/key.txt 的激活 key:在线时刷新,离线显示最后读到的 */}
+                        {d.key && (
+                          <button
+                            type="button"
+                            title={`点击复制 key · ${d.key}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void copyToClipboard(d.key ?? "");
+                              toast.success("已复制 key", {
+                                description: d.key,
+                              });
+                            }}
+                            className="shrink-0 text-left hover:text-foreground hover:underline"
+                          >
+                            key {d.key}
+                          </button>
+                        )}
+                      </span>
+                      {failedSn === d.sn && (
+                        <span className="text-[12px] text-yellow-500">
+                          连不上这个 IP,设备地址可能变了 ——
+                          用上面"连接新设备"手动连一次
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
+                </Fragment>
               );
             })}
           </div>
         </div>
-        <div className="shrink-0 border-t border-border px-4 py-3">
-          <div className="mb-1 text-[11px] text-muted-foreground">
-            adb 路径(留空=自动查找)
-          </div>
+        {/* 窗口按内容高度来,不留一大块空白;adb 路径很少改,收成底下一行 */}
+        <div className="flex shrink-0 items-center gap-2.5 border-t border-border px-4 py-2">
+          <span className="shrink-0 text-[11.5px] text-muted-foreground">
+            adb 路径
+          </span>
           <input
             defaultValue={adbPath}
-            placeholder="/Users/…/platform-tools/adb"
+            placeholder="留空自动查找"
             spellCheck={false}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -465,7 +694,7 @@ export function DeviceManagerPanel() {
               }
             }}
             onBlur={(e) => setAdbPath(e.target.value)}
-            className="h-7 w-full rounded border border-input bg-transparent px-2 font-mono text-[12px] outline-none focus:border-ring"
+            className="h-7 min-w-0 flex-1 rounded border border-transparent bg-transparent px-2 font-mono text-[12px] text-muted-foreground outline-none hover:border-input focus:border-ring focus:text-foreground"
           />
         </div>
       </div>

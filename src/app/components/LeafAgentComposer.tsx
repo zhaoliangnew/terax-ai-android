@@ -452,7 +452,11 @@ function useLeafBranch(
 }
 
 /** 聊天模式下窗格底部的输入框;终端模式下不出现。 */
-export function LeafAgentComposer({ leafId, getCwd }: Props) {
+export function LeafAgentComposer({
+  leafId,
+  getCwd,
+  compact = false,
+}: Props & { compact?: boolean }) {
   const mode = useAgentViewStore((s) => s.modes[leafId] ?? "terminal");
   const quote = useAgentViewStore((s) => s.quotes[leafId] ?? null);
   const injection = useAgentViewStore((s) => s.injections[leafId] ?? null);
@@ -509,6 +513,7 @@ export function LeafAgentComposer({ leafId, getCwd }: Props) {
         usage={session?.usage}
         branch={branch}
         context={session?.context}
+        compact={compact}
         onOpenUsage={() => api.requestUsage(leafId)}
         onCompact={() => api.compact(leafId)}
         onNewChat={() => {
@@ -535,18 +540,19 @@ export function LeafChatDock({
   const session = useChatSession(agent, leafId);
   return (
     <>
-      <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/60 pr-2 pl-3">
-        <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">
-          {AGENT_NAMES[agent]} 聊天
-        </span>
+      {/* 照 Codex:"−"在左上角,点了最小化成右栏标签栏上的小圆钮 */}
+      <div className="flex h-10 shrink-0 items-center gap-1.5 border-b border-border/60 pr-3 pl-2">
         <button
           type="button"
-          title="收起聊天"
+          title="最小化"
           onClick={onCollapse}
           className="flex size-7 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
         >
           <HugeiconsIcon icon={MinusSignIcon} size={14} strokeWidth={2} />
         </button>
+        <span className="min-w-0 flex-1 truncate text-[12.5px] text-muted-foreground">
+          {AGENT_NAMES[agent]} 聊天
+        </span>
       </div>
       <div className="relative min-h-0 flex-1">
         <Suspense fallback={null}>

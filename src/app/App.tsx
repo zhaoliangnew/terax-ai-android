@@ -135,10 +135,12 @@ import {
   workspaceScopeKey,
 } from "@/modules/workspace";
 import {
+  BubbleChatIcon,
   CheckmarkCircle01Icon,
   Folder01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { SearchAddon } from "@xterm/addon-search";
@@ -796,6 +798,35 @@ export default function App() {
   const dockChat =
     rightPanelExpanded && activeLeafInChat && activeLeafId !== null;
   const [dockChatOpen, setDockChatOpen] = useState(false);
+  // 聊天框最小化(左上角"−"):输入框整条藏起来,右栏标签栏上留个小圆钮
+  const [dockHidden, setDockHidden] = useState(false);
+  const dockMinimized = dockChat && dockHidden;
+  const restoreDock = useCallback(() => {
+    setDockHidden(false);
+    // 输入框回来后光标直接进去
+    requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLTextAreaElement>("[data-chat-dock] textarea")
+        ?.focus(),
+    );
+  }, []);
+  // 最小化的小圆钮在右下角(照 Codex)。网页标签页上 app 画的会被原生网页
+  // 挡住,那边由 Rust 放进页面里,点了发 web://chat-bubble 回来
+  useEffect(() => {
+    void invoke("web_chat_bubble", { on: dockMinimized }).catch(() => {});
+  }, [dockMinimized]);
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let alive = true;
+    void listen("web://chat-bubble", () => restoreDock()).then((u) => {
+      if (alive) off = u;
+      else u();
+    });
+    return () => {
+      alive = false;
+      off?.();
+    };
+  }, [restoreDock]);
   const dockOpen = dockChat && dockChatOpen;
   useEffect(() => {
     if (!dockOpen) return;
@@ -2040,22 +2071,23 @@ export default function App() {
                 collapsedSize={0}
               >
                 <div className="h-full min-h-0">
-                  <div
-                    className="terax-pane grid h-full min-h-0"
-                    style={{
-                      gridTemplateColumns: dockOpen
-                        ? "minmax(0,1fr) minmax(320px,32%)"
-                        : "minmax(0,1fr)",
-                      gridTemplateRows: "minmax(0,1fr) auto",
-                    }}
-                  >
-                    <div
-                      className="min-h-0"
-                      style={{
-                        gridColumn: 1,
-                        gridRow: dockChat && !dockOpen ? 1 : "1 / span 2",
-                      }}
-                    >
+                  <div className="terax-pane relative flex h-full min-h-0 flex-col">
+                    {dockMinimized && (
+                      <button
+                        type="button"
+                        title="打开聊天"
+                        aria-label="打开聊天"
+                        onClick={restoreDock}
+                        className="absolute right-4 bottom-4 z-30 flex size-9 cursor-pointer items-center justify-center rounded-full border border-border bg-background text-foreground/85 shadow-lg transition-colors hover:bg-foreground/10"
+                      >
+                        <HugeiconsIcon
+                          icon={BubbleChatIcon}
+                          size={17}
+                          strokeWidth={1.75}
+                        />
+                      </button>
+                    )}
+                    <div className="min-h-0 flex-1">
                       <RightPanel
                         tabBarHost={zenMode ? null : rightTabBarHost}
                         tab={currentRightTab}
@@ -2091,40 +2123,46 @@ export default function App() {
                         }}
                       />
                     </div>
-                    {dockOpen && activeLeafId !== null && (
-                      <div
-                        data-chat-dock
-                        className="flex min-h-0 flex-col border-l border-border/60"
-                        style={{ gridColumn: 2, gridRow: 1 }}
-                      >
-                        <LeafChatDock
-                          leafId={activeLeafId}
-                          getCwd={getLeafCwd}
-                          onCollapse={() => setDockChatOpen(false)}
-                        />
-                      </div>
-                    )}
-                    {/* 输入框始终在同一个位置挂着(只换格子),展开收起不丢草稿和焦点 */}
-                    {dockChat && activeLeafId !== null && (
-                      // biome-ignore lint/a11y/noStaticElementInteractions: 点输入框展开聊天记录,键盘操作都在输入框里
-                      <div
-                        data-chat-dock
-                        className={cn(
-                          "min-w-0 border-t border-border/60",
-                          dockOpen && "border-l",
-                        )}
-                        style={{ gridColumn: dockOpen ? 2 : 1, gridRow: 2 }}
-                        onMouseDown={() => setDockChatOpen(true)}
-                      >
+                    {/* 右栏占满时的聊天框(照 Codex):平时只是右下角一条输入框,
+                        点一下从它往上长出聊天记录,浮在页面上;点别处收回。
+                        网页是原生视图压在所有界面上面,输入框只能占底下一条窄边,
+                        聊天记录浮上去时网页换成定格截图 */}
+                    {dockChat && !dockHidden && activeLeafId !== null && (
+                      <div className="flex shrink-0 justify-end px-3 pt-1.5 pb-2">
+                        {/* biome-ignore lint/a11y/useKeyWithClickEvents: 点输入框展开聊天记录,键盘操作都在输入框里 */}
+                        {/* biome-ignore lint/a11y/noStaticElementInteractions: 同上 */}
                         <div
+                          data-chat-dock
+                          // 一整张卡片(照 Codex):展开时聊天记录接在输入行上面,
+                          // 两块拼成一个圆角框
                           className={cn(
-                            "w-full",
-                            !dockOpen && "mx-auto max-w-3xl",
+                            "relative w-[min(460px,100%)] rounded-2xl border border-border bg-background shadow-xl",
+                            dockOpen && "rounded-t-none border-t-border/50",
                           )}
+                          // 点完再展开:按下就展开的话,松手那一下可能落在别处,
+                          // 被当成"点了外面"立刻又收起,一闪一闪
+                          onClick={() => setDockChatOpen(true)}
                         >
+                          {dockOpen && (
+                            <div
+                              role="dialog"
+                              aria-label="聊天"
+                              className="absolute -right-px bottom-full -left-px flex h-[min(620px,70vh)] flex-col overflow-hidden rounded-t-2xl border border-b-0 border-border bg-background shadow-2xl"
+                            >
+                              <LeafChatDock
+                                leafId={activeLeafId}
+                                getCwd={getLeafCwd}
+                                onCollapse={() => {
+                                  setDockChatOpen(false);
+                                  setDockHidden(true);
+                                }}
+                              />
+                            </div>
+                          )}
                           <LeafAgentComposer
                             leafId={activeLeafId}
                             getCwd={getLeafCwd}
+                            compact
                           />
                         </div>
                       </div>

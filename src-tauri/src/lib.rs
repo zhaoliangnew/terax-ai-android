@@ -392,6 +392,8 @@ pub fn run() {
             browser::web_close_all,
             browser::web_annotate,
             browser::web_annotate_edit,
+            browser::web_chat_bubble,
+            modules::browser_automation::web_freeze_frame,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,

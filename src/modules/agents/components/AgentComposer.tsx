@@ -68,6 +68,8 @@ type Props = {
   onSetServiceTier?: (tier: string) => void;
   /** 套餐用量:打开面板时去查,undefined = 还在查。 */
   usage?: UsageInfo | null;
+  /** 紧凑的一行(右栏浮动聊天框里用,照 Codex):＋、输入、发送,别的都收起。 */
+  compact?: boolean;
   /** 当前上下文大小和占比(底栏"用量"前面显示)。 */
   context?: ContextUsage | null;
   /** 输入框上方显示的当前分支;在 worktree 里再带上 worktree 名。 */
@@ -216,7 +218,7 @@ function ContextMeter({ context }: { context?: ContextUsage | null }) {
 
 /** 输入框底栏上的文字小按钮(用量、压缩、新会话)。 */
 const toolText =
-  "flex h-7 cursor-pointer items-center rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground";
+  "flex h-7 cursor-pointer items-center whitespace-nowrap rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground";
 
 /** 模型菜单还没拉回来时,按 id 给个能读的名字。 */
 function modelLabel(
@@ -363,6 +365,7 @@ export function AgentComposer({
   usage,
   branch,
   context,
+  compact = false,
   onOpenUsage,
 }: Props) {
   const agentName = AGENT_NAMES[agent];
@@ -474,8 +477,13 @@ export function AgentComposer({
 
   return (
     // 整条不透明:输入框本身是半透明的灰,底下不能透出任何东西
-    <div className="relative z-20 shrink-0 bg-background px-6 pt-1 pb-4">
-      {branch && (
+    <div
+      className={cn(
+        "relative z-20 shrink-0",
+        compact ? "" : "bg-background px-6 pt-1 pb-4",
+      )}
+    >
+      {branch && !compact && (
         <div className="mx-auto flex max-w-3xl items-center gap-1 px-2 pb-1.5 text-[12px] text-muted-foreground">
           <HugeiconsIcon
             icon={GitBranchIcon}
@@ -496,9 +504,16 @@ export function AgentComposer({
           </span>
         </div>
       )}
-      <div className="mx-auto flex max-w-3xl flex-col gap-2 rounded-[24px] bg-foreground/[0.12] px-4 pt-3.5 pb-2.5">
+      <div
+        className={cn(
+          "mx-auto flex max-w-3xl",
+          compact
+            ? "flex-row flex-wrap items-center gap-1 px-2 py-1.5"
+            : "flex-col gap-2 rounded-[24px] bg-foreground/[0.12] px-4 pt-3.5 pb-2.5",
+        )}
+      >
         {annotations && (
-          <div className="flex">
+          <div className={cn("flex", compact && "basis-full px-1 pb-1")}>
             {/* 悬停展开成卡片列表(照 Codex):小图 + 说明 */}
             <span className="group/annot relative flex items-center gap-1.5 rounded-lg bg-foreground/[0.1] py-1 pr-1 pl-2.5 text-[12px]">
               <HugeiconsIcon
@@ -543,7 +558,12 @@ export function AgentComposer({
           </div>
         )}
         {attachments.length > 0 && (
-          <div className="flex flex-wrap items-end gap-1.5">
+          <div
+            className={cn(
+              "flex flex-wrap items-end gap-1.5",
+              compact && "basis-full px-1 pb-1",
+            )}
+          >
             {attachments.map((f) =>
               isImagePath(f) ? (
                 // 图片(粘贴的截图、选的图)照 Codex 显示成小图,右上角 × 取消
@@ -622,22 +642,34 @@ export function AgentComposer({
           placeholder="随心输入"
           spellCheck={false}
           title="回车发送,Shift+回车换行"
-          className="min-h-[42px] resize-none bg-transparent text-[14px] leading-[21px] outline-none placeholder:text-[#666666]"
+          className={cn(
+            "resize-none bg-transparent text-[14px] leading-[21px] outline-none placeholder:text-[#666666]",
+            compact
+              ? "order-2 min-h-[28px] min-w-0 flex-1 py-1"
+              : "min-h-[42px]",
+          )}
         />
         {/* 右边的菜单(模型、更多、用量)以这一行为准贴右边弹出,和发送键对齐
             (照 Codex);权限菜单仍跟着自己的按钮 */}
-        <div className="relative flex items-center gap-1">
+        <div
+          className={cn(
+            compact ? "contents" : "relative flex items-center gap-1",
+          )}
+        >
           <button
             type="button"
             title="添加文件或图片(可多选)"
             aria-label="添加附件"
             onClick={() => void pickFiles()}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+            className={cn(
+              "flex size-7 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground",
+              compact && "order-1",
+            )}
           >
             <HugeiconsIcon icon={PlusSignIcon} size={15} strokeWidth={2} />
           </button>
           {/* 权限模式:照 Codex 左下角那个,完全访问标成橙色 */}
-          <div className="relative">
+          <div className={cn("relative", compact && "hidden")}>
             <button
               type="button"
               title="权限模式"
@@ -710,9 +742,9 @@ export function AgentComposer({
               ))}
             </InlineMenu>
           </div>
-          <span className="flex-1" />
+          <span className={cn("flex-1", compact && "hidden")} />
           {/* 用量、压缩、新会话直接摆出来,不收进"更多"菜单 */}
-          <div>
+          <div className={cn(compact && "hidden")}>
             <button
               type="button"
               title="查看用量"
@@ -729,7 +761,7 @@ export function AgentComposer({
             </InlineMenu>
           </div>
           {/* 上下文占用紧挨着"压缩":满了顺手就压 */}
-          <span className="flex items-center">
+          <span className={cn("flex items-center", compact && "hidden")}>
             <ContextMeter context={context} />
             <button
               type="button"
@@ -744,11 +776,11 @@ export function AgentComposer({
             type="button"
             title="开一个新会话"
             onClick={onNewChat}
-            className={toolText}
+            className={cn(toolText, compact && "hidden")}
           >
             新会话
           </button>
-          <div>
+          <div className={cn(compact && "hidden")}>
             <button
               type="button"
               title="切换模型"
@@ -825,6 +857,7 @@ export function AgentComposer({
             className={cn(
               "flex size-8 cursor-pointer items-center justify-center rounded-full bg-[#2c67c5] text-white transition-opacity hover:bg-[#3572d4] disabled:cursor-default",
               !showStop && !canSend && "opacity-45",
+              compact && "order-3 size-7",
             )}
           >
             <HugeiconsIcon
