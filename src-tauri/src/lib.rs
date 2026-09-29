@@ -1,7 +1,7 @@
 pub mod modules;
 
 use modules::{
-    agent, claude_chat, codex_chat, control, fs, git, history, lsp, net, pty, scrcpy, secrets,
+    agent, browser, claude_chat, codex_chat, control, fs, git, history, lsp, net, pty, scrcpy, secrets,
     shell, vibrancy, workspace,
 };
 use std::path::PathBuf;
@@ -266,6 +266,7 @@ pub fn run() {
         .manage(history::HistoryState::default())
         .manage(claude_chat::ClaudeChatState::default())
         .manage(codex_chat::CodexChatState::default())
+        .manage(browser::WebAnnotState::default())
         .manage(lsp::LspState::default())
         .manage(fs::grep::ContentSearchState::default())
         .manage({
@@ -376,6 +377,15 @@ pub fn run() {
             codex_chat::codex_chat_start,
             codex_chat::codex_chat_send,
             codex_chat::codex_chat_stop,
+            browser::web_open,
+            browser::web_set_bounds,
+            browser::web_set_visible,
+            browser::web_navigate,
+            browser::web_history,
+            browser::web_close,
+            browser::web_close_all,
+            browser::web_annotate,
+            browser::web_annotate_edit,
             secrets::secrets_get,
             secrets::secrets_set,
             secrets::secrets_delete,

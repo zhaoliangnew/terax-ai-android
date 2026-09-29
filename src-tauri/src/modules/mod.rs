@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod browser;
 pub mod claude_chat;
 pub mod codex_chat;
 pub mod control;
