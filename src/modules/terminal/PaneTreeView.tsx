@@ -26,7 +26,10 @@ type Props = {
   /** 窗格底部的附加内容(比如 AI 命令行输入框),按 leaf 各画各的。 */
   renderLeafFooter?: (leafId: number) => ReactNode;
   /** 盖在终端上面的内容(比如 agent 的聊天视图),终端本身照常挂着。 */
-  renderLeafOverlay?: (leafId: number) => ReactNode;
+  renderLeafOverlay?: (
+    leafId: number,
+    ctx: { visible: boolean; focused: boolean },
+  ) => ReactNode;
   /** 这些窗格上面盖着别的界面(聊天视图):终端不抢键盘焦点。 */
   focusSuppressed?: ReadonlySet<number>;
 };
@@ -77,7 +80,7 @@ export function PaneTreeView(props: Props) {
             onCwd={b.onCwd}
             onExit={b.onExit}
           />
-          {renderLeafOverlay?.(node.id)}
+          {renderLeafOverlay?.(node.id, { visible: tabVisible, focused })}
           <DropOverlay leafId={node.id} />
         </div>
         {renderLeafFooter?.(node.id)}

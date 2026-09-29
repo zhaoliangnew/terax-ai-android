@@ -7,10 +7,12 @@ use std::process::ExitCode;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod mcp;
+
 use serde_json::{json, Value};
 use terax_control_protocol::{
     CallerContext, ControlDescriptor, ControlRequest, ControlResponse, OpenParams,
-    MAX_MESSAGE_BYTES, METHOD_CAPABILITIES, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PING,
+    MAX_RESPONSE_BYTES, METHOD_CAPABILITIES, METHOD_IDENTIFY, METHOD_OPEN, METHOD_PING,
     PROTOCOL_VERSION, SERVER_RESPONSE_ID,
 };
 
@@ -26,7 +28,12 @@ static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
 enum Action {
     Help,
     Version,
-    Request { method: &'static str, params: Value },
+    /// MCP server on stdio for AI tools (Claude Code, Codex): in-app browser.
+    Mcp,
+    Request {
+        method: &'static str,
+        params: Value,
+    },
 }
 
 #[derive(Debug, PartialEq)]
@@ -85,6 +92,7 @@ fn run(args: Vec<OsString>) -> Result<(), CliError> {
             println!("terax {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
+        Action::Mcp => mcp::serve(),
         Action::Request { method, params } => {
             let endpoint = load_endpoint()?;
             let caller = env::var("TERAX_PANE_ID")
@@ -98,7 +106,7 @@ fn run(args: Vec<OsString>) -> Result<(), CliError> {
                 params,
                 caller: CallerContext { pane_id: caller },
             };
-            let response = send_request(&endpoint.address, &request)?;
+            let response = send_request(&endpoint.address, &request, IO_TIMEOUT)?;
             if !response.ok {
                 let error = response.error.unwrap_or_else(|| {
                     terax_control_protocol::ControlError::new(
@@ -129,6 +137,7 @@ fn parse_args(mut args: Vec<OsString>) -> Result<Config, CliError> {
     let action = match command_text {
         Some("help" | "--help" | "-h") => no_extra_args(args, Action::Help)?,
         Some("--version" | "-V" | "version") => no_extra_args(args, Action::Version)?,
+        Some("mcp") => no_extra_args(args, Action::Mcp)?,
         Some("ping") => request_without_params(args, METHOD_PING)?,
         Some("capabilities") => request_without_params(args, METHOD_CAPABILITIES)?,
         Some("identify") => request_without_params(args, METHOD_IDENTIFY)?,
@@ -383,7 +392,13 @@ fn process_is_alive(pid: u32) -> bool {
     }
 }
 
-fn send_request(address: &str, request: &ControlRequest) -> Result<ControlResponse, CliError> {
+/// `timeout` bounds waiting for the answer: browser calls wait for pages to
+/// load, so they get longer than the quick app commands.
+fn send_request(
+    address: &str,
+    request: &ControlRequest,
+    timeout: Duration,
+) -> Result<ControlResponse, CliError> {
     let address = parse_loopback_address(address)?;
     let mut stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).map_err(|error| {
         CliError::new(
@@ -392,7 +407,7 @@ fn send_request(address: &str, request: &ControlRequest) -> Result<ControlRespon
             EXIT_UNAVAILABLE,
         )
     })?;
-    stream.set_read_timeout(Some(IO_TIMEOUT)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
     write_request(&mut stream, request)?;
 
@@ -437,10 +452,10 @@ fn read_response(
     let mut bytes = Vec::new();
     reader
         .by_ref()
-        .take((MAX_MESSAGE_BYTES + 1) as u64)
+        .take((MAX_RESPONSE_BYTES + 1) as u64)
         .read_until(b'\n', &mut bytes)
         .map_err(io_error)?;
-    if bytes.len() > MAX_MESSAGE_BYTES {
+    if bytes.len() > MAX_RESPONSE_BYTES {
         return Err(CliError::new(
             "message_too_large",
             "Terax response exceeded the protocol limit",
@@ -541,7 +556,7 @@ fn print_result(method: &str, result: Value, as_json: bool) {
 fn print_help() {
     println!(
         "Terax command line interface\n\n\
-Usage:\n  terax <file> [--line <n>] [--no-focus] [--json]\n  terax open <file> [--line <n>] [--no-focus] [--json]\n  terax ping [--json]\n  terax capabilities [--json]\n  terax identify [--json]\n  terax --version\n\n\
+Usage:\n  terax <file> [--line <n>] [--no-focus] [--json]\n  terax open <file> [--line <n>] [--no-focus] [--json]\n  terax ping [--json]\n  terax capabilities [--json]\n  terax identify [--json]\n  terax mcp            (MCP server for AI tools: in-app browser)\n  terax --version\n\n\
 The app must be running. Commands launched in a Terax pane target that pane's space."
     );
 }
@@ -693,7 +708,7 @@ mod tests {
             params: json!({}),
             caller: CallerContext::default(),
         };
-        let bytes = vec![b'x'; MAX_MESSAGE_BYTES + 1];
+        let bytes = vec![b'x'; MAX_RESPONSE_BYTES + 1];
         let error = read_response(&mut Cursor::new(bytes), &request).expect_err("reject response");
         assert_eq!(error.code, "message_too_large");
     }

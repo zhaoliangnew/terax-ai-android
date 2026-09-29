@@ -1,3 +1,5 @@
+import { useImeGuard } from "@/lib/ime";
+import { sendAnnotation } from "@/modules/agents/lib/sendAnnotation";
 import { useAgentViewStore } from "@/modules/agents/store/agentViewStore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -323,6 +325,7 @@ export function ScreenMirror({
   const closeStore = useMirrorAnnotate((s) => s.close);
   const [marks, setMarks] = useState<Mark[]>([]);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const { imeProps, isImeKey } = useImeGuard();
   const [listOpen, setListOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const markId = useRef(0);
@@ -413,22 +416,24 @@ export function ScreenMirror({
       toast.error("先在画面上点一下,写句说明");
       return;
     }
-    const leafId = useAgentViewStore.getState().activeChatLeaf;
-    if (leafId == null) {
-      toast.error("先在左边的窗格切到聊天,再发批注");
+    const { activeChatLeaf, activeCliLeaf } = useAgentViewStore.getState();
+    if (activeChatLeaf == null && activeCliLeaf == null) {
+      toast.error("先在左边的窗格切到聊天或命令行,再发批注");
       return;
     }
     setSending(true);
     try {
       const path = await captureAnnotated(canvas, kept);
-      useAgentViewStore.getState().injectToChat(
-        leafId,
+      const where = sendAnnotation(
         annotationText(kept),
         [path],
         kept.map((m) => ({ thumb: m.thumb, note: m.note })),
       );
+      if (!where) throw new Error("命令行还没开起来");
       closeAnnotate();
-      toast.success("批注已加到对话");
+      toast.success(
+        where === "chat" ? "批注已加到对话" : "批注已贴到命令行,确认后回车发送",
+      );
     } catch (err) {
       toast.error(`发送失败:${String(err)}`);
     } finally {
@@ -519,7 +524,10 @@ export function ScreenMirror({
                           ref={editRef}
                           value={m.note}
                           onChange={(e) => setNote(m.id, e.target.value)}
+                          {...imeProps}
                           onKeyDown={(e) => {
+                            // 输入法在用的键(拼音上屏的回车)不算"添加"
+                            if (isImeKey(e)) return;
                             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                               e.preventDefault();
                               dropEmpty(m.id);

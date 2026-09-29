@@ -11,6 +11,8 @@ export type UsageInfo = {
   /** 套餐名(max / pro …);按量计费的账号是 null。 */
   plan: string | null;
   windows: UsageWindow[];
+  /** 没有额度百分比时给的几句说明(Qoder:本次会话用了多少 credits)。 */
+  notes?: string[];
 };
 
 type ClaudeLimit = {
@@ -23,6 +25,7 @@ type ClaudeWindow = { utilization?: number | null; resets_at?: string | null };
 
 export type ClaudeUsage = {
   subscriptionType?: string | null;
+  notes?: string[];
   available?: boolean;
   rateLimits?: {
     limits?: ClaudeLimit[];
@@ -39,6 +42,7 @@ const iso = (s: string | null | undefined) => {
 /** Claude 的 `/usage` 数据 → 窗口列表。优先用服务端整理好的 `limits`。 */
 export function claudeUsage(u: ClaudeUsage): UsageInfo {
   const plan = u?.subscriptionType ?? null;
+  if (u?.notes?.length) return { plan, windows: [], notes: u.notes };
   const rl = u?.available ? u.rateLimits : null;
   if (!rl) return { plan, windows: [] };
   const windows: UsageWindow[] = [];

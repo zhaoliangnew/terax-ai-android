@@ -38,7 +38,12 @@ export function UsagePanel({
           读不到用量,会话启动好了再试
         </div>
       )}
-      {usage && usage.windows.length === 0 && (
+      {usage?.notes?.map((n) => (
+        <div key={n} className="text-[12.5px] text-muted-foreground">
+          {n}
+        </div>
+      ))}
+      {usage && usage.windows.length === 0 && !usage.notes?.length && (
         <div className="text-[12.5px] text-muted-foreground">
           这个账号没有套餐额度(按量计费)
         </div>

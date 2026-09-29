@@ -1,15 +1,24 @@
+import {
+  MarkdownCode,
+  markdownCodeText,
+} from "@/components/ai-elements/markdown-code";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { cn } from "@/lib/utils";
+import { localHtmlPath } from "@/modules/browser/lib/url";
+import { openInBrowser } from "@/modules/browser/webTabsStore";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
   ArrowRight01Icon,
   Copy01Icon,
+  Globe02Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
+  createContext,
   type ReactNode,
+  useContext,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -21,6 +30,8 @@ import type { PermissionAsk } from "../store/claudeChatStore";
 import { ImageThumb } from "./ImageLightbox";
 
 type Props = {
+  /** 聊天所在目录:回复里的相对路径(build/reports/index.html)按它补全。 */
+  cwd?: string | null;
   items: ChatItem[];
   agentName: string;
   working: boolean;
@@ -71,6 +82,46 @@ function clip(text: string): string {
 
 const str = (v: unknown) => (typeof v === "string" ? v : "");
 
+/** 回复里相对路径要按哪个目录补全。 */
+const ChatCwd = createContext<string | null>(null);
+
+/**
+ * 回复里的行内代码:是 html 文件路径就能点,在右栏内嵌浏览器里打开;
+ * 别的照常(代码块也照常)。
+ */
+function ChatCode({
+  className,
+  children,
+  ...rest
+}: {
+  className?: string;
+  children?: ReactNode;
+}) {
+  const cwd = useContext(ChatCwd);
+  const path = className
+    ? null
+    : localHtmlPath(markdownCodeText(children), cwd);
+  if (!path) {
+    return (
+      <MarkdownCode className={className} {...rest}>
+        {children}
+      </MarkdownCode>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title={`在右栏浏览器里打开 ${path}`}
+      onClick={() => openInBrowser(path)}
+      className="cursor-pointer rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[11px] text-[#6f9ce8] underline decoration-dotted underline-offset-2 hover:text-[#8fb3f0]"
+    >
+      {children}
+    </button>
+  );
+}
+
+const CHAT_COMPONENTS = { code: ChatCode };
+
 /** 回复正文:流式输出时逐字放出来,不是一块一块往外蹦。 */
 function AssistantText({
   text,
@@ -80,7 +131,25 @@ function AssistantText({
   streaming: boolean;
 }) {
   const shown = useSmoothText(text, streaming);
-  return <MessageResponse>{shown}</MessageResponse>;
+  const cwd = useContext(ChatCwd);
+  return (
+    // 指向本地 html 的链接(file://、绝对/相对路径)在右栏浏览器里打开;
+    // 别的链接交给 Markdown 渲染器原来的处理
+    <div
+      onClickCapture={(e) => {
+        const a = (e.target as HTMLElement).closest("a");
+        const path = a
+          ? localHtmlPath(a.getAttribute("href") ?? "", cwd)
+          : null;
+        if (!path) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openInBrowser(path);
+      }}
+    >
+      <MessageResponse components={CHAT_COMPONENTS}>{shown}</MessageResponse>
+    </div>
+  );
 }
 
 function ToolDetail({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
@@ -165,6 +234,12 @@ function ToolRow({
   running: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const cwd = useContext(ChatCwd);
+  // 写出/改了 html 文件的工具卡片:给个"打开",直接在右栏浏览器里看效果
+  const htmlFile =
+    item.name === "Write" || item.name === "Edit" || item.name === "MultiEdit"
+      ? localHtmlPath(str(item.input.file_path), cwd)
+      : null;
   return (
     <div>
       <button
@@ -182,6 +257,28 @@ function ToolRow({
         <span className="min-w-0 truncate text-muted-foreground/80">
           {item.summary}
         </span>
+        {htmlFile && (
+          // biome-ignore lint/a11y/useSemanticElements: 整行已经是 <button>,里面不能再套 button
+          <span
+            role="button"
+            tabIndex={0}
+            title={`在右栏浏览器里打开 ${htmlFile}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              openInBrowser(htmlFile);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.stopPropagation();
+                openInBrowser(htmlFile);
+              }
+            }}
+            className="flex shrink-0 items-center gap-1 rounded px-1.5 text-[11px] text-[#6f9ce8] hover:bg-foreground/10"
+          >
+            <HugeiconsIcon icon={Globe02Icon} size={11} strokeWidth={2} />
+            打开
+          </span>
+        )}
         {item.result?.isError && (
           <span className="shrink-0 text-[11px] text-red-400">失败</span>
         )}
@@ -289,6 +386,7 @@ function PermissionCard({
  * 出来。只负责显示和确认;输入走窗格底部的输入框。
  */
 export function AgentChatView({
+  cwd = null,
   items,
   agentName,
   working,
@@ -370,173 +468,176 @@ export function AgentChatView({
 
   return (
     // z-10:压在终端(xterm 的几层画布自带层级)上面,滚轮和点击都归聊天
-    <div className="absolute inset-0 z-10 bg-background">
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: 鼠标只用来读选区、收起工具条,消息本身不可交互 */}
-      <div
-        ref={scrollRef}
-        onWheel={(e) => {
-          if (e.deltaY < 0) stickRef.current = false;
-        }}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          if (el.scrollHeight - el.scrollTop - el.clientHeight < 24) {
-            stickRef.current = true;
-          }
-          updateActiveTurn(el);
-        }}
-        // 点工具条上的按钮也会冒上来一个 mouseup:那时选区还在,不跳过的话
-        // 刚收起的工具条又被弹出来
-        onMouseUp={(e) => {
-          if ((e.target as HTMLElement).closest("[data-selection-bar]")) return;
-          setTimeout(readSelection, 0);
-        }}
-        onMouseDown={(e) => {
-          if (!(e.target as HTMLElement).closest("[data-selection-bar]")) {
-            setSelection(null);
-          }
-        }}
-        className="absolute inset-0 overflow-y-auto overscroll-contain"
-      >
-        {selection && (
-          <div
-            data-selection-bar=""
-            style={{ top: selection.top, left: selection.left }}
-            className="absolute z-30 flex -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-popover text-[12.5px] shadow-xl"
-          >
-            <button
-              type="button"
-              onClick={() => {
-                onQuote(selection.text);
-                setSelection(null);
-                window.getSelection()?.removeAllRanges();
-              }}
-              className="cursor-pointer px-2.5 py-1.5 hover:bg-foreground/10"
+    <ChatCwd.Provider value={cwd}>
+      <div className="absolute inset-0 z-10 bg-background">
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: 鼠标只用来读选区、收起工具条,消息本身不可交互 */}
+        <div
+          ref={scrollRef}
+          onWheel={(e) => {
+            if (e.deltaY < 0) stickRef.current = false;
+          }}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            if (el.scrollHeight - el.scrollTop - el.clientHeight < 24) {
+              stickRef.current = true;
+            }
+            updateActiveTurn(el);
+          }}
+          // 点工具条上的按钮也会冒上来一个 mouseup:那时选区还在,不跳过的话
+          // 刚收起的工具条又被弹出来
+          onMouseUp={(e) => {
+            if ((e.target as HTMLElement).closest("[data-selection-bar]"))
+              return;
+            setTimeout(readSelection, 0);
+          }}
+          onMouseDown={(e) => {
+            if (!(e.target as HTMLElement).closest("[data-selection-bar]")) {
+              setSelection(null);
+            }
+          }}
+          className="absolute inset-0 overflow-y-auto overscroll-contain"
+        >
+          {selection && (
+            <div
+              data-selection-bar=""
+              style={{ top: selection.top, left: selection.left }}
+              className="absolute z-30 flex -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-popover text-[12.5px] shadow-xl"
             >
-              添加到对话
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void copyToClipboard(selection.text);
-                setSelection(null);
-                window.getSelection()?.removeAllRanges();
-              }}
-              className="cursor-pointer border-l border-border px-2.5 py-1.5 hover:bg-foreground/10"
-            >
-              复制
-            </button>
-          </div>
-        )}
-        {/* 全局默认不让选字(桌面应用的习惯),聊天内容要能选中复制 */}
-        <div className="select-text mx-auto flex max-w-3xl cursor-text flex-col px-6 pt-8 pb-12">
-          {items.length === 0 && !working && !statusText && (
-            <div className="pt-24 text-center text-[13px] text-muted-foreground">
-              给 {agentName} 发条消息开始吧
-            </div>
-          )}
-          {items.map((item, i) => {
-            const prev = items[i - 1];
-            const showTime =
-              item.ts > 0 && (!prev || item.ts - prev.ts > TIME_GAP_MS);
-            return (
-              <div
-                key={item.id}
-                data-turn={item.kind === "user" ? item.id : undefined}
-                className={cn(
-                  "flex scroll-mt-6 flex-col",
-                  showTime ? "mt-10" : gapAbove(item, prev),
-                )}
+              <button
+                type="button"
+                onClick={() => {
+                  onQuote(selection.text);
+                  setSelection(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+                className="cursor-pointer px-2.5 py-1.5 hover:bg-foreground/10"
               >
-                {showTime && (
-                  <div className="mb-6 text-center text-[12px] text-muted-foreground/70">
-                    {timeLabel(item.ts)}
-                  </div>
-                )}
-                {item.kind === "user" && (
-                  <div className="flex justify-end">
-                    <div className="group/user flex max-w-[80%] flex-col items-end gap-1.5">
-                      {item.text && (
-                        <div className="whitespace-pre-wrap break-words rounded-[18px] bg-[#173e77] px-4 py-2.5 text-[14px] leading-relaxed text-white">
-                          {item.text}
-                        </div>
-                      )}
-                      {item.attachments && (
-                        <div className="flex flex-wrap justify-end gap-1">
-                          {item.attachments.map((f) =>
-                            isImagePath(f) ? (
-                              <ImageThumb
-                                key={f}
-                                path={f}
-                                className="max-h-20 max-w-32 rounded-lg border border-border object-cover"
-                              />
-                            ) : (
-                              <span
-                                key={f}
-                                title={f}
-                                className="max-w-56 truncate rounded-md bg-foreground/[0.08] px-2 py-0.5 text-[11.5px] text-muted-foreground"
-                              >
-                                {f.split("/").pop()}
-                              </span>
-                            ),
-                          )}
-                        </div>
-                      )}
-                      {item.text && (
-                        <div className="-mr-1 flex opacity-0 transition-opacity group-hover/user:opacity-100">
-                          <CopyButton text={item.text} />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {item.kind === "assistant" && (
-                  <div className="flex flex-col gap-1.5">
-                    {/* Markdown 渲染默认的标题是大号字,放在对话里一个"##"就
-                        比正文大一截;照 Codex 只比正文略大 */}
-                    <div className="text-[14px] leading-[1.75] text-foreground/95 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[16.5px] [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14.5px] [&_h3]:font-semibold [&_h4]:text-[14px] [&_h4]:font-semibold [&_table]:text-[13px] [&_pre]:text-[12.5px]">
-                      <AssistantText
-                        text={item.text}
-                        streaming={item.streaming === true}
-                      />
-                    </div>
-                    <div className="-ml-1 flex gap-0.5">
-                      <CopyButton text={item.text} />
-                    </div>
-                  </div>
-                )}
-                {item.kind === "tool" && (
-                  <ToolRow item={item} running={working && i === lastIndex} />
-                )}
-                {item.kind === "note" && (
-                  <div className="text-center text-[11.5px] text-muted-foreground/70">
-                    {item.text}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {permissions.map((p) => (
-            <PermissionCard
-              key={p.id}
-              ask={p}
-              onAnswer={(allow, always) => onPermission(p.id, allow, always)}
-            />
-          ))}
-          {statusText && (
-            <div className="mt-6 text-center text-[12px] text-muted-foreground">
-              {statusText}
+                添加到对话
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void copyToClipboard(selection.text);
+                  setSelection(null);
+                  window.getSelection()?.removeAllRanges();
+                }}
+                className="cursor-pointer border-l border-border px-2.5 py-1.5 hover:bg-foreground/10"
+              >
+                复制
+              </button>
             </div>
           )}
-          {/* 回复已经在往外流了就不再挂"正在思考":它在文字下面跟着一跳一跳 */}
-          {working && permissions.length === 0 && !replying && (
-            <Shimmer className="mt-4 text-[13px]">正在思考</Shimmer>
-          )}
+          {/* 全局默认不让选字(桌面应用的习惯),聊天内容要能选中复制 */}
+          <div className="select-text mx-auto flex max-w-3xl cursor-text flex-col px-6 pt-8 pb-12">
+            {items.length === 0 && !working && !statusText && (
+              <div className="pt-24 text-center text-[13px] text-muted-foreground">
+                给 {agentName} 发条消息开始吧
+              </div>
+            )}
+            {items.map((item, i) => {
+              const prev = items[i - 1];
+              const showTime =
+                item.ts > 0 && (!prev || item.ts - prev.ts > TIME_GAP_MS);
+              return (
+                <div
+                  key={item.id}
+                  data-turn={item.kind === "user" ? item.id : undefined}
+                  className={cn(
+                    "flex scroll-mt-6 flex-col",
+                    showTime ? "mt-10" : gapAbove(item, prev),
+                  )}
+                >
+                  {showTime && (
+                    <div className="mb-6 text-center text-[12px] text-muted-foreground/70">
+                      {timeLabel(item.ts)}
+                    </div>
+                  )}
+                  {item.kind === "user" && (
+                    <div className="flex justify-end">
+                      <div className="group/user flex max-w-[80%] flex-col items-end gap-1.5">
+                        {item.text && (
+                          <div className="whitespace-pre-wrap break-words rounded-[18px] bg-[#173e77] px-4 py-2.5 text-[14px] leading-relaxed text-white">
+                            {item.text}
+                          </div>
+                        )}
+                        {item.attachments && (
+                          <div className="flex flex-wrap justify-end gap-1">
+                            {item.attachments.map((f) =>
+                              isImagePath(f) ? (
+                                <ImageThumb
+                                  key={f}
+                                  path={f}
+                                  className="max-h-20 max-w-32 rounded-lg border border-border object-cover"
+                                />
+                              ) : (
+                                <span
+                                  key={f}
+                                  title={f}
+                                  className="max-w-56 truncate rounded-md bg-foreground/[0.08] px-2 py-0.5 text-[11.5px] text-muted-foreground"
+                                >
+                                  {f.split("/").pop()}
+                                </span>
+                              ),
+                            )}
+                          </div>
+                        )}
+                        {item.text && (
+                          <div className="-mr-1 flex opacity-0 transition-opacity group-hover/user:opacity-100">
+                            <CopyButton text={item.text} />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {item.kind === "assistant" && (
+                    <div className="flex flex-col gap-1.5">
+                      {/* Markdown 渲染默认的标题是大号字,放在对话里一个"##"就
+                        比正文大一截;照 Codex 只比正文略大 */}
+                      <div className="text-[14px] leading-[1.75] text-foreground/95 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[16.5px] [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14.5px] [&_h3]:font-semibold [&_h4]:text-[14px] [&_h4]:font-semibold [&_table]:text-[13px] [&_pre]:text-[12.5px]">
+                        <AssistantText
+                          text={item.text}
+                          streaming={item.streaming === true}
+                        />
+                      </div>
+                      <div className="-ml-1 flex gap-0.5">
+                        <CopyButton text={item.text} />
+                      </div>
+                    </div>
+                  )}
+                  {item.kind === "tool" && (
+                    <ToolRow item={item} running={working && i === lastIndex} />
+                  )}
+                  {item.kind === "note" && (
+                    <div className="text-center text-[11.5px] text-muted-foreground/70">
+                      {item.text}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {permissions.map((p) => (
+              <PermissionCard
+                key={p.id}
+                ask={p}
+                onAnswer={(allow, always) => onPermission(p.id, allow, always)}
+              />
+            ))}
+            {statusText && (
+              <div className="mt-6 text-center text-[12px] text-muted-foreground">
+                {statusText}
+              </div>
+            )}
+            {/* 回复已经在往外流了就不再挂"正在思考":它在文字下面跟着一跳一跳 */}
+            {working && permissions.length === 0 && !replying && (
+              <Shimmer className="mt-4 text-[13px]">正在思考</Shimmer>
+            )}
+          </div>
         </div>
+        {turns.length > 1 && (
+          <TurnRail turns={turns} active={activeTurn} onJump={jumpTo} />
+        )}
       </div>
-      {turns.length > 1 && (
-        <TurnRail turns={turns} active={activeTurn} onJump={jumpTo} />
-      )}
-    </div>
+    </ChatCwd.Provider>
   );
 }
 

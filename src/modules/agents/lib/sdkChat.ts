@@ -31,6 +31,10 @@ export type SdkMessage = {
   permissionMode?: string;
   is_error?: boolean;
   result?: string;
+  /** result:这一轮的用量;Qoder 在里面给上下文占比。 */
+  usage?: SdkUsage & { context_usage_ratio?: number };
+  /** result:按模型的用量,带上下文窗口大小。 */
+  modelUsage?: Record<string, { contextWindow?: number }>;
   event?: {
     type?: string;
     index?: number;
@@ -38,7 +42,21 @@ export type SdkMessage = {
     content_block?: Block;
     delta?: { type?: string; text?: string };
   };
-  message?: { id?: string; content?: string | Block[] };
+  message?: { id?: string; content?: string | Block[]; usage?: SdkUsage };
+};
+
+type SdkUsage = {
+  input_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  output_tokens?: number;
+};
+
+/** 当前上下文用了多少:token 数、窗口大小、占比(各家给的不全,有啥填啥)。 */
+export type ContextUsage = {
+  tokens: number | null;
+  window: number | null;
+  ratio: number | null;
 };
 
 function resultText(content: unknown): string {
@@ -57,6 +75,7 @@ export class SdkChatModel {
   permissionMode: string | null = null;
   /** 一轮对话还没结束(从发出去到收到 result)。 */
   working = false;
+  context: ContextUsage | null = null;
 
   private toolIndex = new Map<string, number>();
   /** 流式拼出来的回复:`message id:块序号` → items 下标。 */
@@ -134,11 +153,13 @@ export class SdkChatModel {
       case "stream_event":
         return this.applyStream(msg, ts);
       case "assistant":
+        this.trackPromptSize(msg.message?.usage);
         return this.applyAssistant(msg, ts);
       case "user":
         return this.applyUser(msg);
       case "result":
         this.working = false;
+        this.trackResultContext(msg);
         for (const i of this.streamIndex.values()) {
           const it = this.items[i];
           if (it?.kind === "assistant")
@@ -156,6 +177,43 @@ export class SdkChatModel {
       default:
         return false;
     }
+  }
+
+  /** 每次调模型的 usage:输入(含缓存)+ 输出就是眼下上下文有多大。 */
+  private trackPromptSize(u: SdkUsage | undefined) {
+    if (!u) return;
+    const tokens =
+      (u.input_tokens ?? 0) +
+      (u.cache_read_input_tokens ?? 0) +
+      (u.cache_creation_input_tokens ?? 0) +
+      (u.output_tokens ?? 0);
+    if (tokens <= 0) return;
+    const window = this.context?.window ?? null;
+    this.context = {
+      tokens,
+      window,
+      ratio: window ? tokens / window : null,
+    };
+  }
+
+  /** 一轮结束:Claude 给窗口大小,Qoder 直接给占比。 */
+  private trackResultContext(msg: SdkMessage) {
+    const windows = Object.values(msg.modelUsage ?? {})
+      .map((m) => m.contextWindow ?? 0)
+      .filter((w) => w > 0);
+    const window = windows.length
+      ? Math.max(...windows)
+      : (this.context?.window ?? null);
+    const tokens = this.context?.tokens ?? null;
+    const given = msg.usage?.context_usage_ratio;
+    const ratio =
+      typeof given === "number" && given > 0
+        ? given
+        : tokens && window
+          ? tokens / window
+          : null;
+    if (tokens == null && ratio == null) return;
+    this.context = { tokens, window, ratio };
   }
 
   private applyStream(msg: SdkMessage, ts: number): boolean {

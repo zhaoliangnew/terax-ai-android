@@ -727,8 +727,10 @@ export function JournalDialog({ open, onOpenChange, anchor }: Props) {
                       e.stopPropagation();
                       // 中文输入法里回车是"选中候选词",这一下的 keydown 也叫
                       // Enter。不挡掉的话打拼音打到一半就被提交了,或者候选词被
-                      // 吃掉、看着像"回车没反应"。
-                      if (e.nativeEvent.isComposing) return;
+                      // 吃掉、看着像"回车没反应"。WebKit 里把拼音直接上屏的那
+                      // 下回车 isComposing 已经是 false,只能靠 keyCode 229 认。
+                      if (e.nativeEvent.isComposing || e.keyCode === 229)
+                        return;
                       if (e.key === "Enter") submit();
                     }}
                     placeholder={`刚做完什么?回车记到 ${monthDay(day)} ${weekdayName(day)}`}

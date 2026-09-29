@@ -1,4 +1,5 @@
 import type { ChatItem } from "./chatItems";
+import type { ContextUsage } from "./sdkChat";
 
 /**
  * `codex app-server` 的通知 → 聊天列表。纯状态机,不碰 IO:收到的每条通知
@@ -45,6 +46,11 @@ type Params = {
   error?: { message?: string };
   willRetry?: boolean;
   message?: string;
+  /** thread/tokenUsage/updated:最近一次调模型的 token 数和上下文窗口。 */
+  tokenUsage?: {
+    last?: { totalTokens?: number };
+    modelContextWindow?: number | null;
+  };
 };
 
 /** Codex 把命令包成 `/bin/zsh -lc '...'` 交给 shell;卡片上只显示里面那句。 */
@@ -191,6 +197,7 @@ export class CodexChatModel {
   threadId: string | null = null;
   /** 进行中的那一轮;中断要带上它。 */
   turnId: string | null = null;
+  context: ContextUsage | null = null;
   model: string | null = null;
   /** 推理强度(low / medium …);null = 模型默认。 */
   effort: string | null = null;
@@ -291,6 +298,17 @@ export class CodexChatModel {
           return false;
         }
         this.items[at] = { ...cur, text: cur.text + params.delta };
+        return true;
+      }
+      case "thread/tokenUsage/updated": {
+        const tokens = params.tokenUsage?.last?.totalTokens ?? null;
+        const window = params.tokenUsage?.modelContextWindow ?? null;
+        if (!tokens) return false;
+        this.context = {
+          tokens,
+          window,
+          ratio: window ? tokens / window : null,
+        };
         return true;
       }
       case "error":

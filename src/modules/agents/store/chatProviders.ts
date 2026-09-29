@@ -2,6 +2,7 @@ import {
   type ChatSession,
   ensureChat,
   interruptChat,
+  qoderChat,
   requestModels,
   requestUsage,
   respondPermission,
@@ -10,6 +11,7 @@ import {
   setChatMode,
   setChatModel,
   useClaudeChatStore,
+  useQoderChatStore,
 } from "./claudeChatStore";
 import {
   compactCodex,
@@ -27,7 +29,7 @@ import {
   useCodexChatStore,
 } from "./codexChatStore";
 
-export type ChatAgent = "claude" | "codex";
+export type ChatAgent = "claude" | "codex" | "qoder";
 
 /** 聊天视图对一个会话能做的事;Claude 和 Codex 各一份,界面不用分辨。 */
 export type ChatApi = {
@@ -78,11 +80,24 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     setEffort: setCodexEffort,
     setServiceTier: setCodexServiceTier,
   },
+  qoder: {
+    ensure: (leafId, cwd) => qoderChat.ensureChat(leafId, cwd),
+    send: qoderChat.sendChat,
+    respond: qoderChat.respondPermission,
+    interrupt: qoderChat.interruptChat,
+    setModel: qoderChat.setChatModel,
+    setMode: qoderChat.setChatMode,
+    requestModels: qoderChat.requestModels,
+    requestUsage: qoderChat.requestUsage,
+    compact: (leafId) => qoderChat.sendChat(leafId, "/compact"),
+    restart: qoderChat.restartChat,
+  },
 };
 
 export const AGENT_NAMES: Record<ChatAgent, string> = {
   claude: "Claude",
   codex: "Codex",
+  qoder: "Qoder",
 };
 
 /** 这个窗格在用的那个聊天会话。 */
@@ -92,5 +107,6 @@ export function useChatSession(
 ): ChatSession | undefined {
   const claude = useClaudeChatStore((s) => s.sessions[leafId]);
   const codex = useCodexChatStore((s) => s.sessions[leafId]);
-  return agent === "codex" ? codex : claude;
+  const qoder = useQoderChatStore((s) => s.sessions[leafId]);
+  return agent === "codex" ? codex : agent === "qoder" ? qoder : claude;
 }

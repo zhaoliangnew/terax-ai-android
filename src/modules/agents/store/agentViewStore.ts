@@ -1,7 +1,11 @@
 import { create } from "zustand";
 import type { ChatAgent } from "./chatProviders";
 
-export type AgentViewMode = "chat" | "terminal";
+/** 聊天(聊天界面)、命令行(窗格里单独的终端跑 AI 命令行版)、终端(原来的 shell)。 */
+export type AgentViewMode = "chat" | "cli" | "terminal";
+
+/** 命令行能跑的 AI(和聊天是同一组)。 */
+export type CliAgent = ChatAgent;
 
 /** 一条批注:给"N 条注释"展开的卡片显示。 */
 export type InjectionItem = { thumb: string; note: string };
@@ -27,9 +31,15 @@ type AgentViewStore = {
   /** 窗格里手动选过的聊天对象;没选过的按终端里在跑的 agent 自动判断。 */
   agents: Record<number, ChatAgent>;
   setAgent: (leafId: number, agent: ChatAgent) => void;
+  /** 窗格里已经开过命令行的 AI(各自一个终端,切走不关)。 */
+  clis: Record<number, CliAgent[]>;
+  openCli: (leafId: number, agent: CliAgent) => void;
   /** 当前正处于聊天视图、并且是焦点窗格的那个;投屏批注往这里发。 */
   activeChatLeaf: number | null;
   setActiveChatLeaf: (leafId: number | null) => void;
+  /** 当前正处于命令行视图、并且是焦点窗格的那个;没有聊天时批注贴到这里。 */
+  activeCliLeaf: number | null;
+  setActiveCliLeaf: (leafId: number | null) => void;
   /** 往某个窗格挂一组投屏批注(文字 + 截图 + 每条明细)。 */
   injections: Record<number, ChatInjection>;
   injectToChat: (
@@ -44,7 +54,18 @@ export const useAgentViewStore = create<AgentViewStore>((set) => ({
   modes: {},
   quotes: {},
   agents: {},
+  clis: {},
   activeChatLeaf: null,
+  activeCliLeaf: null,
+  setActiveCliLeaf: (leafId) =>
+    set((s) => (s.activeCliLeaf === leafId ? s : { activeCliLeaf: leafId })),
+  openCli: (leafId, agent) =>
+    set((s) => {
+      const cur = s.clis[leafId] ?? [];
+      return cur.includes(agent)
+        ? s
+        : { clis: { ...s.clis, [leafId]: [...cur, agent] } };
+    }),
   injections: {},
   setActiveChatLeaf: (leafId) =>
     set((s) => (s.activeChatLeaf === leafId ? s : { activeChatLeaf: leafId })),

@@ -333,7 +333,8 @@ async function releaseIfIdle(leafId: number, s: Session): Promise<void> {
   unbindLeafFromSlot(leafId, s);
 }
 
-async function leafHasForegroundJob(leafId: number): Promise<boolean> {
+/** 终端里前台有没有程序在跑(没有就是停在 shell 提示符)。 */
+export async function leafHasForegroundJob(leafId: number): Promise<boolean> {
   const s = sessions.get(leafId);
   if (!s?.pty || s.shellExited) return false;
   try {

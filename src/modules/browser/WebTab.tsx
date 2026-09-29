@@ -1,6 +1,7 @@
 import { rectToVisualScale } from "@/lib/appZoom";
+import { useImeGuard } from "@/lib/ime";
 import { cn } from "@/lib/utils";
-import { useAgentViewStore } from "@/modules/agents/store/agentViewStore";
+import { sendAnnotation } from "@/modules/agents/lib/sendAnnotation";
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
@@ -13,7 +14,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { recordTitle, recordVisit } from "./lib/recentSites";
-import { displayUrl, toUrl } from "./lib/url";
+import { displayUrl, localHtmlPath, toUrl } from "./lib/url";
 import {
   annotationCards,
   annotationPrompt,
@@ -78,7 +79,11 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
   const [opened, setOpened] = useState(false);
   const [address, setAddress] = useState(displayUrl(initialUrl));
   const [loading, setLoading] = useState(false);
+  const { imeProps, isImeKey } = useImeGuard();
   const [error, setError] = useState<string | null>(null);
+  // AI 工具正在操作这个页面:显示在工具栏上,停手 3 秒后消失
+  const [aiAction, setAiAction] = useState<string | null>(null);
+  const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 批注模式:页面里点元素写评论;条数、发送、退出都在页面底部的浮条里
   const [annotating, setAnnotating] = useState(false);
 
@@ -126,8 +131,10 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
     const b = measure() ?? { x: 0, y: 0, width: 1, height: 1 };
     setError(null);
     setLoading(true);
+    // 本地 html 文件(file://…)交给 Rust 走 asset 协议,不当网址
+    const file = localHtmlPath(url);
     try {
-      await invoke("web_open", { label: tabId, url, ...b });
+      await invoke("web_open", { label: tabId, url, file, ...b });
       openedRef.current = true;
       lastRef.current = null;
       setOpened(true);
@@ -167,6 +174,14 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
       }),
     );
     keep(
+      listen<{ label: string; action: string }>("web://ai-activity", (e) => {
+        if (e.payload.label !== tabId) return;
+        setAiAction(e.payload.action);
+        if (aiTimer.current) clearTimeout(aiTimer.current);
+        aiTimer.current = setTimeout(() => setAiAction(null), 3000);
+      }),
+    );
+    keep(
       listen<WebAnnotReport>("web://annotations", (e) => {
         if (e.payload.label !== tabId) return;
         if (e.payload.kind === "exit") {
@@ -179,6 +194,7 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
     return () => {
       alive = false;
       for (const off of offs) off();
+      if (aiTimer.current) clearTimeout(aiTimer.current);
     };
   }, [tabId]);
 
@@ -229,28 +245,38 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
       toast.error("先在页面上点一个元素,写句评论");
       return;
     }
-    const leafId = useAgentViewStore.getState().activeChatLeaf;
-    if (leafId == null) {
-      toast.error("先在左边的窗格切到聊天,再发批注");
+    const where = sendAnnotation(
+      annotationPrompt(report),
+      [],
+      annotationCards(report.items),
+    );
+    if (!where) {
+      toast.error("先在左边的窗格切到聊天或命令行,再发批注");
       return;
     }
-    useAgentViewStore
-      .getState()
-      .injectToChat(
-        leafId,
-        annotationPrompt(report),
-        [],
-        annotationCards(report.items),
-      );
     void invoke("web_annotate_edit", { label: tabId, action: "clear" })
       .catch(() => {})
       .finally(() => setAnnotate(false));
-    toast.success(`${report.items.length} 条批注已加到对话`);
+    toast.success(
+      where === "chat"
+        ? `${report.items.length} 条批注已加到对话`
+        : `${report.items.length} 条批注已贴到命令行,确认后回车发送`,
+    );
   };
   const sendRef = useRef(send);
   sendRef.current = send;
 
   const go = () => {
+    // 地址栏里也能直接打本地 html 的路径
+    const file = localHtmlPath(address);
+    if (file) {
+      if (!openedRef.current) void open(`file://${file}`);
+      else
+        void invoke("web_navigate_file", { label: tabId, path: file }).catch(
+          (e) => setError(String(e)),
+        );
+      return;
+    }
     const url = toUrl(address);
     if (url === "about:blank") return;
     if (!openedRef.current) {
@@ -333,7 +359,9 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
         <input
           value={address}
           onChange={(e) => setAddress(e.target.value)}
+          {...imeProps}
           onKeyDown={(e) => {
+            if (isImeKey(e)) return;
             if (e.key === "Enter") {
               e.preventDefault();
               go();
@@ -348,6 +376,15 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
           spellCheck={false}
           className="min-w-0 flex-1 rounded-full bg-foreground/[0.06] px-3 py-1 text-[12.5px] outline-none focus:bg-foreground/[0.1]"
         />
+        {aiAction && (
+          <span
+            title="AI 工具正在操作这个页面"
+            className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#2c67c5]/15 px-2.5 py-1 text-[12px] text-[#6f9ce8]"
+          >
+            <span className="size-1.5 animate-pulse rounded-full bg-[#4d8ef7]" />
+            AI 正在操作 · {aiAction}
+          </span>
+        )}
       </div>
       {/* 原生 webview 就摆在这一块上面;没开之前显示空白页提示 */}
       <div ref={areaRef} className="relative min-h-0 flex-1">

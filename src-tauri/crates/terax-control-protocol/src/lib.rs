@@ -8,12 +8,67 @@ pub const METHOD_CAPABILITIES: &str = "capabilities";
 pub const METHOD_IDENTIFY: &str = "identify";
 pub const METHOD_OPEN: &str = "open";
 pub const SERVER_RESPONSE_ID: &str = "server";
+/// Upper bound on a response. Requests stay at [`MAX_MESSAGE_BYTES`]; browser
+/// page snapshots come back larger than that.
+pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+// In-app browser, driven by AI tools through `terax-cli mcp`.
+pub const METHOD_BROWSER_TABS: &str = "browser.tabs";
+pub const METHOD_BROWSER_OPEN: &str = "browser.open";
+pub const METHOD_BROWSER_NAVIGATE: &str = "browser.navigate";
+pub const METHOD_BROWSER_BACK: &str = "browser.back";
+pub const METHOD_BROWSER_SNAPSHOT: &str = "browser.snapshot";
+pub const METHOD_BROWSER_CLICK: &str = "browser.click";
+pub const METHOD_BROWSER_TYPE: &str = "browser.type";
+pub const METHOD_BROWSER_PRESS: &str = "browser.press";
+pub const METHOD_BROWSER_SELECT: &str = "browser.select";
+pub const METHOD_BROWSER_SCROLL: &str = "browser.scroll";
+pub const METHOD_BROWSER_SCREENSHOT: &str = "browser.screenshot";
+
 pub const METHODS: &[&str] = &[
     METHOD_PING,
     METHOD_CAPABILITIES,
     METHOD_IDENTIFY,
     METHOD_OPEN,
+    METHOD_BROWSER_TABS,
+    METHOD_BROWSER_OPEN,
+    METHOD_BROWSER_NAVIGATE,
+    METHOD_BROWSER_BACK,
+    METHOD_BROWSER_SNAPSHOT,
+    METHOD_BROWSER_CLICK,
+    METHOD_BROWSER_TYPE,
+    METHOD_BROWSER_PRESS,
+    METHOD_BROWSER_SELECT,
+    METHOD_BROWSER_SCROLL,
+    METHOD_BROWSER_SCREENSHOT,
 ];
+
+/// Parameters shared by the `browser.*` methods; each reads what it needs.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct BrowserParams {
+    /// Target tab; defaults to the one on screen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Element ref from the latest snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub submit: bool,
+    #[serde(default)]
+    pub append: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dy: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_text: Option<usize>,
+}
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub struct CallerContext {

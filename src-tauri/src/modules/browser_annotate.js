@@ -38,6 +38,7 @@
   let pillCommit = null;
   let active = false;
   let marksShown = true;
+  let imeEndedAt = 0;
   /** { el, fx, fy, tag, text, selector, note, box, badge } */
   let items = [];
 
@@ -414,7 +415,17 @@
       return;
     }
     e.stopImmediatePropagation();
-    if (e.type !== "keydown" || e.isComposing) return;
+    if (e.type === "compositionend") imeEndedAt = performance.now();
+    // WebKit 里把拼音直接上屏的那下回车 isComposing 已经是 false,
+    // 只能靠 keyCode 229 和"刚结束组字"认出来,别当成"添加"
+    if (
+      e.type !== "keydown" ||
+      e.isComposing ||
+      e.keyCode === 229 ||
+      performance.now() - imeEndedAt < 50
+    ) {
+      return;
+    }
     if (e.key === "Enter" && pillCommit) {
       e.preventDefault();
       pillCommit(e.metaKey || e.ctrlKey);

@@ -9,12 +9,92 @@
 //! and the capabilities carry no `remote` entry, so pages here get no IPC.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::sync::Mutex;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
 use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl};
 
 const LABEL_PREFIX: &str = "web-";
+
+/// Each web tab is *created* on this URL and then sent to the real page.
+///
+/// Why: tauri serves its `asset:` protocol (read scope `**`, the whole disk)
+/// to every webview, answering with `Access-Control-Allow-Origin` set to the
+/// origin of the URL the webview was created with. Created straight on
+/// `https://some.site`, any script on that site could `fetch` local files
+/// (verified: /etc/hosts came back). A `.invalid` host can never serve a page
+/// (RFC 6761, and HTTPS rules out DNS hijacks), so no real page ever has the
+/// origin the protocol trusts. `about:blank` won't do: it maps to origin
+/// `null`, which a sandboxed iframe also has. The load itself is cancelled in
+/// `on_navigation`, so no request goes out.
+const ORIGIN_SHIELD: &str = "https://terax-inapp.invalid/";
+const ORIGIN_SHIELD_HOST: &str = "terax-inapp.invalid";
+
+fn is_shield(url: &Url) -> bool {
+    url.host_str() == Some(ORIGIN_SHIELD_HOST)
+}
+
+/// Is this a URL of tauri's asset protocol (how local HTML files are served)?
+fn is_asset(url: &Url) -> bool {
+    url.scheme() == "asset" || url.host_str() == Some("asset.localhost")
+}
+
+/// `encodeURIComponent` for one path segment.
+fn encode_segment(segment: &str) -> String {
+    let mut out = String::with_capacity(segment.len());
+    for byte in segment.bytes() {
+        let unreserved = byte.is_ascii_alphanumeric()
+            || matches!(
+                byte,
+                b'-' | b'_' | b'.' | b'!' | b'~' | b'*' | b'\'' | b'(' | b')'
+            );
+        if unreserved {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Asset-protocol URL for a local file, one path segment encoded at a time so
+/// the directory stays in the URL and the page's relative `./app.css` or
+/// `./page2.html` resolve next to it (same scheme as the frontend's
+/// `encodeAssetPath`; the handler strips one leading `/`, hence `%2F`).
+pub fn asset_url(path: &std::path::Path) -> Result<Url, String> {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let encoded: Vec<String> = text
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(encode_segment)
+        .collect();
+    let base = if cfg!(any(windows, target_os = "android")) {
+        "http://asset.localhost/"
+    } else {
+        "asset://localhost/"
+    };
+    Url::parse(&format!("{base}%2F{}", encoded.join("/"))).map_err(|e| e.to_string())
+}
+
+/// A local HTML file the user asked to open: absolute, exists, .html/.htm.
+fn local_html(path: &str) -> Result<std::path::PathBuf, String> {
+    let p = std::path::PathBuf::from(path);
+    if !p.is_absolute() {
+        return Err(format!("不是绝对路径: {path}"));
+    }
+    let is_html = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"));
+    if !is_html {
+        return Err(format!("不是 html 文件: {path}"));
+    }
+    if !p.is_file() {
+        return Err(format!("文件不存在: {path}"));
+    }
+    Ok(p)
+}
 
 /// Picker injected while annotating. It reports back by navigating to
 /// `terax-annot://<kind>?d=<json>`, which `on_navigation` intercepts.
@@ -22,6 +102,157 @@ const ANNOTATE_JS: &str = include_str!("browser_annotate.js");
 const ANNOT_SCHEME: &str = "terax-annot";
 /// Upper bound on one annotation report (the URL carries the JSON).
 const MAX_ANNOT_BYTES: usize = 64 * 1024;
+
+/// Live web tabs as the AI tools see them: which exist, what they show,
+/// which one is on screen, and whether a page is still loading (so an action
+/// that navigates can wait for the new page).
+#[derive(Default)]
+pub struct WebTabsState {
+    inner: Mutex<TabsInner>,
+    loaded: Condvar,
+}
+
+#[derive(Default)]
+struct TabsInner {
+    /// label -> (url, title, loading); `order` keeps open order.
+    tabs: HashMap<String, (String, String, bool)>,
+    order: Vec<String>,
+    shown: Option<String>,
+    ai_seq: u32,
+    /// Tabs showing a local HTML file: only these may load `asset:` URLs.
+    local: HashSet<String>,
+}
+
+impl WebTabsState {
+    fn opened(&self, label: &str, url: &str) {
+        let mut g = self.inner.lock().unwrap();
+        g.tabs
+            .insert(label.to_string(), (url.to_string(), String::new(), true));
+        g.order.retain(|l| l != label);
+        g.order.push(label.to_string());
+    }
+
+    fn closed(&self, label: &str) {
+        let mut g = self.inner.lock().unwrap();
+        g.tabs.remove(label);
+        g.local.remove(label);
+        g.order.retain(|l| l != label);
+        if g.shown.as_deref() == Some(label) {
+            g.shown = None;
+        }
+        drop(g);
+        self.loaded.notify_all();
+    }
+
+    fn page_event(&self, label: &str, url: &str, loading: bool) {
+        let mut g = self.inner.lock().unwrap();
+        if let Some(t) = g.tabs.get_mut(label) {
+            t.0 = url.to_string();
+            t.2 = loading;
+        }
+        drop(g);
+        if !loading {
+            self.loaded.notify_all();
+        }
+    }
+
+    fn titled(&self, label: &str, title: &str) {
+        if let Some(t) = self.inner.lock().unwrap().tabs.get_mut(label) {
+            t.1 = title.to_string();
+        }
+    }
+
+    fn shown(&self, label: &str) {
+        let mut g = self.inner.lock().unwrap();
+        if g.tabs.contains_key(label) {
+            g.shown = Some(label.to_string());
+        }
+    }
+
+    fn allow_local(&self, label: &str) {
+        self.inner.lock().unwrap().local.insert(label.to_string());
+    }
+
+    fn is_local(&self, label: &str) -> bool {
+        self.inner.lock().unwrap().local.contains(label)
+    }
+
+    pub fn contains(&self, label: &str) -> bool {
+        self.inner.lock().unwrap().tabs.contains_key(label)
+    }
+
+    /// The tab on screen, else the most recently opened one.
+    pub fn current(&self) -> Option<String> {
+        let g = self.inner.lock().unwrap();
+        g.shown
+            .clone()
+            .filter(|l| g.tabs.contains_key(l))
+            .or_else(|| g.order.last().cloned())
+    }
+
+    pub fn info(&self, label: &str) -> Option<(String, String)> {
+        self.inner
+            .lock()
+            .unwrap()
+            .tabs
+            .get(label)
+            .map(|t| (t.0.clone(), t.1.clone()))
+    }
+
+    /// (label, url, title) in open order.
+    pub fn list(&self) -> Vec<(String, String, String)> {
+        let g = self.inner.lock().unwrap();
+        g.order
+            .iter()
+            .filter_map(|l| g.tabs.get(l).map(|t| (l.clone(), t.0.clone(), t.1.clone())))
+            .collect()
+    }
+
+    pub fn next_ai_label(&self) -> String {
+        let mut g = self.inner.lock().unwrap();
+        g.ai_seq += 1;
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        format!("{LABEL_PREFIX}ai-{stamp}-{}", g.ai_seq)
+    }
+
+    pub fn is_loading(&self, label: &str) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .tabs
+            .get(label)
+            .is_some_and(|t| t.2)
+    }
+
+    /// Before starting a navigation: count the tab as loading right away, so
+    /// `wait_loaded` doesn't return before the page-load event arrives.
+    pub fn mark_loading(&self, label: &str) {
+        if let Some(t) = self.inner.lock().unwrap().tabs.get_mut(label) {
+            t.2 = true;
+        }
+    }
+
+    /// Block until the tab's page finished loading (or `timeout`). A load that
+    /// never reports back (failed navigation) is cleared at the timeout so it
+    /// doesn't stall every later call.
+    pub fn wait_loaded(&self, label: &str, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        let mut g = self.inner.lock().unwrap();
+        while g.tabs.get(label).is_some_and(|t| t.2) {
+            let now = Instant::now();
+            if now >= deadline {
+                if let Some(t) = g.tabs.get_mut(label) {
+                    t.2 = false;
+                }
+                return;
+            }
+            g = self.loaded.wait_timeout(g, deadline - now).unwrap().0;
+        }
+    }
+}
 
 /// Tabs whose annotate mode is on. Reports from any other tab are dropped, so
 /// a page can't push fake annotations into the chat on its own.
@@ -78,7 +309,7 @@ fn check_label(label: &str) -> Result<(), String> {
     }
 }
 
-fn parse_url(url: &str) -> Result<Url, String> {
+pub fn parse_url(url: &str) -> Result<Url, String> {
     let parsed = Url::parse(url).map_err(|e| format!("网址不对: {e}"))?;
     match parsed.scheme() {
         "http" | "https" => Ok(parsed),
@@ -197,13 +428,22 @@ pub async fn web_open(
     y: f64,
     width: f64,
     height: f64,
+    file: Option<String>,
 ) -> Result<(), String> {
     check_label(&label)?;
     if app.get_webview(&label).is_some() {
         return Ok(());
     }
-    let target = parse_url(&url)?;
+    // 本地 html 文件走 asset 协议;这个标签页因此被允许加载 asset: 地址
+    let target = match file.as_deref() {
+        Some(path) => asset_url(&local_html(path)?)?,
+        None => parse_url(&url)?,
+    };
     let window = app.get_window("main").ok_or("main window not found")?;
+    app.state::<WebTabsState>().opened(&label, target.as_str());
+    if file.is_some() {
+        app.state::<WebTabsState>().allow_local(&label);
+    }
 
     let load_app = app.clone();
     let title_app = app.clone();
@@ -211,8 +451,19 @@ pub async fn web_open(
     let nav_label = label.clone();
     let win_app = app.clone();
     let win_label = label.clone();
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External(target))
+    let shield = Url::parse(ORIGIN_SHIELD).map_err(|e| e.to_string())?;
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External(shield))
         .on_navigation(move |url| {
+            if is_shield(url) {
+                return false;
+            }
+            // 本地文件(asset:)只许"本地文件标签页"打开:不然网页一句
+            // location.href = "asset://..." 就能把你的文件显示出来给 AI 读
+            if is_asset(url) {
+                return nav_app
+                    .try_state::<WebTabsState>()
+                    .is_some_and(|s| s.is_local(&nav_label));
+            }
             if url.scheme() != ANNOT_SCHEME {
                 return true;
             }
@@ -238,7 +489,13 @@ pub async fn web_open(
             NewWindowResponse::Deny
         })
         .on_page_load(move |wv, payload| {
+            if is_shield(payload.url()) {
+                return;
+            }
             let started = matches!(payload.event(), PageLoadEvent::Started);
+            if let Some(tabs) = load_app.try_state::<WebTabsState>() {
+                tabs.page_event(wv.label(), payload.url().as_str(), started);
+            }
             let _ = load_app.emit(
                 "web://load",
                 LoadEvent {
@@ -257,6 +514,9 @@ pub async fn web_open(
             }
         })
         .on_document_title_changed(move |wv, title| {
+            if let Some(tabs) = title_app.try_state::<WebTabsState>() {
+                tabs.titled(wv.label(), &title);
+            }
             let _ = title_app.emit(
                 "web://title",
                 TitleEvent {
@@ -270,12 +530,19 @@ pub async fn web_open(
         .data_store_identifier(DATA_STORE_ID)
         .user_agent(safari_user_agent());
 
-    window
+    let webview = window
         .add_child(
             builder,
             LogicalPosition::new(x, y),
             LogicalSize::new(width.max(1.0), height.max(1.0)),
         )
+        .map_err(|e| {
+            app.state::<WebTabsState>().closed(&label);
+            format!("打开网页失败: {e}")
+        })?;
+    // 建在占位地址上(见 ORIGIN_SHIELD),再去真正的页面
+    webview
+        .navigate(target)
         .map_err(|e| format!("打开网页失败: {e}"))?;
     Ok(())
 }
@@ -299,6 +566,9 @@ pub fn web_set_bounds(
 #[tauri::command]
 pub fn web_set_visible(app: AppHandle, label: String, visible: bool) -> Result<(), String> {
     let wv = webview(&app, &label)?;
+    if visible {
+        app.state::<WebTabsState>().shown(&label);
+    }
     if visible { wv.show() } else { wv.hide() }.map_err(|e| e.to_string())
 }
 
@@ -306,6 +576,15 @@ pub fn web_set_visible(app: AppHandle, label: String, visible: bool) -> Result<(
 pub fn web_navigate(app: AppHandle, label: String, url: String) -> Result<(), String> {
     let wv = webview(&app, &label)?;
     wv.navigate(parse_url(&url)?).map_err(|e| e.to_string())
+}
+
+/// Open a local HTML file in an existing tab (typed into its address bar).
+#[tauri::command]
+pub fn web_navigate_file(app: AppHandle, label: String, path: String) -> Result<(), String> {
+    let wv = webview(&app, &label)?;
+    let url = asset_url(&local_html(&path)?)?;
+    app.state::<WebTabsState>().allow_local(&label);
+    wv.navigate(url).map_err(|e| e.to_string())
 }
 
 /// back / forward / reload go through page history, so no URL is needed.
@@ -329,6 +608,7 @@ pub fn web_close(
 ) -> Result<(), String> {
     check_label(&label)?;
     state.armed.lock().unwrap().remove(&label);
+    app.state::<WebTabsState>().closed(&label);
     if let Some(wv) = app.get_webview(&label) {
         wv.close().map_err(|e| e.to_string())?;
     }
@@ -379,6 +659,7 @@ pub fn web_annotate_edit(
 pub fn web_close_all(app: AppHandle) {
     for (label, wv) in app.webviews() {
         if label.starts_with(LABEL_PREFIX) {
+            app.state::<WebTabsState>().closed(&label);
             let _ = wv.close();
         }
     }
@@ -416,6 +697,40 @@ mod tests {
         assert!(ua.contains("Version/26.1 Safari/605.1.15"));
         assert!(ua.starts_with("Mozilla/5.0 (Macintosh;"));
         assert!(!ua.contains("  "));
+    }
+
+    #[test]
+    fn origin_shield_is_unreachable_and_recognized() {
+        let shield = Url::parse(ORIGIN_SHIELD).unwrap();
+        assert_eq!(shield.scheme(), "https");
+        assert!(shield.host_str().unwrap().ends_with(".invalid"));
+        assert!(is_shield(&shield));
+        assert!(!is_shield(&Url::parse("https://example.com/").unwrap()));
+    }
+
+    #[test]
+    fn asset_urls_keep_directories() {
+        let url = asset_url(std::path::Path::new("/Users/me/报告 1/index.html")).unwrap();
+        #[cfg(not(any(windows, target_os = "android")))]
+        assert_eq!(
+            url.as_str(),
+            "asset://localhost/%2FUsers/me/%E6%8A%A5%E5%91%8A%201/index.html"
+        );
+        assert!(is_asset(&url));
+        assert!(!is_asset(&Url::parse("https://example.com/").unwrap()));
+    }
+
+    #[test]
+    fn local_html_needs_an_existing_absolute_html_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let page = dir.path().join("a.HTML");
+        std::fs::write(&page, "<p>x</p>").unwrap();
+        assert!(local_html(page.to_str().unwrap()).is_ok());
+        assert!(local_html("relative/a.html").is_err());
+        assert!(local_html(dir.path().join("missing.html").to_str().unwrap()).is_err());
+        let txt = dir.path().join("a.txt");
+        std::fs::write(&txt, "x").unwrap();
+        assert!(local_html(txt.to_str().unwrap()).is_err());
     }
 
     #[test]

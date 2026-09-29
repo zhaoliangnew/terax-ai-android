@@ -1,7 +1,7 @@
 pub mod modules;
 
 use modules::{
-    agent, browser, claude_chat, codex_chat, control, fs, git, history, lsp, net, pty, scrcpy, secrets,
+    agent, browser, claude_chat, codex_chat, control, qoder_chat, fs, git, history, lsp, net, pty, scrcpy, secrets,
     shell, vibrancy, workspace,
 };
 use std::path::PathBuf;
@@ -265,8 +265,10 @@ pub fn run() {
         .manage(fs::watch::FsWatchState::default())
         .manage(history::HistoryState::default())
         .manage(claude_chat::ClaudeChatState::default())
+        .manage(qoder_chat::QoderChatState::default())
         .manage(codex_chat::CodexChatState::default())
         .manage(browser::WebAnnotState::default())
+        .manage(browser::WebTabsState::default())
         .manage(lsp::LspState::default())
         .manage(fs::grep::ContentSearchState::default())
         .manage({
@@ -372,6 +374,9 @@ pub fn run() {
             claude_chat::claude_chat_start,
             claude_chat::claude_chat_send,
             claude_chat::claude_chat_stop,
+            qoder_chat::qoder_chat_start,
+            qoder_chat::qoder_chat_send,
+            qoder_chat::qoder_chat_stop,
             claude_chat::chat_pick_files,
             claude_chat::chat_save_image,
             codex_chat::codex_chat_start,
@@ -381,6 +386,7 @@ pub fn run() {
             browser::web_set_bounds,
             browser::web_set_visible,
             browser::web_navigate,
+            browser::web_navigate_file,
             browser::web_history,
             browser::web_close,
             browser::web_close_all,
@@ -414,6 +420,9 @@ pub fn run() {
                         state.kill_all();
                     }
                     if let Some(state) = app.try_state::<codex_chat::CodexChatState>() {
+                        state.kill_all();
+                    }
+                    if let Some(state) = app.try_state::<qoder_chat::QoderChatState>() {
                         state.kill_all();
                     }
                     if let Some(state) = app.try_state::<control::ControlState>() {

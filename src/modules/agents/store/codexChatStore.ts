@@ -183,6 +183,7 @@ function snapshot(leafId: number) {
     serviceTier: m.serviceTier,
     permissionMode: m.permissionMode,
     sessionId: m.threadId,
+    context: m.context,
   });
 }
 

@@ -1,11 +1,12 @@
+import { useImeGuard } from "@/lib/ime";
 import { cn } from "@/lib/utils";
 import {
   AlertCircleIcon,
   ArrowDown01Icon,
   ArrowUp02Icon,
+  GitBranchIcon,
   Hold02Icon,
   Message01Icon,
-  MoreHorizontalIcon,
   PencilEdit02Icon,
   PlusSignIcon,
   Shield01Icon,
@@ -25,7 +26,9 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { isImagePath } from "../lib/chatItems";
+import type { ContextUsage } from "../lib/sdkChat";
 import type { UsageInfo } from "../lib/usage";
+import { AGENT_NAMES, type ChatAgent } from "../store/chatProviders";
 import type { ModelOption } from "../store/claudeChatStore";
 import { CodexModelPanel, effortLabel } from "./CodexModelPanel";
 import { ImageThumb } from "./ImageLightbox";
@@ -33,7 +36,7 @@ import { UsagePanel } from "./UsagePanel";
 
 type Props = {
   /** 聊天接的是谁:权限菜单的选项、各处的称呼跟着变。 */
-  agent: "claude" | "codex";
+  agent: ChatAgent;
   /** 一轮对话进行中:输入框为空时发送键变成"停止"。 */
   working: boolean;
   /** 发消息;附件是用系统文件框选的绝对路径。 */
@@ -65,6 +68,10 @@ type Props = {
   onSetServiceTier?: (tier: string) => void;
   /** 套餐用量:打开面板时去查,undefined = 还在查。 */
   usage?: UsageInfo | null;
+  /** 当前上下文大小和占比(底栏"用量"前面显示)。 */
+  context?: ContextUsage | null;
+  /** 输入框上方显示的当前分支;在 worktree 里再带上 worktree 名。 */
+  branch?: { name: string; worktree: string | null } | null;
   onOpenUsage: () => void;
 };
 
@@ -137,21 +144,119 @@ const CODEX_MODES: ModeOption[] = [
   },
 ];
 
+/** 12.3k / 1.2M 这种短写法。 */
+function shortTokens(n: number): string {
+  if (n >= 1_000_000)
+    return `${(n / 1_000_000).toFixed(n % 1_000_000 ? 1 : 0)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+}
+
+/** 底栏上的上下文占用:小圆环 + 百分比,悬停看 token 数。 */
+function ContextMeter({ context }: { context?: ContextUsage | null }) {
+  if (!context || context.ratio == null) {
+    if (!context?.tokens) return null;
+    return (
+      <span
+        title="当前上下文大小"
+        className="px-1 text-[12px] tabular-nums text-muted-foreground"
+      >
+        上下文 {shortTokens(context.tokens)}
+      </span>
+    );
+  }
+  const pct = Math.min(100, Math.max(0, context.ratio * 100));
+  const tokens =
+    context.tokens ??
+    (context.window ? Math.round(context.ratio * context.window) : null);
+  const detail =
+    tokens && context.window
+      ? `${shortTokens(tokens)} / ${shortTokens(context.window)} tokens`
+      : tokens
+        ? `${shortTokens(tokens)} tokens`
+        : "";
+  const r = 5.5;
+  const c = 2 * Math.PI * r;
+  return (
+    <span
+      title={`当前上下文 ${Math.round(pct)}%${detail ? `(${detail})` : ""}。满了可以点"压缩"`}
+      className="flex h-7 items-center gap-1 pl-1 text-[12px] tabular-nums text-muted-foreground"
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+        <circle
+          cx="7"
+          cy="7"
+          r={r}
+          fill="none"
+          strokeWidth="2"
+          className="stroke-foreground/15"
+        />
+        <circle
+          cx="7"
+          cy="7"
+          r={r}
+          fill="none"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={`${(pct / 100) * c} ${c}`}
+          transform="rotate(-90 7 7)"
+          className={
+            pct >= 85
+              ? "stroke-red-400"
+              : pct >= 60
+                ? "stroke-amber-400"
+                : "stroke-foreground/60"
+          }
+        />
+      </svg>
+      {Math.round(pct)}%
+    </span>
+  );
+}
+
+/** 输入框底栏上的文字小按钮(用量、压缩、新会话)。 */
+const toolText =
+  "flex h-7 cursor-pointer items-center rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground";
+
 /** 模型菜单还没拉回来时,按 id 给个能读的名字。 */
 function modelLabel(
   model: string | null,
   models: ModelOption[],
   fallback: string,
 ): string {
-  if (!model) return fallback;
+  if (!model) {
+    // 还没收到会话的初始化消息(刚恢复的会话要等第一轮):用的就是默认模型
+    const def = models.find((m) => m.value === "default");
+    return (def && modelNameOf(def)) || fallback;
+  }
   const hit = models.find(
     (m) => m.value === model || model.startsWith(m.value),
   );
-  if (hit) return hit.displayName;
-  return model
+  // 菜单项名字是"Opus (1M context)"这种不带版本的,按钮上用说明里的
+  // 具体型号("Opus 5.5 with 1M context" → Opus 5.5 1M)
+  if (hit) return modelNameOf(hit) || hit.displayName;
+  if (!model.startsWith("claude-")) return model;
+  // claude-opus-5-5[1m] → Opus 5.5 1M,和菜单里的写法一样首字母大写
+  const name = model
     .replace(/^claude-/, "")
     .replace(/\[1m\]$/, " 1M")
     .replace(/-(\d+)-(\d+)/, " $1.$2");
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/** 从模型说明里取具体型号:"Opus 5.5 with 1M context · …" → "Opus 5.5 1M"。 */
+function modelNameOf(m: ModelOption): string {
+  if (!m.description) return "";
+  const name = shortDescription(m.description)
+    .replace(/ with 1M context$/i, " 1M")
+    .trim();
+  // 只认"型号 + 版本号"开头的(Claude 的写法);Codex 的说明是一句介绍,不能拿来当名字
+  return /^[A-Z][a-z]+ \d/.test(name) ? name : "";
+}
+
+/** 模型说明只留"是哪个模型"那半句,"适合干什么"的长句不要。 */
+function shortDescription(description: string): string {
+  return description.split(" · ")[0].trim();
 }
 
 /**
@@ -256,17 +361,18 @@ export function AgentComposer({
   onSetEffort,
   onSetServiceTier,
   usage,
+  branch,
+  context,
   onOpenUsage,
 }: Props) {
-  const agentName = agent === "codex" ? "Codex" : "Claude";
+  const agentName = AGENT_NAMES[agent];
   const modeOptions = agent === "codex" ? CODEX_MODES : CLAUDE_MODES;
   const currentMode = modeOptions.find((o) => o.mode === permissionMode);
   const [text, setText] = useState("");
-  const [menu, setMenu] = useState<"mode" | "model" | "more" | "usage" | null>(
-    null,
-  );
+  const { imeProps, isImeKey } = useImeGuard();
+  const [menu, setMenu] = useState<"mode" | "model" | "usage" | null>(null);
   const closeMenu = useCallback(() => setMenu(null), []);
-  const toggleMenu = (m: "mode" | "model" | "more") =>
+  const toggleMenu = (m: "mode" | "model" | "usage") =>
     setMenu((cur) => (cur === m ? null : m));
   const [attachments, setAttachments] = useState<string[]>([]);
   const pickFiles = async () => {
@@ -369,6 +475,27 @@ export function AgentComposer({
   return (
     // 整条不透明:输入框本身是半透明的灰,底下不能透出任何东西
     <div className="relative z-20 shrink-0 bg-background px-6 pt-1 pb-4">
+      {branch && (
+        <div className="mx-auto flex max-w-3xl items-center gap-1 px-2 pb-1.5 text-[12px] text-muted-foreground">
+          <HugeiconsIcon
+            icon={GitBranchIcon}
+            size={12}
+            strokeWidth={1.75}
+            className="shrink-0"
+          />
+          {branch.worktree && (
+            <>
+              <span className="shrink-0 text-foreground/80">
+                {branch.worktree}
+              </span>
+              <span className="shrink-0 text-muted-foreground/50">·</span>
+            </>
+          )}
+          <span className="min-w-0 truncate" title={branch.name}>
+            {branch.name}
+          </span>
+        </div>
+      )}
       <div className="mx-auto flex max-w-3xl flex-col gap-2 rounded-[24px] bg-foreground/[0.12] px-4 pt-3.5 pb-2.5">
         {annotations && (
           <div className="flex">
@@ -480,9 +607,10 @@ export function AgentComposer({
             }
             void attachPastedImages(images);
           }}
+          {...imeProps}
           onKeyDown={(e) => {
-            // 输入法选词时的回车是确认候选,不是发送
-            if (e.nativeEvent.isComposing) return;
+            // 输入法选词、把拼音直接上屏时的回车是给输入法的,不是发送
+            if (isImeKey(e)) return;
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();
@@ -583,6 +711,43 @@ export function AgentComposer({
             </InlineMenu>
           </div>
           <span className="flex-1" />
+          {/* 用量、压缩、新会话直接摆出来,不收进"更多"菜单 */}
+          <div>
+            <button
+              type="button"
+              title="查看用量"
+              onClick={() => {
+                if (menu !== "usage") onOpenUsage();
+                toggleMenu("usage");
+              }}
+              className={toolText}
+            >
+              用量
+            </button>
+            <InlineMenu open={menu === "usage"} onClose={closeMenu} align="end">
+              <UsagePanel agentName={agentName} usage={usage} />
+            </InlineMenu>
+          </div>
+          {/* 上下文占用紧挨着"压缩":满了顺手就压 */}
+          <span className="flex items-center">
+            <ContextMeter context={context} />
+            <button
+              type="button"
+              title="压缩上下文"
+              onClick={onCompact}
+              className={cn(toolText, context && "pl-1")}
+            >
+              压缩
+            </button>
+          </span>
+          <button
+            type="button"
+            title="开一个新会话"
+            onClick={onNewChat}
+            className={toolText}
+          >
+            新会话
+          </button>
           <div>
             <button
               type="button"
@@ -640,7 +805,7 @@ export function AgentComposer({
                           <span>{m.displayName}</span>
                           {m.description && (
                             <span className="text-[11px] font-normal text-muted-foreground">
-                              {m.description}
+                              {shortDescription(m.description)}
                             </span>
                           )}
                         </span>
@@ -649,56 +814,6 @@ export function AgentComposer({
                   )}
                 </>
               )}
-            </InlineMenu>
-          </div>
-          <div>
-            <button
-              type="button"
-              aria-label="更多"
-              title="更多"
-              onClick={() => toggleMenu("more")}
-              className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-            >
-              <HugeiconsIcon
-                icon={MoreHorizontalIcon}
-                size={15}
-                strokeWidth={2}
-              />
-            </button>
-            <InlineMenu
-              open={menu === "more"}
-              onClose={closeMenu}
-              align="end"
-              className="min-w-36"
-            >
-              <MenuItem
-                onClick={() => {
-                  onOpenUsage();
-                  setMenu("usage");
-                }}
-              >
-                用量
-              </MenuItem>
-              <MenuItem
-                onClick={() => {
-                  onCompact();
-                  closeMenu();
-                }}
-              >
-                压缩上下文
-              </MenuItem>
-              <div className="my-1 h-px bg-border" />
-              <MenuItem
-                onClick={() => {
-                  onNewChat();
-                  closeMenu();
-                }}
-              >
-                新会话
-              </MenuItem>
-            </InlineMenu>
-            <InlineMenu open={menu === "usage"} onClose={closeMenu} align="end">
-              <UsagePanel agentName={agentName} usage={usage} />
             </InlineMenu>
           </div>
           <button

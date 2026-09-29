@@ -17,9 +17,10 @@ import { cn, isHtmlPath, isMarkdownPath } from "@/lib/utils";
 import { AgentStatusDot } from "@/modules/agent-status/AgentStatusDot";
 import {
   AgentNotificationsBridge,
-  findAgentLauncher,
+  NotificationBell,
   nextAttentionTarget,
 } from "@/modules/agents";
+import { cliLeafIds } from "@/modules/agents/lib/cliLeaf";
 import { useAgentViewStore } from "@/modules/agents/store/agentViewStore";
 import {
   AgentRunBridge,
@@ -34,7 +35,6 @@ import {
 import { AiComposerProvider } from "@/modules/ai/lib/composer";
 import { native } from "@/modules/ai/lib/native";
 import {
-  AgentQuickLaunch,
   AgentSessionActions,
   BranchChip,
   classifyProjectKind,
@@ -44,7 +44,6 @@ import {
   OpenInToolMenu,
   ProductLinkChip,
   ProjectLinksBar,
-  type QuickAgentId,
   RepoUrlChip,
   setProjectLink,
   setTaskLink,
@@ -55,6 +54,7 @@ import {
   useProjectGitInfo,
   YunxiaoProjectPickerDialog,
 } from "@/modules/android-run";
+import { REVEAL_RIGHT_PANEL } from "@/modules/browser/webTabsStore";
 import { CommandPalette, createCommandItems } from "@/modules/command-palette";
 import { useControlBridge } from "@/modules/control";
 import {
@@ -137,10 +137,8 @@ import {
 import {
   CheckmarkCircle01Icon,
   Folder01Icon,
-  FolderTreeIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { SearchAddon } from "@xterm/addon-search";
@@ -152,12 +150,18 @@ import {
   useRef,
   useState,
 } from "react";
-import type { PanelImperativeHandle } from "react-resizable-panels";
+import { createPortal } from "react-dom";
+import type {
+  GroupImperativeHandle,
+  PanelImperativeHandle,
+} from "react-resizable-panels";
 import { toast as sonnerToast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
 import {
   LeafAgentChat,
   LeafAgentComposer,
+  LeafChatDock,
+  LeafViewSwitch,
 } from "./components/LeafAgentComposer";
 import {
   effectiveRightTab,
@@ -429,7 +433,47 @@ export default function App() {
   });
   const currentRightTab = effectiveRightTab(rightTab, !!androidProjectRoot);
   const devicePanelRef = useRef<PanelImperativeHandle | null>(null);
+  const deviceElementRef = useRef<HTMLDivElement | null>(null);
+  const workspaceElementRef = useRef<HTMLDivElement | null>(null);
+  const [workspaceToolbarHost, setWorkspaceToolbarHost] =
+    useState<HTMLDivElement | null>(null);
+  const mainGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const splitLayoutRef = useRef<Record<string, number> | null>(null);
+  const [rightPanelExpanded, setRightPanelExpanded] = useState(false);
+  const [rightTabBarHost, setRightTabBarHost] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const toggleRightPanelExpanded = useCallback(() => {
+    const group = mainGroupRef.current;
+    if (!group) return;
+    const layout = group.getLayout();
+    if (layout.workspace === 0) {
+      const saved = splitLayoutRef.current;
+      const available = 100 - layout.sidebar;
+      const workspaceRatio = saved
+        ? saved.workspace / (saved.workspace + saved.device)
+        : 0.625;
+      group.setLayout({
+        ...layout,
+        workspace: available * workspaceRatio,
+        device: available * (1 - workspaceRatio),
+      });
+    } else {
+      splitLayoutRef.current = layout;
+      group.setLayout({
+        ...layout,
+        workspace: 0,
+        device: layout.device + layout.workspace,
+      });
+    }
+  }, []);
   const toggleRightPanel = useCallback(() => {
+    const group = mainGroupRef.current;
+    const layout = group?.getLayout();
+    if (group && layout?.workspace === 0) {
+      group.setLayout({ ...layout, workspace: layout.device, device: 0 });
+      return;
+    }
     const p = devicePanelRef.current;
     if (!p) return;
     if (p.isCollapsed()) p.expand();
@@ -443,6 +487,15 @@ export default function App() {
     // 右栏被拖到收起时,点入口要先把它展开
     const p = devicePanelRef.current;
     if (p?.isCollapsed()) p.expand();
+  }, []);
+  // AI 在内嵌浏览器里操作时右栏要露出来(RightPanel 发这个事件)
+  useEffect(() => {
+    const reveal = () => {
+      const p = devicePanelRef.current;
+      if (p?.isCollapsed()) p.expand();
+    };
+    window.addEventListener(REVEAL_RIGHT_PANEL, reveal);
+    return () => window.removeEventListener(REVEAL_RIGHT_PANEL, reveal);
   }, []);
 
   // 右键工程 → 填"当前云效需求"。跟目录级的云效项目分开:这个跟着仓库走,不继承。
@@ -556,7 +609,11 @@ export default function App() {
     const live = new Set<number>();
     for (const t of tabs) {
       if (t.kind === "terminal") {
-        for (const id of leafIds(t.paneTree)) live.add(id);
+        for (const id of leafIds(t.paneTree)) {
+          live.add(id);
+          // 窗格名下的命令行终端跟着窗格走,窗格关了一起收
+          for (const cli of cliLeafIds(id)) live.add(cli);
+        }
       }
     }
     for (const id of liveLeavesRef.current) {
@@ -734,11 +791,44 @@ export default function App() {
   );
   const activeLeafInChat = isTerminalTab && activeLeafMode === "chat";
 
+  // 右栏占满中间+右边时,当前聊天停到右栏底下:平时只是一条输入框,点一下
+  // 展开成右边的聊天记录;点别处(右栏 tab、网页、投屏)又收回一条
+  const dockChat =
+    rightPanelExpanded && activeLeafInChat && activeLeafId !== null;
+  const [dockChatOpen, setDockChatOpen] = useState(false);
+  const dockOpen = dockChat && dockChatOpen;
+  useEffect(() => {
+    if (!dockOpen) return;
+    // 用 click 不用 mousedown:等这次点击在原来的布局上落完再收,
+    // 不然按下那一刻布局就变了,松手点到的是别的东西
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Element | null;
+      if (t?.closest("[data-chat-dock]")) return;
+      // 输入框里点开的大图、菜单这类浮层不算"别处"
+      if (t?.closest('[role="dialog"], [role="menu"]')) return;
+      setDockChatOpen(false);
+    };
+    // 点到原生网页上,DOM 收不到点击,只能从界面失焦看出来
+    const onBlur = () => setDockChatOpen(false);
+    window.addEventListener("click", onDown, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("click", onDown, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [dockOpen]);
+
   // 投屏批注要知道往哪个聊天发:当前聊天窗格,不在聊天就没有
   const setActiveChatLeaf = useAgentViewStore((s) => s.setActiveChatLeaf);
   useEffect(() => {
     setActiveChatLeaf(activeLeafInChat ? activeLeafId : null);
   }, [activeLeafInChat, activeLeafId, setActiveChatLeaf]);
+  // 命令行视图的窗格也能收批注(贴进命令行输入框)
+  const setActiveCliLeaf = useAgentViewStore((s) => s.setActiveCliLeaf);
+  const activeLeafInCli = isTerminalTab && activeLeafMode === "cli";
+  useEffect(() => {
+    setActiveCliLeaf(activeLeafInCli ? activeLeafId : null);
+  }, [activeLeafInCli, activeLeafId, setActiveCliLeaf]);
 
   // 往当前终端里发一条斜杠命令。给底栏那几个按钮用 —— 它们只在当前终端确实
   // 跑着 Claude/Codex 时才显示,所以这里不用再判断打给谁。
@@ -757,48 +847,6 @@ export default function App() {
       setTimeout(() => t.write("\r"), 120);
     },
     [activeLeafId],
-  );
-
-  // 一键起 agent:优先直接用当前终端(你多半已经在这个工程的终端里了,再开一个
-  // 纯属添乱);只有当前 tab 不是终端时才新开一个。
-  const openAgentTerminal = useCallback(
-    (path: string, command: string, agent: QuickAgentId) => {
-      const line = `cd ${quoteShellArg(path)} && ${command}\r`;
-      // Install the OSC 777 notification hook first, same as the built-in
-      // agent launcher does — without it the agent only ever emits `started`
-      // and the status dot stays stuck on 🟡 working forever. 没钩子的那几个
-      // (Qoder…)直接跳过:后端认不出这个名字,只会往控制台扔一条 warn。
-      const hooksReady = findAgentLauncher(agent).supportsHooks
-        ? invoke("agent_enable_hooks", { agent }).catch((error) => {
-            console.warn(
-              `[terax] could not enable ${agent} notifications:`,
-              error,
-            );
-          })
-        : Promise.resolve();
-      const current =
-        activeLeafId !== null ? terminalRefs.current.get(activeLeafId) : null;
-      if (current) {
-        void hooksReady.then(() => {
-          current.write(line);
-          current.focus();
-        });
-        return;
-      }
-      const tabId = newTab(path);
-      void (async () => {
-        await hooksReady;
-        setTimeout(() => {
-          const tab = tabsRef.current.find((x) => x.id === tabId);
-          if (!tab || tab.kind !== "terminal") return;
-          const t = terminalRefs.current.get(tab.activeLeafId);
-          if (!t) return;
-          t.write(line);
-          t.focus();
-        }, 80);
-      })();
-    },
-    [newTab, activeLeafId],
   );
 
   // 左侧项目树里,已有终端 tab 打开的安卓工程目录用绿字标出来,方便一眼看出
@@ -1011,14 +1059,27 @@ export default function App() {
     () =>
       new Set(
         Object.entries(leafModes)
-          .filter(([, m]) => m === "chat")
+          // 聊天、命令行都盖在 shell 上面:shell 不抢焦点
+          .filter(([, m]) => m !== "terminal")
           .map(([id]) => Number(id)),
       ),
     [leafModes],
   );
+  // 当前窗格的 Claude/Codex、聊天/终端切换摆在工程工具栏最左边;没有工具栏
+  // (不在安卓工程里)或不是当前窗格,就还浮在窗格右上角
+  const switchLeafId =
+    androidProjectRoot && isTerminalTab ? activeLeafId : null;
   const renderLeafOverlay = useCallback(
-    (leafId: number) => <LeafAgentChat leafId={leafId} getCwd={getLeafCwd} />,
-    [getLeafCwd],
+    (leafId: number, ctx: { visible: boolean; focused: boolean }) => (
+      <LeafAgentChat
+        leafId={leafId}
+        getCwd={getLeafCwd}
+        showSwitch={leafId !== switchLeafId}
+        visible={ctx.visible}
+        focused={ctx.focused}
+      />
+    ),
+    [getLeafCwd, switchLeafId],
   );
 
   const activeFilePath = (() => {
@@ -1600,6 +1661,36 @@ export default function App() {
     terminalRefs,
   });
 
+  const workspaceToolbar = androidProjectRoot ? (
+    <div
+      data-tauri-drag-region
+      className={cn(
+        "@container flex shrink-0 items-center gap-2 overflow-x-auto px-3 text-[13px]",
+        workspaceToolbarHost && !zenMode
+          ? "h-full"
+          : "border-b border-border py-1.5",
+      )}
+    >
+      <span className="flex min-w-0 flex-1 items-center gap-2">
+        {switchLeafId !== null && (
+          <LeafViewSwitch leafId={switchLeafId} getCwd={getLeafCwd} />
+        )}
+        <AgentStatusDot
+          projectRoot={androidProjectRoot}
+          projectPtyIds={projectPtyIds}
+        />
+      </span>
+      <span className="flex shrink-0 items-center gap-2">
+        <OpenInToolMenu projectRoot={androidProjectRoot} />
+        <ProjectLinksBar
+          projectRoot={androidProjectRoot}
+          version={linkVersion}
+          onChanged={bumpLinks}
+        />
+      </span>
+    </div>
+  ) : null;
+
   const shell = (
     <ThemeProvider>
       <TooltipProvider>
@@ -1609,9 +1700,12 @@ export default function App() {
               onToggleSidebar={toggleSidebar}
               onToggleRightPanel={toggleRightPanel}
               onOpenCommandPalette={() => openCommandPalette("commands")}
-              onActivateAgent={onActivateAgent}
-              onActivateLocalAgent={onActivateLocalAgent}
-              onOpenSettings={() => void openSettingsWindow()}
+              tabBarRef={setRightTabBarHost}
+              workspaceToolbarRef={setWorkspaceToolbarHost}
+              workspaceElementRef={workspaceElementRef}
+              rightPanelElementRef={deviceElementRef}
+              rightPanelExpanded={rightPanelExpanded}
+              onToggleRightPanelExpanded={toggleRightPanelExpanded}
               spaceSwitcher={null}
               searchTarget={searchTarget}
               searchRef={searchInlineRef}
@@ -1619,15 +1713,20 @@ export default function App() {
           )}
 
           <main className="zoom-content flex min-h-0 flex-1">
-            {!zenMode && <ToolRail />}
+            {!zenMode && (
+              <ToolRail onOpenSettings={() => void openSettingsWindow()} />
+            )}
             <ResizablePanelGroup
+              groupRef={mainGroupRef}
               orientation="horizontal"
               className="min-h-0 flex-1"
               defaultLayout={mainLayout.defaultLayout}
               onLayoutChanged={(layout, meta) => {
                 // 整体比例交给库存(拖完就记住),侧栏宽度另外还要按 px 存一份:
                 // 收起再展开、下次启动都靠它还原
-                mainLayout.onLayoutChanged(layout, meta);
+                if (layout.workspace > 0) {
+                  mainLayout.onLayoutChanged(layout, meta);
+                }
                 const width = sidebarRef.current?.getSize().inPixels ?? 0;
                 persistSidebarWidth(width, meta.isUserInteraction);
               }}
@@ -1669,6 +1768,12 @@ export default function App() {
                               ref={explorerRef}
                               rootPath={activeSpaceRoot ?? explorerRoot}
                               hideHeaderActions
+                              headerAccessory={
+                                <NotificationBell
+                                  onActivate={onActivateAgent}
+                                  onActivateLocal={onActivateLocalAgent}
+                                />
+                              }
                               gitStatus={
                                 explorerGitDecorations
                                   ? sourceControl.status
@@ -1752,71 +1857,20 @@ export default function App() {
               {/* 线用 border 画:界面整体缩放到 95%,1px 的背景条只剩 0.95px,有的位置会被
                   整条吞掉;边框至少画一个物理像素 */}
               <ResizableHandle className="w-px shrink-0 cursor-col-resize border-foreground/[0.16] border-l bg-transparent transition-colors duration-[var(--dur-fast)] after:w-3 hover:border-foreground/35" />
-              <ResizablePanel id="workspace" defaultSize="50%" minSize="25%">
+              <ResizablePanel
+                id="workspace"
+                elementRef={workspaceElementRef}
+                defaultSize="50%"
+                minSize="25%"
+                collapsible
+                collapsedSize={0}
+                onResize={(size) => setRightPanelExpanded(size.inPixels === 0)}
+              >
                 <div className="h-full min-h-0">
                   <div className="terax-pane flex h-full min-h-0 flex-col">
-                    {/* 换行交给 flex-wrap 自己判断,但换的是**面包屑里面**:
-                        名字那一组自己 flex-wrap,摆不下时先掉下去的是排在最后的
-                        分支名,右边的按钮留在第一行 —— 按钮被挤到第二行、分支
-                        却在第一行被切掉,才是最难受的那种。每个名字自己
-                        nowrap(`[&>*]:whitespace-nowrap`),所以断的是词与词
-                        之间,不会从名字中间劈开。 */}
-                    {/* 面包屑跟分支/按钮统一到 13px:15px 时中文产品名比旁边
-                        的分支名明显大一截,看着不是一行东西。 */}
-                    {androidProjectRoot && (
-                      <div className="@container flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 overflow-hidden border-b border-border px-3 py-1.5 text-[13px]">
-                        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-                          {/* 产品目录文件的入口摆在这条最前面:它跟着的是
-                              "当前这个工程",和右边那排外部工具(AS/访达)不是
-                              一回事,排在分支前面更顺手 */}
-                          {rightPanelRoot && (
-                            <button
-                              type="button"
-                              aria-label="源码"
-                              title="在右栏看源码"
-                              onClick={() => selectRightTab("source")}
-                              className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded border border-border text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
-                            >
-                              <HugeiconsIcon
-                                icon={FolderTreeIcon}
-                                size={13}
-                                strokeWidth={1.75}
-                              />
-                            </button>
-                          )}
-                          {/* 顶部这条只留分支:产品名/工程名在上面的 tab 上
-                              已经写着了,再重复一遍就是把这一行挤到换行。产品
-                              目录文件的入口挪到了 AS 图标左边那个,云效项目
-                              chip 在底部那条面包屑里还留着。 */}
-                          <BranchChip
-                            projectRoot={androidProjectRoot}
-                            onOpenDiff={openGitDiffTab}
-                            onOpenPanel={() => selectRightTab("repo")}
-                            /* 不再按 max-w-40 死切:分支名摆不下时整条会掉到
-                               第二行,那一行是空的,再截就是白截。真比一整行
-                               还长才截(chip 自己有 truncate)。 */
-                            className="max-w-full"
-                          />
-                          <AgentStatusDot
-                            projectRoot={androidProjectRoot}
-                            projectPtyIds={projectPtyIds}
-                          />
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          <AgentQuickLaunch
-                            projectRoot={androidProjectRoot}
-                            busyAgent={activeTerminalAgent}
-                            onLaunch={openAgentTerminal}
-                          />
-                          <OpenInToolMenu projectRoot={androidProjectRoot} />
-                          <ProjectLinksBar
-                            projectRoot={androidProjectRoot}
-                            version={linkVersion}
-                            onChanged={bumpLinks}
-                          />
-                        </span>
-                      </div>
-                    )}
+                    {workspaceToolbarHost && !zenMode
+                      ? createPortal(workspaceToolbar, workspaceToolbarHost)
+                      : workspaceToolbar}
                     <div className="relative min-h-0 flex-1">
                       <WorkspaceSurface
                         tabs={tabs}
@@ -1979,46 +2033,102 @@ export default function App() {
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}
+                elementRef={deviceElementRef}
                 defaultSize="30%"
                 minSize="20%"
                 collapsible
                 collapsedSize={0}
               >
                 <div className="h-full min-h-0">
-                  <div className="terax-pane flex h-full min-h-0 flex-col">
-                    <RightPanel
-                      tab={currentRightTab}
-                      onTabChange={selectRightTab}
-                      hasDevice={!!androidProjectRoot}
-                      root={rightPanelRoot}
-                      filesState={
-                        rightPanelRoot
-                          ? projectFilesByRoot[rightPanelRoot]
-                          : undefined
-                      }
-                      onFilesStateChange={(root, next) =>
-                        setProjectFilesByRoot((cur) => ({
-                          ...cur,
-                          [root]: next,
-                        }))
-                      }
-                      onOpenDiff={openGitDiffTab}
-                      sourceProps={{
-                        gitStatus: explorerGitDecorations
-                          ? sourceControl.status
-                          : null,
-                        dirtyPaths: dirtyFilePaths,
-                        onPathRenamed: handlePathRenamed,
-                        onPathDeleted: handlePathDeleted,
-                        onRevealInTerminal: cdInNewTab,
-                        onOpenNewTerminal: openNewTerminalAt,
-                        onOpenInSourceControl:
-                          handleOpenRepositoryInSourceControl,
-                        onOpenGitHistory: handleOpenGitHistoryForPath,
-                        onAttachToAgent: handleAttachFileToAgent,
-                        pathDropTarget: terminalPathDropTarget,
+                  <div
+                    className="terax-pane grid h-full min-h-0"
+                    style={{
+                      gridTemplateColumns: dockOpen
+                        ? "minmax(0,1fr) minmax(320px,32%)"
+                        : "minmax(0,1fr)",
+                      gridTemplateRows: "minmax(0,1fr) auto",
+                    }}
+                  >
+                    <div
+                      className="min-h-0"
+                      style={{
+                        gridColumn: 1,
+                        gridRow: dockChat && !dockOpen ? 1 : "1 / span 2",
                       }}
-                    />
+                    >
+                      <RightPanel
+                        tabBarHost={zenMode ? null : rightTabBarHost}
+                        tab={currentRightTab}
+                        onTabChange={selectRightTab}
+                        hasDevice={!!androidProjectRoot}
+                        root={rightPanelRoot}
+                        filesState={
+                          rightPanelRoot
+                            ? projectFilesByRoot[rightPanelRoot]
+                            : undefined
+                        }
+                        onFilesStateChange={(root, next) =>
+                          setProjectFilesByRoot((cur) => ({
+                            ...cur,
+                            [root]: next,
+                          }))
+                        }
+                        onOpenDiff={openGitDiffTab}
+                        sourceProps={{
+                          gitStatus: explorerGitDecorations
+                            ? sourceControl.status
+                            : null,
+                          dirtyPaths: dirtyFilePaths,
+                          onPathRenamed: handlePathRenamed,
+                          onPathDeleted: handlePathDeleted,
+                          onRevealInTerminal: cdInNewTab,
+                          onOpenNewTerminal: openNewTerminalAt,
+                          onOpenInSourceControl:
+                            handleOpenRepositoryInSourceControl,
+                          onOpenGitHistory: handleOpenGitHistoryForPath,
+                          onAttachToAgent: handleAttachFileToAgent,
+                          pathDropTarget: terminalPathDropTarget,
+                        }}
+                      />
+                    </div>
+                    {dockOpen && activeLeafId !== null && (
+                      <div
+                        data-chat-dock
+                        className="flex min-h-0 flex-col border-l border-border/60"
+                        style={{ gridColumn: 2, gridRow: 1 }}
+                      >
+                        <LeafChatDock
+                          leafId={activeLeafId}
+                          getCwd={getLeafCwd}
+                          onCollapse={() => setDockChatOpen(false)}
+                        />
+                      </div>
+                    )}
+                    {/* 输入框始终在同一个位置挂着(只换格子),展开收起不丢草稿和焦点 */}
+                    {dockChat && activeLeafId !== null && (
+                      // biome-ignore lint/a11y/noStaticElementInteractions: 点输入框展开聊天记录,键盘操作都在输入框里
+                      <div
+                        data-chat-dock
+                        className={cn(
+                          "min-w-0 border-t border-border/60",
+                          dockOpen && "border-l",
+                        )}
+                        style={{ gridColumn: dockOpen ? 2 : 1, gridRow: 2 }}
+                        onMouseDown={() => setDockChatOpen(true)}
+                      >
+                        <div
+                          className={cn(
+                            "w-full",
+                            !dockOpen && "mx-auto max-w-3xl",
+                          )}
+                        >
+                          <LeafAgentComposer
+                            leafId={activeLeafId}
+                            getCwd={getLeafCwd}
+                          />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </ResizablePanel>

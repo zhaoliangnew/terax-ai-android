@@ -288,6 +288,54 @@ fn read_request(reader: &mut impl BufRead) -> Result<ControlRequest, ReadRequest
     })
 }
 
+/// `browser.*`: drive the in-app web tabs for AI tools (`terax-cli mcp`).
+/// Runs on this connection's worker thread; the calls block on WebKit's
+/// main-thread callbacks, which is fine here and must never happen on main.
+fn browser_request(request: ControlRequest, app: &tauri::AppHandle) -> ControlResponse {
+    use crate::modules::browser_automation as auto;
+    use terax_control_protocol::BrowserParams;
+    let p: BrowserParams = match serde_json::from_value(request.params.clone()) {
+        Ok(p) => p,
+        Err(error) => {
+            return ControlResponse::failure(
+                request.id,
+                "invalid_params",
+                format!("invalid browser parameters: {error}"),
+            )
+        }
+    };
+    let tab = p.tab.as_deref();
+    let need = |v: Option<String>, what: &str| v.ok_or_else(|| format!("缺少参数 {what}"));
+    let element = || {
+        p.element
+            .ok_or_else(|| "缺少参数 element(snapshot 里的编号)".to_string())
+    };
+    let result = match request.method.as_str() {
+        "browser.tabs" => Ok(auto::tabs(app)),
+        "browser.open" => need(p.url.clone(), "url").and_then(|u| auto::open(app, &u)),
+        "browser.navigate" => need(p.url.clone(), "url").and_then(|u| auto::navigate(app, tab, &u)),
+        "browser.back" => auto::back(app, tab),
+        "browser.snapshot" => auto::snapshot(app, tab, p.max_text),
+        "browser.click" => element().and_then(|e| auto::click(app, tab, e)),
+        "browser.type" => element().and_then(|e| {
+            let text = need(p.text.clone(), "text")?;
+            auto::type_text(app, tab, e, &text, p.submit, p.append)
+        }),
+        "browser.press" => need(p.key.clone(), "key").and_then(|k| auto::press(app, tab, &k)),
+        "browser.select" => element().and_then(|e| {
+            let value = need(p.value.clone(), "value")?;
+            auto::select(app, tab, e, &value)
+        }),
+        "browser.scroll" => auto::scroll(app, tab, p.dy, p.element),
+        "browser.screenshot" => auto::screenshot(app, tab),
+        other => Err(format!("unknown browser method: {other}")),
+    };
+    match result {
+        Ok(value) => ControlResponse::success(request.id, value),
+        Err(message) => ControlResponse::failure(request.id, "browser_error", message),
+    }
+}
+
 fn route_request(
     mut request: ControlRequest,
     app: &tauri::AppHandle,
@@ -339,6 +387,7 @@ fn route_request(
             }),
         ),
         METHOD_IDENTIFY => forward_to_frontend(request, app, state),
+        method if method.starts_with("browser.") => browser_request(request, app),
         METHOD_OPEN => {
             let params: OpenParams = match serde_json::from_value(request.params.clone()) {
                 Ok(params) => params,

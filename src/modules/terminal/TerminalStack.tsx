@@ -18,7 +18,10 @@ type Props = {
   /** 每个窗格底部的附加内容(AI 命令行输入框)。 */
   renderLeafFooter?: (leafId: number) => ReactNode;
   /** 盖在每个窗格终端上面的内容(agent 聊天视图)。 */
-  renderLeafOverlay?: (leafId: number) => ReactNode;
+  renderLeafOverlay?: (
+    leafId: number,
+    ctx: { visible: boolean; focused: boolean },
+  ) => ReactNode;
   /** 盖着聊天视图的窗格:终端不抢键盘焦点。 */
   focusSuppressed?: ReadonlySet<number>;
 };

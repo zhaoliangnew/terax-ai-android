@@ -12,6 +12,8 @@ export type WebTabInfo = {
 type Store = {
   byRoot: Record<string, WebTabInfo[]>;
   add: (root: string, url: string) => string;
+  /** AI 开的标签页:id 由 Rust 定(它要等这个 id 的网页出现)。 */
+  addWithId: (root: string, id: string, url: string) => void;
   remove: (root: string, id: string) => void;
   setTitle: (root: string, id: string, title: string) => void;
 };
@@ -40,6 +42,17 @@ export const useWebTabsStore = create<Store>((set) => ({
     }));
     return id;
   },
+  addWithId: (root, id, url) =>
+    set((s) => {
+      const list = s.byRoot[root] ?? [];
+      if (list.some((t) => t.id === id)) return s;
+      return {
+        byRoot: {
+          ...s.byRoot,
+          [root]: [...list, { id, url, title: "新标签页" }],
+        },
+      };
+    }),
   remove: (root, id) =>
     set((s) => ({
       byRoot: {
@@ -57,3 +70,18 @@ export const useWebTabsStore = create<Store>((set) => ({
       },
     })),
 }));
+
+/** 让 App 把收起的右栏展开(AI 在内嵌浏览器里操作时要看得见)。 */
+export const REVEAL_RIGHT_PANEL = "terax:reveal-right-panel";
+
+/** 右栏没进任何工程时,网页标签页放在这一组里。 */
+export const NO_PROJECT_ROOT = "(no-project)";
+
+/** 请右栏新开一个网页标签页(比如聊天里点了 html 文件)。detail: { url } */
+export const OPEN_IN_BROWSER = "terax:open-in-browser";
+
+/** 在右栏内嵌浏览器里打开网址或本地 html 文件(传 file:// 或绝对路径)。 */
+export function openInBrowser(urlOrPath: string) {
+  const url = urlOrPath.startsWith("/") ? `file://${urlOrPath}` : urlOrPath;
+  window.dispatchEvent(new CustomEvent(OPEN_IN_BROWSER, { detail: { url } }));
+}

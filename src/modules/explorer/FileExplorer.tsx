@@ -30,6 +30,7 @@ import { ChangedFilesDialog } from "@/modules/source-control/ChangedFilesDialog"
 import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
   ArrowDown01Icon,
+  ArrowRight01Icon,
   ArrowUp01Icon,
   FileAddIcon,
   FileEditIcon,
@@ -44,8 +45,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   forwardRef,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -128,6 +131,7 @@ type Props = {
   headerActions?: ExplorerHeaderAction[];
   /** 头部那排按钮只留上一级、刷新和"只看已打开的工程"(搜索走快捷键,新建走右键菜单)。 */
   hideHeaderActions?: boolean;
+  headerAccessory?: ReactNode;
   /** 关掉某个工程的全部终端 tab(右键菜单"关闭终端")。 */
   onCloseProjectTerminals?: (path: string) => void;
   /** 给这个工程填"当前云效需求"地址(跟着仓库走,不继承)。 */
@@ -346,6 +350,7 @@ export const FileExplorer = memo(
       onSetAsRoot,
       headerActions,
       hideHeaderActions,
+      headerAccessory,
       onCloseProjectTerminals,
       onLinkYunxiaoTask,
       onLinkYunxiaoProject,
@@ -364,6 +369,10 @@ export const FileExplorer = memo(
       gitDecorations,
     );
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
+    const [pinnedGroupOpen, setPinnedGroupOpen] = useState(true);
+    const [projectsGroupOpen, setProjectsGroupOpen] = useState(true);
+    const pinnedGroupId = useId();
+    const projectsGroupId = useId();
     // 置顶目录(工程上百个,常用的那几个提到最前面)
     const [pinnedPaths, setPinnedPaths] = useState<Set<string>>(() =>
       loadPinnedDirs(),
@@ -784,6 +793,7 @@ export const FileExplorer = memo(
         setRevealTarget(null);
         return;
       }
+      setProjectsGroupOpen(true);
       if (entryIndexByPath.has(revealTarget)) {
         setSelectedPath(revealTarget);
         const target = revealTarget;
@@ -875,7 +885,13 @@ export const FileExplorer = memo(
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       if (tree.renaming || tree.pendingCreate || isSearchOpen) return;
+      if (onSetAsRoot && !projectsGroupOpen) return;
       const target = e.target as HTMLElement;
+      if (
+        !e.currentTarget.contains(target) ||
+        headerRef.current?.contains(target)
+      )
+        return;
       if (
         target.tagName === "INPUT" ||
         target.tagName === "TEXTAREA" ||
@@ -1169,6 +1185,9 @@ export const FileExplorer = memo(
             </span>
           )}
 
+          {headerAccessory && (
+            <div className="flex shrink-0 items-center">{headerAccessory}</div>
+          )}
           <ExplorerHeaderActions
             actions={
               hideHeaderActions
@@ -1177,7 +1196,11 @@ export const FileExplorer = memo(
                   )
                 : actions
             }
-            width={headerWidth}
+            width={
+              headerWidth === null
+                ? null
+                : headerWidth - (headerAccessory ? 32 : 0)
+            }
           />
         </div>
 
@@ -1187,55 +1210,72 @@ export const FileExplorer = memo(
             一展开可能是上百个工程,不封顶的话它会把下面的树整个顶出容器,
             结果两边都滚不动。所以给一个 45% 的上限,超了才自己滚。 */}
         {onSetAsRoot && pinnedRows.length > 0 && (
-          <div className="max-h-[45%] shrink-0 overflow-y-auto overflow-x-hidden border-b border-border pb-1">
-            <div className="sticky top-0 z-20 bg-[var(--pane-bg,var(--background))] px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+          <div className="max-h-[45%] shrink-0 overflow-y-auto overflow-x-hidden pb-4">
+            <button
+              type="button"
+              aria-expanded={pinnedGroupOpen}
+              aria-controls={pinnedGroupId}
+              onClick={() => setPinnedGroupOpen((open) => !open)}
+              onKeyDown={(e) => e.stopPropagation()}
+              className="sticky top-0 z-20 flex h-8 w-full shrink-0 cursor-pointer items-center gap-1.5 bg-[var(--pane-bg,var(--background))] px-3 text-left text-[13px] font-normal text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+            >
               置顶
-            </div>
-            {pinnedRows.map((row) => {
-              // 取消置顶走右键:行尾本来就挤着云效图标、分支名、状态灯,
-              // 再浮一个 ✕ 上去必然压到别人身上
-              const pinRoot =
-                row.kind === "entry" && row.depth === 0 ? row : null;
-              if (!pinRoot)
-                return (
-                  <div key={row.key}>
-                    {renderRow(row, pinnedRowActions, true)}
-                  </div>
-                );
-              return (
-                <ContextMenu key={row.key}>
-                  {/* 置顶目录那一行钉在顶上:往下滚的时候还看得见自己在哪个
-                      目录里。纯 CSS sticky —— 下一个置顶目录顶上来就自然把
-                      前一个推走,不用算滚动位置 */}
-                  <ContextMenuTrigger asChild>
-                    {/* top-6 = 上面那条"置顶"标题的高度,不然目录行会滑到
-                        标题底下被盖住 */}
-                    <div className="sticky top-6 z-10 bg-[var(--pane-bg,var(--background))]">
+              <HugeiconsIcon
+                icon={ArrowRight01Icon}
+                size={12}
+                strokeWidth={1.75}
+                className={cn(
+                  "transition-transform",
+                  pinnedGroupOpen && "rotate-90",
+                )}
+              />
+            </button>
+            <div id={pinnedGroupId} hidden={!pinnedGroupOpen}>
+              {pinnedRows.map((row) => {
+                // 取消置顶走右键:行尾本来就挤着云效图标、分支名、状态灯,
+                // 再浮一个 ✕ 上去必然压到别人身上
+                const pinRoot =
+                  row.kind === "entry" && row.depth === 0 ? row : null;
+                if (!pinRoot)
+                  return (
+                    <div key={row.key}>
                       {renderRow(row, pinnedRowActions, true)}
                     </div>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className={COMPACT_CONTENT}>
-                    <ContextMenuItem
-                      className={COMPACT_ITEM}
-                      onSelect={() => {
-                        setPinnedDir(pinRoot.path, false);
-                        toast.success("已取消置顶", {
-                          description: pinRoot.name,
-                        });
-                      }}
-                    >
-                      取消置顶
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      className={COMPACT_ITEM}
-                      onSelect={() => setRevealTarget(pinRoot.path)}
-                    >
-                      在树中定位
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                </ContextMenu>
-              );
-            })}
+                  );
+                return (
+                  <ContextMenu key={row.key}>
+                    {/* 置顶目录那一行钉在顶上:往下滚的时候还看得见自己在哪个
+                      目录里。纯 CSS sticky —— 下一个置顶目录顶上来就自然把
+                      前一个推走,不用算滚动位置 */}
+                    <ContextMenuTrigger asChild>
+                      {/* 跟随分组标题高度,避免滚动时盖住目录行。 */}
+                      <div className="sticky top-8 z-10 bg-[var(--pane-bg,var(--background))]">
+                        {renderRow(row, pinnedRowActions, true)}
+                      </div>
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className={COMPACT_CONTENT}>
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => {
+                          setPinnedDir(pinRoot.path, false);
+                          toast.success("已取消置顶", {
+                            description: pinRoot.name,
+                          });
+                        }}
+                      >
+                        取消置顶
+                      </ContextMenuItem>
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => setRevealTarget(pinRoot.path)}
+                      >
+                        在树中定位
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -1289,12 +1329,30 @@ export const FileExplorer = memo(
             <ContextMenuTrigger asChild>
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 {/* 置顶那块有标题,这块没有的话两片列表糊在一起分不出来 */}
-                {onSetAsRoot && pinnedRows.length > 0 && (
-                  <div className="shrink-0 px-2 pt-1.5 pb-1 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
-                    {rootPath?.split("/").filter(Boolean).pop() ?? "全部"}
-                  </div>
+                {onSetAsRoot && (
+                  <button
+                    type="button"
+                    aria-expanded={projectsGroupOpen}
+                    aria-controls={projectsGroupId}
+                    onClick={() => setProjectsGroupOpen((open) => !open)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    className="flex h-8 w-full shrink-0 cursor-pointer items-center gap-1.5 px-3 text-left text-[13px] font-normal text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+                  >
+                    项目
+                    <HugeiconsIcon
+                      icon={ArrowRight01Icon}
+                      size={12}
+                      strokeWidth={1.75}
+                      className={cn(
+                        "transition-transform",
+                        projectsGroupOpen && "rotate-90",
+                      )}
+                    />
+                  </button>
                 )}
                 <div
+                  id={projectsGroupId}
+                  hidden={!!onSetAsRoot && !projectsGroupOpen}
                   ref={scrollRef}
                   data-explorer-drop=""
                   className={cn(

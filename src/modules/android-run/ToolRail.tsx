@@ -1,8 +1,11 @@
+import { Button } from "@/components/ui/button";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Settings01Icon } from "@hugeicons/core-free-icons";
+import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { ApifoxMenu } from "./ApifoxMenu";
 import { CustomLinksMenu } from "./CustomLinksMenu";
@@ -37,38 +40,51 @@ function RailTip({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-export function ToolRail() {
+export function ToolRail({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <nav
       aria-label="工具"
-      className="flex w-12 shrink-0 flex-col items-center gap-2 py-2"
+      className="flex min-h-0 w-12 shrink-0 flex-col items-center gap-2 py-2"
     >
-      <RailTip label="嵌入式组知识库">
-        <KnowledgeBaseMenu />
-      </RailTip>
-      <RailTip label="云效项目">
-        <YunxiaoProjectsButton />
-      </RailTip>
-      <RailTip label="云效代码库">
-        <YunxiaoReposButton />
-      </RailTip>
-      <RailTip label="Apifox 接口文档">
-        <ApifoxMenu />
-      </RailTip>
-      <RailTip label="测试环境">
-        <TestEnvMenu />
-      </RailTip>
-      <RailTip label="记一下">
-        <JournalButton />
-      </RailTip>
-      <RailTip label="钉钉直达">
-        <DingGroupsMenu />
-      </RailTip>
-      <RailTip label="微信">
-        <WeChatButton />
-      </RailTip>
-      <RailTip label="收藏夹">
-        <CustomLinksMenu />
+      <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto">
+        <RailTip label="嵌入式组知识库">
+          <KnowledgeBaseMenu />
+        </RailTip>
+        <RailTip label="云效项目">
+          <YunxiaoProjectsButton />
+        </RailTip>
+        <RailTip label="云效代码库">
+          <YunxiaoReposButton />
+        </RailTip>
+        <RailTip label="Apifox 接口文档">
+          <ApifoxMenu />
+        </RailTip>
+        <RailTip label="测试环境">
+          <TestEnvMenu />
+        </RailTip>
+        <RailTip label="记一下">
+          <JournalButton />
+        </RailTip>
+        <RailTip label="钉钉直达">
+          <DingGroupsMenu />
+        </RailTip>
+        <RailTip label="微信">
+          <WeChatButton />
+        </RailTip>
+        <RailTip label="收藏夹">
+          <CustomLinksMenu />
+        </RailTip>
+      </div>
+      <RailTip label="设置">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="设置"
+          onClick={onOpenSettings}
+          className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <HugeiconsIcon icon={Settings01Icon} size={18} strokeWidth={1.75} />
+        </Button>
       </RailTip>
     </nav>
   );

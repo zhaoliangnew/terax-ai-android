@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod browser;
+pub mod browser_automation;
 pub mod claude_chat;
 pub mod codex_chat;
 pub mod control;
@@ -15,3 +16,4 @@ pub mod secrets;
 pub mod shell;
 pub mod vibrancy;
 pub mod workspace;
+pub mod qoder_chat;

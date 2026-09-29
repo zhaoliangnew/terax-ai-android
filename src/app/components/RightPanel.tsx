@@ -1,7 +1,13 @@
 import { cn } from "@/lib/utils";
 import { native } from "@/modules/ai/lib/native";
 import { BranchChip } from "@/modules/android-run/BranchChip";
-import { EMPTY_TABS, useWebTabsStore } from "@/modules/browser/webTabsStore";
+import {
+  EMPTY_TABS,
+  NO_PROJECT_ROOT,
+  OPEN_IN_BROWSER,
+  REVEAL_RIGHT_PANEL,
+  useWebTabsStore,
+} from "@/modules/browser/webTabsStore";
 import {
   EMPTY_PROJECT_FILES,
   ProjectFilesPane,
@@ -14,13 +20,17 @@ import {
   Globe02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { listen } from "@tauri-apps/api/event";
 import {
   type ComponentProps,
   lazy,
   Suspense,
+  useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 const DevicePanel = lazy(() => import("@/modules/android-run/DevicePanel"));
 const WebTab = lazy(() =>
@@ -79,6 +89,7 @@ type SourceProps = Omit<
 >;
 
 type Props = {
+  tabBarHost?: HTMLElement | null;
   tab: RightTab;
   onTabChange: (tab: RightTab) => void;
   /** 有安卓工程才有投屏 tab。 */
@@ -97,6 +108,7 @@ type Props = {
  * 第一次点开才挂载,没用过就不拉编辑器和 git 那一套。
  */
 export function RightPanel({
+  tabBarHost,
   tab,
   onTabChange,
   hasDevice,
@@ -120,27 +132,81 @@ export function RightPanel({
 
   // 每个工程各自的网页标签页(内嵌浏览器)。选中网页时固定 tab 让位。
   // 用固定的空数组:`?? []` 每次渲染都新建,zustand 会当成变了 → 无限刷新
-  const webTabs = useWebTabsStore((s) =>
-    root ? (s.byRoot[root] ?? EMPTY_TABS) : EMPTY_TABS,
-  );
+  // 没进工程时也能开网页(AI 也要能开),归到一个公共组里
+  const webRoot = root ?? NO_PROJECT_ROOT;
+  const webRootRef = useRef(webRoot);
+  webRootRef.current = webRoot;
+  const allWebTabs = useWebTabsStore((s) => s.byRoot);
+  const webTabs = allWebTabs[webRoot] ?? EMPTY_TABS;
   const addWebTab = useWebTabsStore((s) => s.add);
   const removeWebTab = useWebTabsStore((s) => s.remove);
   const setWebTitle = useWebTabsStore((s) => s.setTitle);
-  const [activeWeb, setActiveWeb] = useState<string | null>(null);
-  // 切工程、或选中的网页被关掉:回到固定 tab
+  // 每个工程各记各的选中网页:切到别的工程再切回来,还停在原来那个网页上
+  const [activeWebByRoot, setActiveWebByRoot] = useState<
+    Record<string, string | null>
+  >({});
+  const activeWeb = activeWebByRoot[webRoot] ?? null;
+  const setActiveWeb = useCallback((id: string | null) => {
+    const r = webRootRef.current;
+    setActiveWebByRoot((m) => (m[r] === id ? m : { ...m, [r]: id }));
+  }, []);
+  // 选中的网页被关掉:回到固定 tab
   useEffect(() => {
     if (activeWeb && !webTabs.some((t) => t.id === activeWeb)) {
       setActiveWeb(null);
     }
-  }, [activeWeb, webTabs]);
+  }, [activeWeb, webTabs, setActiveWeb]);
 
+  const selectWebTab = (id: string) => {
+    setActiveWeb(id);
+    window.dispatchEvent(new Event(REVEAL_RIGHT_PANEL));
+  };
   const openWebTab = () => {
-    if (!root) return;
-    setActiveWeb(addWebTab(root, "about:blank"));
+    selectWebTab(addWebTab(webRoot, "about:blank"));
   };
   const closeWebTab = (id: string) => {
-    if (root) removeWebTab(root, id);
+    removeWebTab(webRoot, id);
   };
+
+  // AI 工具(terax-cli mcp)在内嵌浏览器里干活:它开的标签页加到当前这组,
+  // 它操作哪个标签页就切到哪个,右栏收起了也展开 —— 用户要看得见它在做什么
+  useEffect(() => {
+    const offs: (() => void)[] = [];
+    let alive = true;
+    const keep = (p: Promise<() => void>) =>
+      p.then((u) => (alive ? offs.push(u) : u())).catch(() => {});
+    const show = (id: string) => {
+      setActiveWeb(id);
+      window.dispatchEvent(new Event(REVEAL_RIGHT_PANEL));
+    };
+    keep(
+      listen<{ label: string; url: string }>("web://ai-open", (e) => {
+        useWebTabsStore
+          .getState()
+          .addWithId(webRootRef.current, e.payload.label, e.payload.url);
+        show(e.payload.label);
+      }),
+    );
+    keep(
+      listen<{ label: string }>("web://ai-activity", (e) => {
+        const tabs =
+          useWebTabsStore.getState().byRoot[webRootRef.current] ?? EMPTY_TABS;
+        if (tabs.some((t) => t.id === e.payload.label)) show(e.payload.label);
+      }),
+    );
+    // 界面里别处(聊天点了 html 文件)要开网页:新开一个标签页
+    const onOpen = (e: Event) => {
+      const url = (e as CustomEvent<{ url?: string }>).detail?.url;
+      if (!url) return;
+      show(useWebTabsStore.getState().add(webRootRef.current, url));
+    };
+    window.addEventListener(OPEN_IN_BROWSER, onOpen);
+    return () => {
+      alive = false;
+      for (const off of offs) off();
+      window.removeEventListener(OPEN_IN_BROWSER, onOpen);
+    };
+  }, [setActiveWeb]);
   const selectFixed = (t: RightTab) => {
     setActiveWeb(null);
     onTabChange(t);
@@ -152,71 +218,84 @@ export function RightPanel({
     </div>
   );
 
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div
-        role="tablist"
-        aria-label="右栏"
-        className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1.5"
-      >
-        {tabs.map((t) => (
+  const tabBar = (
+    <div
+      role="tablist"
+      aria-label="右栏"
+      className={cn(
+        "flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto bg-frame px-2",
+        tabBarHost ? "h-full" : "h-11 border-b border-border/60",
+      )}
+    >
+      {tabs.map((t) => (
+        <button
+          key={t}
+          type="button"
+          role="tab"
+          aria-selected={t === current && !activeWeb}
+          onClick={() => selectFixed(t)}
+          className={cn(
+            // 选中只换底色和字色,不加粗:加粗会把字撑宽,切一下整排跳一下
+            "h-8 min-w-16 shrink-0 cursor-pointer rounded-lg border border-transparent px-3 text-[13px] font-normal transition-colors focus-visible:outline-2 focus-visible:outline-ring",
+            t === current && !activeWeb
+              ? "border-foreground/15 bg-foreground/[0.08] text-foreground"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+          )}
+        >
+          {RIGHT_TAB_LABELS[t]}
+        </button>
+      ))}
+      {/* 每个工程独立的网页标签页,跟在仓库后面 */}
+      {webTabs.map((wt) => (
+        <span
+          key={wt.id}
+          className={cn(
+            "group/wt flex h-8 w-60 shrink-0 items-center gap-2 rounded-lg border border-transparent pr-1.5 pl-2.5 text-[13px] font-normal transition-colors",
+            activeWeb === wt.id
+              ? "border-foreground/15 bg-foreground/[0.08] text-foreground"
+              : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+          )}
+        >
           <button
-            key={t}
             type="button"
             role="tab"
-            aria-selected={t === current && !activeWeb}
-            onClick={() => selectFixed(t)}
-            className={cn(
-              // 选中只换底色和字色,不加粗:加粗会把字撑宽,切一下整排跳一下
-              "h-8 min-w-16 cursor-pointer rounded-md px-4 text-[13px] font-medium transition-colors",
-              t === current && !activeWeb
-                ? "bg-foreground/10 text-foreground"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-            )}
+            aria-selected={activeWeb === wt.id}
+            title={wt.title}
+            onClick={() => selectWebTab(wt.id)}
+            className="flex h-full min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left focus-visible:outline-2 focus-visible:outline-ring"
           >
-            {RIGHT_TAB_LABELS[t]}
+            <HugeiconsIcon
+              icon={Globe02Icon}
+              size={14}
+              strokeWidth={1.75}
+              className="shrink-0"
+            />
+            <span className="truncate">{wt.title}</span>
           </button>
-        ))}
-        {/* 每个工程独立的网页标签页,跟在仓库后面 */}
-        {webTabs.map((wt) => (
-          <span
-            key={wt.id}
-            className={cn(
-              "group/wt flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-md pr-1 pl-2.5 text-[13px] transition-colors",
-              activeWeb === wt.id
-                ? "bg-foreground/10 text-foreground"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-            )}
-          >
-            <button
-              type="button"
-              onClick={() => setActiveWeb(wt.id)}
-              className="flex max-w-32 cursor-pointer items-center gap-1.5"
-            >
-              <HugeiconsIcon icon={Globe02Icon} size={13} strokeWidth={1.75} />
-              <span className="truncate">{wt.title}</span>
-            </button>
-            <button
-              type="button"
-              aria-label="关闭标签页"
-              onClick={() => closeWebTab(wt.id)}
-              className="flex size-4 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-foreground/15 group-hover/wt:opacity-70 hover:!opacity-100"
-            >
-              <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
-            </button>
-          </span>
-        ))}
-        {root && (
           <button
             type="button"
-            onClick={openWebTab}
-            title="新建网页标签页"
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+            aria-label="关闭标签页"
+            onClick={() => closeWebTab(wt.id)}
+            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
           >
-            <HugeiconsIcon icon={Add01Icon} size={15} strokeWidth={2} />
+            <HugeiconsIcon icon={Cancel01Icon} size={11} strokeWidth={2} />
           </button>
-        )}
-      </div>
+        </span>
+      ))}
+      <button
+        type="button"
+        onClick={openWebTab}
+        title="新建网页标签页"
+        className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+      >
+        <HugeiconsIcon icon={Add01Icon} size={15} strokeWidth={2} />
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {tabBarHost ? createPortal(tabBar, tabBarHost) : tabBar}
       <div className="relative min-h-0 flex-1">
         {/* 投屏一直挂着:切到非安卓工程时卸载的话,投屏会话就断了 */}
         <div
@@ -269,19 +348,22 @@ export function RightPanel({
             )}
           </div>
         )}
-        {/* 网页标签页:各开各的 Chrome target,切走只隐藏不卸载,会话不断 */}
-        {webTabs.map((wt) => (
-          <div key={wt.id} className="absolute inset-0">
-            <Suspense fallback={null}>
-              <WebTab
-                tabId={wt.id}
-                initialUrl={wt.url}
-                visible={activeWeb === wt.id}
-                onTitle={(t) => root && setWebTitle(root, wt.id, t)}
-              />
-            </Suspense>
-          </div>
-        ))}
+        {/* 网页标签页:所有工程的都挂着,切走(换 tab 或换工程)只隐藏不卸载,
+            页面和登录状态都留着 */}
+        {Object.entries(allWebTabs).flatMap(([r, list]) =>
+          list.map((wt) => (
+            <div key={wt.id} className="absolute inset-0">
+              <Suspense fallback={null}>
+                <WebTab
+                  tabId={wt.id}
+                  initialUrl={wt.url}
+                  visible={r === webRoot && activeWeb === wt.id}
+                  onTitle={(t) => setWebTitle(r, wt.id, t)}
+                />
+              </Suspense>
+            </div>
+          )),
+        )}
       </div>
     </div>
   );

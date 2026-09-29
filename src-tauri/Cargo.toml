@@ -76,7 +76,27 @@ keyring = { version = "3.6", default-features = false, features = [
 	"apple-native",
 ] }
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSUserDefaults"] }
+objc2-foundation = { version = "0.3", features = [
+	"NSString",
+	"NSUserDefaults",
+	"NSError",
+	"NSData",
+	"NSDictionary",
+] }
+# 内嵌浏览器给 AI 用:原生 WKWebView 执行 JS 并拿回结果、截图(tauri 的 eval
+# 拿不到返回值)。版本跟 wry 用的保持一致
+objc2-web-kit = { version = "0.3", features = [
+	"WKWebView",
+	"WKSnapshotConfiguration",
+	"block2",
+	"objc2-app-kit",
+] }
+objc2-app-kit = { version = "0.3", features = [
+	"NSImage",
+	"NSImageRep",
+	"NSBitmapImageRep",
+] }
+block2 = "0.6"
 window-vibrancy = "0.8"
 
 # WebKitGTK can't read external clipboard copies; mac/win webviews can.
