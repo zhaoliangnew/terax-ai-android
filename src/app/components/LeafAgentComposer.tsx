@@ -378,8 +378,8 @@ export function LeafAgentChat({
               session?.error ?? null,
             )}
             permissions={session?.permissions ?? []}
-            onPermission={(id, allow, always) =>
-              api.respond(leafId, id, allow, always)
+            onPermission={(id, allow, always, input, message) =>
+              api.respond(leafId, id, allow, always, input, message)
             }
             onQuote={(text) => addQuote(leafId, text)}
           />
@@ -567,8 +567,8 @@ export function LeafChatDock({
               session?.error ?? null,
             )}
             permissions={session?.permissions ?? []}
-            onPermission={(id, allow, always) =>
-              api.respond(leafId, id, allow, always)
+            onPermission={(id, allow, always, input, message) =>
+              api.respond(leafId, id, allow, always, input, message)
             }
             onQuote={(text) => addQuote(leafId, text)}
           />

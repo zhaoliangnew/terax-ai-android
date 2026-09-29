@@ -338,11 +338,20 @@ function createSdkChat(cmds: SdkChatCommands) {
     id: string,
     allow: boolean,
     always = false,
+    updatedInput?: Record<string, unknown>,
+    message?: string,
   ) {
     const cur = store.getState().sessions[leafId];
     if (!cur) return;
     patch(leafId, { permissions: cur.permissions.filter((p) => p.id !== id) });
-    send(leafId, { op: "permission", id, allow, always });
+    send(leafId, {
+      op: "permission",
+      id,
+      allow,
+      always,
+      updatedInput,
+      message,
+    });
   }
 
   function interruptChat(leafId: number) {

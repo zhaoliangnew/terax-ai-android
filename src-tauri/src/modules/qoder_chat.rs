@@ -387,13 +387,24 @@ pub fn qoder_chat_send(
             let allow = op.get("allow").and_then(Value::as_bool).unwrap_or(false);
             let always = op.get("always").and_then(Value::as_bool).unwrap_or(false);
             let decision = if allow {
-                let mut d = json!({"behavior": "allow", "updatedInput": ask.input});
+                // AskUserQuestion 的回答由界面填进 updatedInput 带回来
+                let input = op
+                    .get("updatedInput")
+                    .filter(|v| v.is_object())
+                    .cloned()
+                    .unwrap_or(ask.input);
+                let mut d = json!({"behavior": "allow", "updatedInput": input});
                 if always && !ask.suggestions.is_null() {
                     d["updatedPermissions"] = ask.suggestions;
                 }
                 d
             } else {
-                json!({"behavior": "deny", "message": "用户拒绝了这次操作"})
+                let msg = op
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .filter(|m| !m.trim().is_empty())
+                    .unwrap_or("用户拒绝了这次操作");
+                json!({"behavior": "deny", "message": msg})
             };
             write_line(
                 &s.stdin,

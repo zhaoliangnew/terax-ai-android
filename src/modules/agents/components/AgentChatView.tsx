@@ -39,7 +39,13 @@ type Props = {
   statusText: string | null;
   /** Claude 等着确认的操作(可能不止一个)。 */
   permissions: PermissionAsk[];
-  onPermission: (id: string, allow: boolean, always?: boolean) => void;
+  onPermission: (
+    id: string,
+    allow: boolean,
+    always?: boolean,
+    updatedInput?: Record<string, unknown>,
+    message?: string,
+  ) => void;
   /** 选中一段文字点"添加到对话":作为引用塞进输入框。 */
   onQuote: (text: string) => void;
 };
@@ -324,6 +330,238 @@ const TOOL_VERB: Record<string, string> = {
   WebSearch: "联网搜索",
 };
 
+type AskQuestion = {
+  question: string;
+  header?: string;
+  multiSelect?: boolean;
+  options?: { label: string; description?: string }[];
+};
+
+/**
+ * AI 用 AskUserQuestion 问你:把问题和选项画成能点的样子(不是一坨 JSON),
+ * 选好了回答放进 updatedInput.answers 带回去(单选是选项名,多选用", "连起来)。
+ */
+function QuestionCard({
+  ask,
+  onAnswer,
+}: {
+  ask: PermissionAsk;
+  onAnswer: (
+    allow: boolean,
+    always?: boolean,
+    updatedInput?: Record<string, unknown>,
+  ) => void;
+}) {
+  const questions = (
+    Array.isArray(ask.input.questions) ? ask.input.questions : []
+  ) as AskQuestion[];
+  const [picked, setPicked] = useState<Record<number, string[]>>({});
+  const [other, setOther] = useState<Record<number, string>>({});
+  const toggle = (qi: number, label: string, multi: boolean) =>
+    setPicked((cur) => {
+      const now = cur[qi] ?? [];
+      const next = multi
+        ? now.includes(label)
+          ? now.filter((l) => l !== label)
+          : [...now, label]
+        : [label];
+      return { ...cur, [qi]: next };
+    });
+  const answerOf = (qi: number) => {
+    const typed = other[qi]?.trim();
+    const labels = [...(picked[qi] ?? []), ...(typed ? [typed] : [])];
+    return labels.join(", ");
+  };
+  const ready = questions.every((_, qi) => answerOf(qi) !== "");
+  const submit = () => {
+    const answers: Record<string, string> = {};
+    questions.forEach((q, qi) => {
+      answers[q.question] = answerOf(qi);
+    });
+    onAnswer(true, false, { ...ask.input, answers });
+  };
+  return (
+    <div className="mt-4 flex flex-col gap-4 rounded-2xl border border-sky-500/35 bg-sky-500/[0.05] p-4">
+      {questions.map((q, qi) => (
+        <div key={q.question} className="flex flex-col gap-2">
+          <div className="flex items-baseline gap-2">
+            {q.header && (
+              <span className="shrink-0 rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">
+                {q.header}
+              </span>
+            )}
+            <span className="text-[13.5px] font-medium">{q.question}</span>
+            {q.multiSelect && (
+              <span className="shrink-0 text-[11.5px] text-muted-foreground">
+                可多选
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {(q.options ?? []).map((o) => {
+              const on = (picked[qi] ?? []).includes(o.label);
+              return (
+                <button
+                  key={o.label}
+                  type="button"
+                  onClick={() => toggle(qi, o.label, !!q.multiSelect)}
+                  className={cn(
+                    "flex cursor-pointer flex-col items-start gap-0.5 rounded-lg border px-3 py-2 text-left transition-colors",
+                    on
+                      ? "border-sky-400/70 bg-sky-500/15"
+                      : "border-border hover:bg-foreground/[0.06]",
+                  )}
+                >
+                  <span className="text-[13px] font-medium">{o.label}</span>
+                  {o.description && (
+                    <span className="text-[12px] text-muted-foreground">
+                      {o.description}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            <input
+              value={other[qi] ?? ""}
+              onChange={(e) =>
+                setOther((cur) => ({ ...cur, [qi]: e.target.value }))
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && ready) submit();
+              }}
+              placeholder="其他(自己写)"
+              className="h-8 rounded-lg border border-border bg-transparent px-3 text-[12.5px] outline-none focus:border-ring"
+            />
+          </div>
+        </div>
+      ))}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={!ready}
+          onClick={submit}
+          className="h-8 cursor-pointer rounded-lg bg-foreground px-3.5 text-[12.5px] font-medium text-background hover:bg-foreground/85 disabled:cursor-default disabled:opacity-40"
+        >
+          提交回答
+        </button>
+        <button
+          type="button"
+          onClick={() => onAnswer(false)}
+          className="h-8 cursor-pointer rounded-lg border border-border px-3.5 text-[12.5px] text-muted-foreground hover:bg-foreground/10"
+        >
+          不回答
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 计划模式做完、请你批准计划(ExitPlanMode):把计划按 Markdown 画出来;
+ * 批准就开始动手,不批准可以写修改意见让它接着改计划。
+ */
+function PlanCard({
+  ask,
+  onAnswer,
+}: {
+  ask: PermissionAsk;
+  onAnswer: (
+    allow: boolean,
+    always?: boolean,
+    updatedInput?: Record<string, unknown>,
+    message?: string,
+  ) => void;
+}) {
+  const [feedback, setFeedback] = useState("");
+  const plan = str(ask.input.plan);
+  const keepPlanning = () =>
+    onAnswer(
+      false,
+      false,
+      undefined,
+      feedback.trim()
+        ? `先别执行,按这些意见改计划:${feedback.trim()}`
+        : "先别执行,继续完善计划",
+    );
+  return (
+    <div className="mt-4 flex flex-col gap-3 rounded-2xl border border-violet-500/35 bg-violet-500/[0.05] p-4">
+      <div className="flex items-center gap-2 text-[13.5px] font-medium">
+        <span className="size-2 shrink-0 rounded-full bg-violet-400" />
+        计划做好了,确认后开始执行
+      </div>
+      <div className="max-h-[50vh] overflow-auto rounded-lg bg-foreground/[0.04] px-4 py-2 text-[13px]">
+        <MessageResponse components={CHAT_COMPONENTS}>{plan}</MessageResponse>
+      </div>
+      <input
+        value={feedback}
+        onChange={(e) => setFeedback(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && feedback.trim()) keepPlanning();
+        }}
+        placeholder="有要改的地方?写在这里,点「继续规划」"
+        className="h-8 rounded-lg border border-border bg-transparent px-3 text-[12.5px] outline-none focus:border-ring"
+      />
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => onAnswer(true)}
+          className="h-8 cursor-pointer rounded-lg bg-foreground px-3.5 text-[12.5px] font-medium text-background hover:bg-foreground/85"
+        >
+          批准,开始执行
+        </button>
+        <button
+          type="button"
+          onClick={keepPlanning}
+          className="h-8 cursor-pointer rounded-lg border border-border px-3.5 text-[12.5px] hover:bg-foreground/10"
+        >
+          继续规划
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 改文件 / 写文件要确认时,把改动本身摆出来(不只一个路径)。 */
+function EditPreview({ input }: { input: Record<string, unknown> }) {
+  const edits: { old: string; neu: string }[] = Array.isArray(input.edits)
+    ? (input.edits as Record<string, unknown>[]).map((e) => ({
+        old: str(e.old_string),
+        neu: str(e.new_string),
+      }))
+    : input.old_string !== undefined || input.new_string !== undefined
+      ? [{ old: str(input.old_string), neu: str(input.new_string) }]
+      : [];
+  const content = str(input.content);
+  if (!edits.length && !content) return null;
+  const lines = (text: string, sign: "-" | "+") =>
+    text.split("\n").map((l, i) => (
+      <div
+        // biome-ignore lint/suspicious/noArrayIndexKey: 行号就是身份
+        key={`${sign}${i}`}
+        className={
+          sign === "-"
+            ? "bg-red-500/10 text-red-300"
+            : "bg-emerald-500/10 text-emerald-300"
+        }
+      >
+        {sign} {l}
+      </div>
+    ));
+  return (
+    <div className="max-h-64 overflow-auto rounded-lg bg-foreground/[0.05] px-3 py-2 font-mono text-[12px] whitespace-pre-wrap break-all">
+      {content
+        ? lines(clip(content), "+")
+        : edits.map((e, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: 顺序即身份
+            <div key={i} className={i > 0 ? "mt-2" : ""}>
+              {e.old && lines(clip(e.old), "-")}
+              {lines(clip(e.neu), "+")}
+            </div>
+          ))}
+    </div>
+  );
+}
+
 /** Claude 要做某件事、等你点头:照 Codex 的确认卡片,把要做的事摆出来。 */
 function PermissionCard({
   ask,
@@ -347,6 +585,7 @@ function PermissionCard({
       <div className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-foreground/[0.05] px-3 py-2 font-mono text-[12px]">
         {clip(detail)}
       </div>
+      <EditPreview input={ask.input} />
       {str(ask.input.description) && (
         <div className="text-[12.5px] text-muted-foreground">
           {str(ask.input.description)}
@@ -615,13 +854,34 @@ export function AgentChatView({
                 </div>
               );
             })}
-            {permissions.map((p) => (
-              <PermissionCard
-                key={p.id}
-                ask={p}
-                onAnswer={(allow, always) => onPermission(p.id, allow, always)}
-              />
-            ))}
+            {permissions.map((p) =>
+              p.toolName === "ExitPlanMode" && str(p.input.plan) ? (
+                <PlanCard
+                  key={p.id}
+                  ask={p}
+                  onAnswer={(allow, always, input, message) =>
+                    onPermission(p.id, allow, always, input, message)
+                  }
+                />
+              ) : p.toolName === "AskUserQuestion" &&
+                Array.isArray(p.input.questions) ? (
+                <QuestionCard
+                  key={p.id}
+                  ask={p}
+                  onAnswer={(allow, always, input) =>
+                    onPermission(p.id, allow, always, input)
+                  }
+                />
+              ) : (
+                <PermissionCard
+                  key={p.id}
+                  ask={p}
+                  onAnswer={(allow, always) =>
+                    onPermission(p.id, allow, always)
+                  }
+                />
+              ),
+            )}
             {statusText && (
               <div className="mt-6 text-center text-[12px] text-muted-foreground">
                 {statusText}

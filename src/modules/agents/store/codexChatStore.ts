@@ -104,6 +104,8 @@ const conns = new Map<number, Conn>();
 const ready = new Map<number, Promise<void>>();
 /** 权限确认卡片的 id → app-server 那边请求的 id。 */
 const asks = new Map<string, RpcId>();
+/** Codex 的提问(requestUserInput):问题原文 → 它的问题 id,回答时按 id 回。 */
+const questionIds = new Map<string, Map<string, string>>();
 
 const lastThreadKey = (cwd: string) => `terax.codexChat.lastThread:${cwd}`;
 
@@ -208,6 +210,12 @@ function handleServerRequest(leafId: number, conn: Conn, msg: RpcMessage) {
     reason?: string | null;
     itemId?: string;
     grantRoot?: string | null;
+    questions?: {
+      id: string;
+      header?: string;
+      question: string;
+      options?: { label: string; description?: string }[] | null;
+    }[];
   };
   let toolName: string;
   let input: Record<string, unknown>;
@@ -224,8 +232,24 @@ function handleServerRequest(leafId: number, conn: Conn, msg: RpcMessage) {
         ? card.input.file_path
         : (params.grantRoot ?? "");
     input = { file_path: paths };
+  } else if (msg.method === "item/tool/requestUserInput") {
+    // Codex 问你问题:换成和 Claude AskUserQuestion 一样的形状,共用问答卡片
+    toolName = "AskUserQuestion";
+    const ids = new Map<string, string>();
+    input = {
+      questions: (params.questions ?? []).map((q) => {
+        ids.set(q.question, q.id);
+        return {
+          question: q.question,
+          header: q.header,
+          multiSelect: false,
+          options: q.options ?? [],
+        };
+      }),
+    };
+    questionIds.set(`codex-${String(id)}`, ids);
   } else {
-    // 别的交互(追问、MCP 授权…)聊天里还没做界面,直接回绝,免得它一直等
+    // 别的交互(MCP 表单、权限提升…)聊天里还没做界面,直接回绝,免得它一直等
     conn.respondError(id, "not supported in Terax chat");
     return;
   }
@@ -453,6 +477,7 @@ export function respondCodexPermission(
   askId: string,
   allow: boolean,
   always = false,
+  updatedInput?: Record<string, unknown>,
 ) {
   const cur = useCodexChatStore.getState().sessions[leafId];
   const rid = asks.get(askId);
@@ -460,7 +485,22 @@ export function respondCodexPermission(
   if (!cur) return;
   patch(leafId, { permissions: cur.permissions.filter((p) => p.id !== askId) });
   asks.delete(askId);
+  const ids = questionIds.get(askId);
+  questionIds.delete(askId);
   if (rid === undefined || !conn) return;
+  if (ids) {
+    // 提问的回答:{ answers: { 问题id: { answers: [回答] } } };不回答就给空的
+    const given = (allow ? updatedInput?.answers : undefined) as
+      | Record<string, string>
+      | undefined;
+    const answers: Record<string, { answers: string[] }> = {};
+    for (const [question, qid] of ids) {
+      const a = given?.[question];
+      if (a) answers[qid] = { answers: [a] };
+    }
+    conn.respond(rid, { answers });
+    return;
+  }
   conn.respond(rid, {
     decision: allow ? (always ? "acceptForSession" : "accept") : "decline",
   });

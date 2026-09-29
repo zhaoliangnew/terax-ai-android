@@ -40,6 +40,10 @@ export type ChatApi = {
     id: string,
     allow: boolean,
     always?: boolean,
+    /** 改过的工具参数(AskUserQuestion 的回答放这里)。 */
+    updatedInput?: Record<string, unknown>,
+    /** 拒绝时带给 AI 的话(比如对计划的修改意见)。 */
+    message?: string,
   ) => void;
   interrupt: (leafId: number) => void;
   setModel: (leafId: number, model: string) => void;

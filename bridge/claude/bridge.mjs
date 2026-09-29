@@ -182,6 +182,10 @@ async function handle(cmd) {
       if (cmd.allow) {
         p.resolve({
           behavior: "allow",
+          // AskUserQuestion 的回答放在 updatedInput.answers 里带回去
+          ...(cmd.updatedInput && typeof cmd.updatedInput === "object"
+            ? { updatedInput: cmd.updatedInput }
+            : {}),
           ...(cmd.always && p.suggestions
             ? { updatedPermissions: p.suggestions }
             : {}),
