@@ -142,15 +142,17 @@ fn write_line(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<(), Strin
 
 const INIT_REQUEST: &str = "terax-init";
 
-/// One CLI stdout line → what the chat view gets (if anything).
+/// One CLI stdout line → what the chat view gets (possibly nothing).
 fn translate(
     line: &str,
     stdin: &Arc<Mutex<ChildStdin>>,
     pending: &Arc<Mutex<HashMap<String, PendingAsk>>>,
     models: &Arc<Mutex<Option<Value>>>,
     usage: &Arc<Mutex<QoderUsage>>,
-) -> Option<Value> {
-    let v: Value = serde_json::from_str(line).ok()?;
+) -> Vec<Value> {
+    let Ok(v) = serde_json::from_str::<Value>(line) else {
+        return vec![];
+    };
     if v.get("type").and_then(Value::as_str) == Some("result") {
         if let Some(c) = v.get("total_credits").and_then(Value::as_f64) {
             usage.lock().unwrap().credits = Some(c);
@@ -158,8 +160,12 @@ fn translate(
     }
     match v.get("type").and_then(Value::as_str) {
         Some("control_request") => {
-            let id = v.get("request_id").and_then(Value::as_str)?.to_string();
-            let req = v.get("request")?;
+            let (Some(id), Some(req)) = (
+                v.get("request_id").and_then(Value::as_str).map(String::from),
+                v.get("request"),
+            ) else {
+                return vec![];
+            };
             if req.get("subtype").and_then(Value::as_str) != Some("can_use_tool") {
                 // Hooks, MCP bridging…: nothing on our side handles those.
                 let _ = write_line(
@@ -167,7 +173,7 @@ fn translate(
                     &json!({"type": "control_response", "response": {
                         "subtype": "error", "request_id": id, "error": "not supported"}}),
                 );
-                return None;
+                return vec![];
             }
             let input = req.get("input").cloned().unwrap_or_else(|| json!({}));
             let suggestions = req
@@ -188,13 +194,15 @@ fn translate(
                     suggestions,
                 },
             );
-            Some(json!({
+            vec![json!({
                 "type": "permission_request", "id": id, "toolName": tool,
                 "input": input, "blockedPath": blocked, "canAlways": can_always,
-            }))
+            })]
         }
         Some("control_response") => {
-            let resp = v.get("response")?;
+            let Some(resp) = v.get("response") else {
+                return vec![];
+            };
             if resp.get("request_id").and_then(Value::as_str) == Some(INIT_REQUEST) {
                 let init = resp.get("response").unwrap_or(&Value::Null);
                 usage.lock().unwrap().plan = init
@@ -203,11 +211,17 @@ fn translate(
                     .map(String::from);
                 let list = chat_models(init);
                 *models.lock().unwrap() = Some(list.clone());
-                return Some(json!({ "type": "models", "models": list }));
+                let mut out = vec![json!({ "type": "models", "models": list })];
+                // Commands with descriptions only come here; the chat keeps
+                // them for its "/" menu.
+                if let Some(commands) = init.get("commands").filter(|c| c.is_array()) {
+                    out.push(json!({ "type": "commands", "commands": commands }));
+                }
+                return out;
             }
-            None
+            vec![]
         }
-        _ => Some(json!({ "type": "sdk", "msg": v })),
+        _ => vec![json!({ "type": "sdk", "msg": v })],
     }
 }
 
@@ -305,10 +319,12 @@ pub async fn qoder_chat_start(
         );
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                if let Some(evt) = translate(&line, &r_stdin, &r_pending, &r_models, &r_usage) {
-                    if r_events.send(evt.to_string()).is_err() {
-                        break;
-                    }
+                let events = translate(&line, &r_stdin, &r_pending, &r_models, &r_usage);
+                if events
+                    .iter()
+                    .any(|evt| r_events.send(evt.to_string()).is_err())
+                {
+                    break;
                 }
             }
             let status = reader_sessions
@@ -425,6 +441,8 @@ pub fn qoder_chat_send(
             }
             Ok(())
         }
+        // The list already went out with the initialize response.
+        "commands" => Ok(()),
         "usage" => {
             let u = s.usage.lock().unwrap().clone();
             let _ = s.events.send(usage_event(&u).to_string());

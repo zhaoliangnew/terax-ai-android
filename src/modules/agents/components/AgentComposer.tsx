@@ -27,6 +27,11 @@ import {
 import { toast } from "sonner";
 import { isImagePath } from "../lib/chatItems";
 import type { ContextUsage } from "../lib/sdkChat";
+import {
+  commandQuery,
+  matchCommands,
+  type SlashCommandOption,
+} from "../lib/slashCommands";
 import type { UsageInfo } from "../lib/usage";
 import { AGENT_NAMES, type ChatAgent } from "../store/chatProviders";
 import type { ModelOption } from "../store/claudeChatStore";
@@ -75,6 +80,12 @@ type Props = {
   /** 输入框上方显示的当前分支;在 worktree 里再带上 worktree 名。 */
   branch?: { name: string; worktree: string | null } | null;
   onOpenUsage: () => void;
+  /** 输入 / (Codex 是 $)能选的技能和命令;undefined = 还在读。 */
+  commands?: SlashCommandOption[];
+  /** 选择菜单弹出来时去拉一次最新的列表。 */
+  onOpenCommands?: () => void;
+  /** 正在压缩上下文:压缩按钮显示进行中。 */
+  compacting?: boolean;
 };
 
 type ModeOption = {
@@ -367,6 +378,9 @@ export function AgentComposer({
   context,
   compact = false,
   onOpenUsage,
+  commands,
+  onOpenCommands,
+  compacting = false,
 }: Props) {
   const agentName = AGENT_NAMES[agent];
   const modeOptions = agent === "codex" ? CODEX_MODES : CLAUDE_MODES;
@@ -475,6 +489,50 @@ export function AgentComposer({
 
   const showStop = working && !canSend;
 
+  // 打 / 选技能(Codex 的技能是 $名字,/ 也能呼出来);Claude 的命令只能放开头
+  const [caret, setCaret] = useState(0);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const [cmdIndex, setCmdIndex] = useState(0);
+  const cmdQuery = commandQuery(
+    text.slice(0, caret),
+    agent === "codex" ? ["$", "/"] : ["/"],
+    agent === "codex",
+  );
+  const matches = cmdQuery
+    ? matchCommands(commands ?? [], cmdQuery.query).slice(0, 60)
+    : [];
+  // 打了字还一个都对不上(多半是在写路径)就不弹,空着的菜单挡眼
+  const cmdOpen =
+    cmdQuery !== null &&
+    dismissed !== text &&
+    (matches.length > 0 || cmdQuery.query === "" || commands === undefined);
+  const activeCmd = Math.min(cmdIndex, Math.max(0, matches.length - 1));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在菜单弹出的那一下拉
+  useEffect(() => {
+    if (cmdOpen) onOpenCommands?.();
+  }, [cmdOpen]);
+  const cmdListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    cmdListRef.current
+      ?.querySelector(`[data-cmd-index="${activeCmd}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeCmd]);
+  const pickCommand = (c: SlashCommandOption) => {
+    if (!cmdQuery) return;
+    const before = text.slice(0, cmdQuery.start);
+    const insert = `${agent === "codex" ? "$" : "/"}${c.name} `;
+    const next = before + insert + text.slice(caret).replace(/^ /, "");
+    const pos = before.length + insert.length;
+    setText(next);
+    setCaret(pos);
+    requestAnimationFrame(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
   return (
     // 整条不透明:输入框本身是半透明的灰,底下不能透出任何东西
     <div
@@ -483,6 +541,66 @@ export function AgentComposer({
         compact ? "" : "bg-background px-6 pt-1 pb-4",
       )}
     >
+      {cmdOpen && (
+        <div
+          className={cn(
+            "absolute inset-x-0 bottom-full z-30 mx-auto max-w-3xl",
+            compact ? "px-1 pb-1" : "px-6",
+          )}
+        >
+          <div
+            ref={cmdListRef}
+            role="listbox"
+            aria-label="选择技能"
+            className="flex max-h-72 flex-col overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+          >
+            {matches.length === 0 ? (
+              <div className="px-2.5 py-1.5 text-[12.5px] text-muted-foreground">
+                {commands === undefined ? "正在读取技能…" : "没有可用的技能"}
+              </div>
+            ) : (
+              matches.map((c, i) => (
+                <button
+                  key={c.name}
+                  type="button"
+                  role="option"
+                  aria-selected={i === activeCmd}
+                  data-cmd-index={i}
+                  // 按下不抢输入框的焦点
+                  onMouseDown={(e) => e.preventDefault()}
+                  onMouseMove={() => i !== activeCmd && setCmdIndex(i)}
+                  onClick={() => pickCommand(c)}
+                  className={cn(
+                    "flex w-full cursor-pointer items-baseline gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px]",
+                    i === activeCmd && "bg-foreground/10",
+                  )}
+                >
+                  <span className="shrink-0 font-medium">
+                    {agent === "codex" ? "$" : "/"}
+                    {c.name}
+                  </span>
+                  {c.argumentHint && (
+                    <span className="shrink-0 text-muted-foreground/70">
+                      {c.argumentHint}
+                    </span>
+                  )}
+                  <span
+                    className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground"
+                    title={c.description}
+                  >
+                    {c.description}
+                  </span>
+                  {c.builtin && (
+                    <span className="shrink-0 text-[11px] text-muted-foreground/70">
+                      命令
+                    </span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
       {branch && !compact && (
         <div className="mx-auto flex max-w-3xl items-center gap-1 px-2 pb-1.5 text-[12px] text-muted-foreground">
           <HugeiconsIcon
@@ -613,7 +731,12 @@ export function AgentComposer({
           ref={inputRef}
           rows={1}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            setCaret(e.target.selectionStart);
+            setCmdIndex(0);
+          }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onPaste={(e) => {
             // 剪贴板里有图(截图)就存成临时文件当附件;同时有文字的(从网页
             // 复制的图文)文字照常粘进去
@@ -631,6 +754,26 @@ export function AgentComposer({
           onKeyDown={(e) => {
             // 输入法选词、把拼音直接上屏时的回车是给输入法的,不是发送
             if (isImeKey(e)) return;
+            if (cmdOpen && matches.length > 0) {
+              const n = matches.length;
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setCmdIndex(
+                  (activeCmd + (e.key === "ArrowDown" ? 1 : n - 1)) % n,
+                );
+                return;
+              }
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                pickCommand(matches[activeCmd]);
+                return;
+              }
+            }
+            if (cmdOpen && e.key === "Escape") {
+              e.preventDefault();
+              setDismissed(text);
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();
@@ -642,6 +785,9 @@ export function AgentComposer({
           placeholder="随心输入"
           spellCheck={false}
           title="回车发送,Shift+回车换行"
+          role="combobox"
+          aria-expanded={cmdOpen}
+          aria-autocomplete="list"
           className={cn(
             "resize-none bg-transparent text-[14px] leading-[21px] outline-none placeholder:text-[#666666]",
             compact
@@ -765,11 +911,16 @@ export function AgentComposer({
             <ContextMeter context={context} />
             <button
               type="button"
-              title="压缩上下文"
+              title={compacting ? "正在压缩上下文" : "压缩上下文"}
+              disabled={compacting}
               onClick={onCompact}
-              className={cn(toolText, context && "pl-1")}
+              className={cn(
+                toolText,
+                context && "pl-1",
+                compacting && "cursor-default text-foreground",
+              )}
             >
-              压缩
+              {compacting ? "压缩中…" : "压缩"}
             </button>
           </span>
           <button

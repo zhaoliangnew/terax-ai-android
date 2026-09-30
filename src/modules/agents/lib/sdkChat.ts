@@ -1,4 +1,9 @@
 import { type ChatItem, toolSummary } from "./chatItems";
+import {
+  commandsFromInit,
+  normalizeCommands,
+  type SlashCommandOption,
+} from "./slashCommands";
 
 /**
  * Claude Agent SDK 的消息流 → 聊天列表。纯状态机,不碰 IO:桥接进程转过来
@@ -35,6 +40,17 @@ export type SdkMessage = {
   usage?: SdkUsage & { context_usage_ratio?: number };
   /** result:按模型的用量,带上下文窗口大小。 */
   modelUsage?: Record<string, { contextWindow?: number }>;
+  /** system/init:可用的命令、技能名字;commands_changed:带说明的完整列表。 */
+  slash_commands?: string[];
+  skills?: string[];
+  terminal_slash_commands?: string[];
+  commands?: unknown[];
+  /** system/status:"compacting" 表示正在压缩上下文。 */
+  status?: string | null;
+  /** system/compact_boundary:压缩前后的 token 数。 */
+  compact_metadata?: { pre_tokens?: number; post_tokens?: number };
+  /** Claude Code 自己塞的用户消息(压缩后的摘要等),不是用户说的话。 */
+  isSynthetic?: boolean;
   event?: {
     type?: string;
     index?: number;
@@ -59,6 +75,12 @@ export type ContextUsage = {
   ratio: number | null;
 };
 
+function shortTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${Math.round(n / 1000)}k`;
+  return String(n);
+}
+
 function resultText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -75,7 +97,13 @@ export class SdkChatModel {
   permissionMode: string | null = null;
   /** 一轮对话还没结束(从发出去到收到 result)。 */
   working = false;
+  /** 正在压缩上下文(大会话要好几分钟)。 */
+  compacting = false;
   context: ContextUsage | null = null;
+  /** 输入 / 弹出的技能和命令;null = 还不知道。 */
+  commands: SlashCommandOption[] | null = null;
+  /** 已经拿到带说明的列表,init 里只有名字的那份不再覆盖它。 */
+  private commandsDetailed = false;
 
   private toolIndex = new Map<string, number>();
   /** 流式拼出来的回复:`message id:块序号` → items 下标。 */
@@ -105,6 +133,11 @@ export class SdkChatModel {
     this.working = true;
   }
 
+  setCommands(raw: unknown) {
+    this.commands = normalizeCommands(raw);
+    this.commandsDetailed = true;
+  }
+
   addNote(text: string, ts = Date.now()) {
     this.items.push({ kind: "note", id: this.nextId("n"), text, ts });
   }
@@ -130,7 +163,7 @@ export class SdkChatModel {
                   .map((b) => b.text as string)
               : [];
         const text = texts.join("\n").trim();
-        if (text && !text.startsWith("<")) {
+        if (text && !text.startsWith("<") && !msg.isSynthetic) {
           this.items.push({ kind: "user", id: this.nextId("u"), text, ts: 0 });
         }
         this.applyUser(msg);
@@ -147,6 +180,37 @@ export class SdkChatModel {
           this.sessionId = msg.session_id ?? this.sessionId;
           this.model = msg.model ?? this.model;
           this.permissionMode = msg.permissionMode ?? this.permissionMode;
+          if (!this.commandsDetailed) this.commands = commandsFromInit(msg);
+          return true;
+        }
+        if (msg.subtype === "status") {
+          const next = msg.status === "compacting";
+          if (next === this.compacting) return false;
+          this.compacting = next;
+          return true;
+        }
+        if (msg.subtype === "compact_boundary") {
+          this.compacting = false;
+          const pre = msg.compact_metadata?.pre_tokens;
+          const post = msg.compact_metadata?.post_tokens;
+          this.addNote(
+            pre && post
+              ? `上下文已压缩:${shortTokens(pre)} → ${shortTokens(post)} tokens`
+              : "上下文已压缩",
+            ts,
+          );
+          if (post) {
+            const window = this.context?.window ?? null;
+            this.context = {
+              tokens: post,
+              window,
+              ratio: window ? post / window : null,
+            };
+          }
+          return true;
+        }
+        if (msg.subtype === "commands_changed") {
+          this.setCommands(msg.commands);
           return true;
         }
         return false;
@@ -159,6 +223,7 @@ export class SdkChatModel {
         return this.applyUser(msg);
       case "result":
         this.working = false;
+        this.compacting = false;
         this.trackResultContext(msg);
         for (const i of this.streamIndex.values()) {
           const it = this.items[i];

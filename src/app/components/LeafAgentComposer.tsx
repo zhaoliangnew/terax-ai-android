@@ -372,6 +372,7 @@ export function LeafAgentChat({
             items={session?.items ?? []}
             agentName={AGENT_NAMES[agent]}
             working={session?.working ?? false}
+            compacting={session?.compacting ?? false}
             statusText={statusText(
               AGENT_NAMES[agent],
               session?.status,
@@ -515,6 +516,9 @@ export function LeafAgentComposer({
         context={session?.context}
         compact={compact}
         onOpenUsage={() => api.requestUsage(leafId)}
+        commands={session?.commands}
+        onOpenCommands={() => api.requestCommands(leafId)}
+        compacting={session?.compacting ?? false}
         onCompact={() => api.compact(leafId)}
         onNewChat={() => {
           const dir = cwd();
@@ -561,6 +565,7 @@ export function LeafChatDock({
             items={session?.items ?? []}
             agentName={AGENT_NAMES[agent]}
             working={session?.working ?? false}
+            compacting={session?.compacting ?? false}
             statusText={statusText(
               AGENT_NAMES[agent],
               session?.status,

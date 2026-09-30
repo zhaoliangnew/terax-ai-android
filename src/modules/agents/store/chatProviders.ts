@@ -3,6 +3,7 @@ import {
   ensureChat,
   interruptChat,
   qoderChat,
+  requestCommands,
   requestModels,
   requestUsage,
   respondPermission,
@@ -17,6 +18,7 @@ import {
   compactCodex,
   ensureCodexChat,
   interruptCodex,
+  requestCodexCommands,
   requestCodexModels,
   requestCodexUsage,
   respondCodexPermission,
@@ -50,6 +52,8 @@ export type ChatApi = {
   setMode: (leafId: number, mode: string) => void;
   requestModels: (leafId: number) => void;
   requestUsage: (leafId: number) => void;
+  /** 拉一次输入 / (Codex 是 $)能选的技能和命令。 */
+  requestCommands: (leafId: number) => void;
   compact: (leafId: number) => void;
   restart: (leafId: number, cwd: string) => void;
   /** 推理强度、快速档:只有 Codex 有。 */
@@ -67,6 +71,7 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     setMode: setChatMode,
     requestModels,
     requestUsage,
+    requestCommands,
     compact: (leafId) => sendChat(leafId, "/compact"),
     restart: restartChat,
   },
@@ -79,6 +84,7 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     setMode: setCodexMode,
     requestModels: requestCodexModels,
     requestUsage: requestCodexUsage,
+    requestCommands: requestCodexCommands,
     compact: compactCodex,
     restart: restartCodex,
     setEffort: setCodexEffort,
@@ -93,6 +99,7 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     setMode: qoderChat.setChatMode,
     requestModels: qoderChat.requestModels,
     requestUsage: qoderChat.requestUsage,
+    requestCommands: qoderChat.requestCommands,
     compact: (leafId) => qoderChat.sendChat(leafId, "/compact"),
     restart: qoderChat.restartChat,
   },

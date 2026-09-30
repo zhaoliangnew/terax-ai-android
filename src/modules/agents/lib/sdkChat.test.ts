@@ -13,6 +13,49 @@ const assistant = (id: string, content: unknown[]): SdkMessage => ({
 });
 
 describe("SdkChatModel", () => {
+  it("tracks compaction and notes the new context size", () => {
+    const m = new SdkChatModel();
+    m.addUser("/compact");
+    m.apply({ type: "system", subtype: "status", status: "compacting" });
+    expect(m.compacting).toBe(true);
+    m.apply({
+      type: "system",
+      subtype: "compact_boundary",
+      compact_metadata: { pre_tokens: 550_000, post_tokens: 12_000 },
+    });
+    expect(m.compacting).toBe(false);
+    expect(m.context?.tokens).toBe(12_000);
+    expect(m.items[m.items.length - 1]).toMatchObject({
+      kind: "note",
+      text: "上下文已压缩:550k → 12k tokens",
+    });
+    m.apply({ type: "result", subtype: "success" });
+    expect(m.working).toBe(false);
+  });
+
+  it("keeps init command names until the detailed list arrives", () => {
+    const m = new SdkChatModel();
+    m.apply({
+      type: "system",
+      subtype: "init",
+      slash_commands: ["pdf"],
+      skills: ["pdf"],
+    });
+    expect(m.commands?.map((c) => c.name)).toEqual(["pdf"]);
+    m.setCommands([{ name: "pdf", description: "PDF files" }]);
+    m.apply({ type: "system", subtype: "init", slash_commands: [] });
+    expect(m.commands?.[0].description).toBe("PDF files");
+  });
+
+  it("hides synthetic user messages when loading history", () => {
+    const m = new SdkChatModel();
+    m.loadHistory([
+      { type: "user", isSynthetic: true, message: { content: "summary" } },
+      { type: "user", message: { content: "hi" } },
+    ]);
+    expect(m.items.map((i) => i.kind === "user" && i.text)).toEqual(["hi"]);
+  });
+
   it("reads session info from init", () => {
     const m = new SdkChatModel();
     m.apply({

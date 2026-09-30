@@ -6,12 +6,13 @@
 //   {op:"send", text, attachments?: string[]}   absolute paths picked by the user
 //   {op:"permission", id, allow, always?, message?}
 //   {op:"interrupt"} | {op:"set_model", model} | {op:"set_mode", mode}
-//   {op:"models"} | {op:"usage"}
+//   {op:"models"} | {op:"usage"} | {op:"commands"}
 // bridge -> host (stdout, one JSON object per line)
 //   {type:"sdk", msg}                      every SDK message, untouched
 //   {type:"permission_request", id, toolName, input, blockedPath, canAlways}
 //   {type:"models", models:[{value, displayName, description}]}
 //   {type:"usage", usage}                  plan rate-limit windows (/usage)
+//   {type:"commands", commands:[{name, description, argumentHint, builtin?}]}
 //   {type:"history", messages}             earlier turns of a resumed session
 //   {type:"error", message} | {type:"closed"}
 // Diagnostics go to stderr only; stdout carries protocol lines exclusively.
@@ -217,6 +218,17 @@ async function handle(cmd) {
           description: m.description ?? "",
         })),
       });
+      return;
+    }
+    case "commands": {
+      // 技能和斜杠命令(带说明),输入框里打 / 选;之后有变化走 commands_changed
+      let commands = [];
+      try {
+        commands = (await session?.supportedCommands()) ?? [];
+      } catch (e) {
+        log("commands unavailable", String(e));
+      }
+      out({ type: "commands", commands });
       return;
     }
     case "usage": {

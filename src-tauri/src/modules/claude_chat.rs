@@ -26,6 +26,7 @@ const HOST_OPS: &[&str] = &[
     "set_mode",
     "models",
     "usage",
+    "commands",
 ];
 
 struct Session {
@@ -270,6 +271,7 @@ mod tests {
     fn allows_known_ops_only() {
         assert!(validate_host_line(r#"{"op":"send","text":"hi"}"#).is_ok());
         assert!(validate_host_line(r#"{"op":"permission","id":"1","allow":true}"#).is_ok());
+        assert!(validate_host_line(r#"{"op":"commands"}"#).is_ok());
         assert!(validate_host_line(r#"{"op":"start","cwd":"/"}"#).is_err());
         assert!(validate_host_line(r#"{"text":"no op"}"#).is_err());
         assert!(validate_host_line("not json").is_err());

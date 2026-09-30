@@ -1,6 +1,11 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 import { CodexChatModel, type CodexTurn, unwrapShell } from "../lib/codexChat";
+import {
+  commandsFromCodexSkills,
+  mentionedSkills,
+  type SlashCommandOption,
+} from "../lib/slashCommands";
 import { type CodexSnapshot, codexUsage } from "../lib/usage";
 import type { ChatSession, ModelOption } from "./claudeChatStore";
 
@@ -424,8 +429,12 @@ export function ensureCodexChat(leafId: number, cwd: string, fresh = false) {
 
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
 
-/** 图片直接给 Codex 看;别的文件列出路径让它自己读。 */
-function buildInput(text: string, attachments: string[]) {
+/** 图片直接给 Codex 看;别的文件列出路径让它自己读;$技能 带上技能本身。 */
+function buildInput(
+  text: string,
+  attachments: string[],
+  skills: readonly SlashCommandOption[],
+) {
   const images = attachments.filter((f) => IMAGE_EXT.test(f));
   const others = attachments.filter((f) => !IMAGE_EXT.test(f));
   let body = text.trim();
@@ -438,6 +447,11 @@ function buildInput(text: string, attachments: string[]) {
   return [
     ...images.map((path) => ({ type: "localImage", path })),
     { type: "text", text: body, text_elements: [] },
+    ...mentionedSkills(text, skills).map((s) => ({
+      type: "skill",
+      name: s.name,
+      path: s.path,
+    })),
   ];
 }
 
@@ -457,7 +471,11 @@ export function sendCodex(
       if (!m.threadId) throw new Error("会话还没建好");
       return conn.request("turn/start", {
         threadId: m.threadId,
-        input: buildInput(text, attachments),
+        input: buildInput(
+          text,
+          attachments,
+          useCodexChatStore.getState().sessions[leafId]?.commands ?? [],
+        ),
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
         ...(m.model ? { model: m.model } : {}),
@@ -588,6 +606,16 @@ export function requestCodexModels(leafId: number) {
       patch(leafId, { models: list });
     })
     .catch(() => {});
+}
+
+/** 这个目录能用的技能(输入 $ 选),结果落在 session.commands。 */
+export function requestCodexCommands(leafId: number) {
+  const conn = conns.get(leafId);
+  if (!conn) return;
+  void (ready.get(leafId) ?? Promise.resolve())
+    .then(() => conn.request("skills/list", {}))
+    .then((res) => patch(leafId, { commands: commandsFromCodexSkills(res) }))
+    .catch(() => patch(leafId, { commands: [] }));
 }
 
 /** 查套餐用量,结果落在 session.usage。 */

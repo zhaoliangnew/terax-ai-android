@@ -9,6 +9,7 @@ import { localHtmlPath } from "@/modules/browser/lib/url";
 import { openInBrowser } from "@/modules/browser/webTabsStore";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
+  ArrowDown02Icon,
   ArrowRight01Icon,
   Copy01Icon,
   Globe02Icon,
@@ -19,6 +20,7 @@ import {
   createContext,
   type ReactNode,
   useContext,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -35,6 +37,8 @@ type Props = {
   items: ChatItem[];
   agentName: string;
   working: boolean;
+  /** 正在压缩上下文(一轮进行中的特殊情况)。 */
+  compacting?: boolean;
   /** 正在启动 / 已结束 / 启动失败时的一行提示;正常对话时为 null。 */
   statusText: string | null;
   /** Claude 等着确认的操作(可能不止一个)。 */
@@ -630,6 +634,7 @@ export function AgentChatView({
   agentName,
   working,
   statusText,
+  compacting = false,
   permissions,
   onPermission,
   onQuote,
@@ -694,12 +699,37 @@ export function AgentChatView({
   // 贴底跟随:人一往上滚就松开,滚回底部附近再重新贴上。以前每次渲染都
   // 拽回底部,流式输出时一秒刷几十次,根本翻不上去。
   const stickRef = useRef(true);
+  const contentRef = useRef<HTMLDivElement>(null);
+  /** 离底部还远:右下角挂一个"回到底部"。 */
+  const [awayFromBottom, setAwayFromBottom] = useState(false);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: 内容变了才需要跟到底
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [items, working, permissions, statusText]);
+
+  // Markdown、代码高亮、图片是渲染之后才把高度撑开的,只在消息变化时跟一下
+  // 会停在半截(刚打开旧会话时最明显);高度一变、还贴着底就再跟一次
+  useEffect(() => {
+    const box = scrollRef.current;
+    const content = contentRef.current;
+    if (!box || !content) return;
+    const follow = () => {
+      if (stickRef.current) box.scrollTop = box.scrollHeight;
+    };
+    const ro = new ResizeObserver(follow);
+    ro.observe(content);
+    ro.observe(box);
+    return () => ro.disconnect();
+  }, []);
+
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickRef.current = true;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
 
   const lastIndex = items.length - 1;
   const last = items[lastIndex];
@@ -717,9 +747,10 @@ export function AgentChatView({
           }}
           onScroll={(e) => {
             const el = e.currentTarget;
-            if (el.scrollHeight - el.scrollTop - el.clientHeight < 24) {
-              stickRef.current = true;
-            }
+            const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+            if (gap < 24) stickRef.current = true;
+            // 差一屏以上才算"离开了底部",贴底时的细小抖动不让按钮闪
+            setAwayFromBottom(gap > el.clientHeight * 0.5);
             updateActiveTurn(el);
           }}
           // 点工具条上的按钮也会冒上来一个 mouseup:那时选区还在,不跳过的话
@@ -767,7 +798,10 @@ export function AgentChatView({
             </div>
           )}
           {/* 全局默认不让选字(桌面应用的习惯),聊天内容要能选中复制 */}
-          <div className="select-text mx-auto flex max-w-3xl cursor-text flex-col px-6 pt-8 pb-12">
+          <div
+            ref={contentRef}
+            className="select-text mx-auto flex max-w-3xl cursor-text flex-col px-6 pt-8 pb-12"
+          >
             {items.length === 0 && !working && !statusText && (
               <div className="pt-24 text-center text-[13px] text-muted-foreground">
                 给 {agentName} 发条消息开始吧
@@ -889,10 +923,23 @@ export function AgentChatView({
             )}
             {/* 回复已经在往外流了就不再挂"正在思考":它在文字下面跟着一跳一跳 */}
             {working && permissions.length === 0 && !replying && (
-              <Shimmer className="mt-4 text-[13px]">正在思考</Shimmer>
+              <Shimmer className="mt-4 text-[13px]">
+                {compacting ? "正在压缩上下文,会话大的话要几分钟" : "正在思考"}
+              </Shimmer>
             )}
           </div>
         </div>
+        {awayFromBottom && (
+          <button
+            type="button"
+            title="回到底部"
+            aria-label="回到底部"
+            onClick={scrollToBottom}
+            className="absolute bottom-4 left-1/2 z-20 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-popover text-muted-foreground shadow-lg transition-colors hover:text-foreground"
+          >
+            <HugeiconsIcon icon={ArrowDown02Icon} size={15} strokeWidth={2} />
+          </button>
+        )}
         {turns.length > 1 && (
           <TurnRail turns={turns} active={activeTurn} onJump={jumpTo} />
         )}

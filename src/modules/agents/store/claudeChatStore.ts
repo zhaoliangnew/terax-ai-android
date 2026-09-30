@@ -6,6 +6,7 @@ import {
   SdkChatModel,
   type SdkMessage,
 } from "../lib/sdkChat";
+import type { SlashCommandOption } from "../lib/slashCommands";
 import { type ClaudeUsage, claudeUsage, type UsageInfo } from "../lib/usage";
 
 export type PermissionAsk = {
@@ -47,6 +48,10 @@ export type ChatSession = {
   usage?: UsageInfo | null;
   /** 当前上下文大小和占比;还没对话过是 null/undefined。 */
   context?: ContextUsage | null;
+  /** 输入 / 能选的技能和命令(Codex 是 $ 选技能);undefined = 还没拿到。 */
+  commands?: SlashCommandOption[];
+  /** 正在压缩上下文:界面把"正在思考"换成"正在压缩上下文"。 */
+  compacting?: boolean;
 };
 
 type Store = { sessions: Record<number, ChatSession> };
@@ -119,6 +124,8 @@ function createSdkChat(cmds: SdkChatCommands) {
       permissionMode: m.permissionMode,
       sessionId: m.sessionId,
       context: m.context,
+      commands: m.commands ?? undefined,
+      compacting: m.compacting,
     });
   }
 
@@ -148,6 +155,7 @@ function createSdkChat(cmds: SdkChatCommands) {
       message?: string;
       models?: ModelOption[];
       usage?: ClaudeUsage;
+      commands?: unknown[];
     } & Partial<PermissionAsk>;
     try {
       evt = JSON.parse(line);
@@ -202,6 +210,10 @@ function createSdkChat(cmds: SdkChatCommands) {
       }
       case "models":
         patch(leafId, { models: evt.models ?? [] });
+        return;
+      case "commands":
+        m.setCommands(evt.commands);
+        snapshot(leafId);
         return;
       case "usage":
         patch(leafId, { usage: evt.usage ? claudeUsage(evt.usage) : null });
@@ -383,6 +395,11 @@ function createSdkChat(cmds: SdkChatCommands) {
     send(leafId, { op: "models" });
   }
 
+  /** 带说明的技能/命令列表,结果落在 session.commands。 */
+  function requestCommands(leafId: number) {
+    send(leafId, { op: "commands" });
+  }
+
   /** 查套餐用量(/usage 的数据),结果落在 session.usage。 */
   function requestUsage(leafId: number) {
     send(leafId, { op: "usage" });
@@ -412,6 +429,7 @@ function createSdkChat(cmds: SdkChatCommands) {
     setChatMode,
     requestModels,
     requestUsage,
+    requestCommands,
     restartChat,
   };
 }
@@ -433,6 +451,7 @@ export const {
   setChatMode,
   requestModels,
   requestUsage,
+  requestCommands,
   restartChat,
 } = claude;
 
