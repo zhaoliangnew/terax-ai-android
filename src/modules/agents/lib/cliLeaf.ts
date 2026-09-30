@@ -13,3 +13,27 @@ export function cliLeafId(leafId: number, agent: CliAgent): number {
 export function cliLeafIds(leafId: number): number[] {
   return CLI_AGENTS.map((a) => cliLeafId(leafId, a));
 }
+
+/** 会话 id 要拼进终端命令,只认字母数字和 -_,别的一律不接。 */
+export function isSafeSessionId(id: string): boolean {
+  return /^[A-Za-z0-9_-]{1,128}$/.test(id);
+}
+
+/** 命令行还没跑起来:带上"接着这个会话"启动。 */
+export function resumeLaunchCommand(
+  agent: CliAgent,
+  base: string,
+  sessionId: string,
+): string {
+  return agent === "codex"
+    ? `${base} resume ${sessionId}`
+    : `${base} --resume ${sessionId}`;
+}
+
+/** 命令行里 AI 已经在跑:在它里面切到这个会话;Codex 的 /resume 不接 id,切不了。 */
+export function resumeInCliInput(
+  agent: CliAgent,
+  sessionId: string,
+): string | null {
+  return agent === "codex" ? null : `/resume ${sessionId}\r`;
+}

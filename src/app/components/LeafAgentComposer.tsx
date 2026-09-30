@@ -1,5 +1,10 @@
 import { cn } from "@/lib/utils";
-import { cliLeafId } from "@/modules/agents/lib/cliLeaf";
+import {
+  cliLeafId,
+  isSafeSessionId,
+  resumeInCliInput,
+  resumeLaunchCommand,
+} from "@/modules/agents/lib/cliLeaf";
 import { findAgentLauncher } from "@/modules/agents/lib/launcher";
 import {
   type AgentViewMode,
@@ -10,6 +15,7 @@ import {
   AGENT_NAMES,
   CHAT_APIS,
   type ChatAgent,
+  chatSessionNow,
   useChatSession,
 } from "@/modules/agents/store/chatProviders";
 import { native } from "@/modules/ai/lib/native";
@@ -204,13 +210,33 @@ const AGENT_OPTIONS: { value: CliAgent; label: string }[] = [
 ];
 
 /** 在命令行终端里把 AI 跑起来(先装好通知钩子,状态灯要靠它)。 */
-function launchCli(id: number, agent: CliAgent) {
+function launchCli(id: number, agent: CliAgent, resume: string | null) {
   const hooks = findAgentLauncher(agent).supportsHooks
     ? invoke("agent_enable_hooks", { agent }).catch(() => {})
     : Promise.resolve();
+  const base = AGENT_QUICK_COMMANDS[agent];
+  const cmd = resume ? resumeLaunchCommand(agent, base, resume) : base;
   void hooks
     .then(() => whenSessionReady(id))
-    .then(() => writeToSession(id, `${AGENT_QUICK_COMMANDS[agent]}\r`));
+    .then(() => writeToSession(id, `${cmd}\r`));
+}
+
+/**
+ * 聊天里有对话的话,切命令行时把这个会话交过去:聊天这边先停掉(两边同时
+ * 往一个会话里写会乱),返回要在命令行里接着的会话 id。
+ */
+function handOffChat(leafId: number, agent: CliAgent): string | null {
+  const chat = chatSessionNow(agent, leafId);
+  const id = chat?.sessionId;
+  if (!chat || !id || !isSafeSessionId(id)) return null;
+  // 还没说过话的会话没存盘,命令行接不上
+  if (!chat.items.some((i) => i.kind === "user")) return null;
+  if (chat.working) {
+    toast.info("聊天这一轮还没结束,命令行里先不接这个会话");
+    return null;
+  }
+  CHAT_APIS[agent].suspend(leafId);
+  return id;
 }
 
 /**
@@ -230,10 +256,21 @@ function openLeafCli(
       return;
     }
     store.openCli(leafId, agent);
-    launchCli(id, agent);
+    launchCli(id, agent, handOffChat(leafId, agent));
   } else {
+    const resume = handOffChat(leafId, agent);
     void leafHasForegroundJob(id).then((busy) => {
-      if (!busy) launchCli(id, agent);
+      if (!busy) {
+        launchCli(id, agent, resume);
+        return;
+      }
+      if (!resume) return;
+      const input = resumeInCliInput(agent, resume);
+      if (input) void writeToSession(id, input);
+      else
+        toast.info(
+          `${AGENT_NAMES[agent]} 命令行已经在跑别的会话,退出后再点"命令行"就接上聊天`,
+        );
     });
   }
   store.setMode(leafId, "cli");

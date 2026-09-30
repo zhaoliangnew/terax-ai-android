@@ -652,6 +652,19 @@ export function compactCodex(leafId: number) {
 }
 
 /** 结束当前会话,开一个新的。 */
+/** 把会话交给命令行:停掉 app-server,线程记录留着,切回聊天时接着读。 */
+export function suspendCodex(leafId: number) {
+  const chatId = useCodexChatStore.getState().sessions[leafId]?.chatId;
+  if (chatId != null) void invoke("codex_chat_stop", { id: chatId });
+  useCodexChatStore.setState((s) => {
+    const { [leafId]: _, ...rest } = s.sessions;
+    return { sessions: rest };
+  });
+  models.delete(leafId);
+  conns.delete(leafId);
+  ready.delete(leafId);
+}
+
 export function restartCodex(leafId: number, cwd: string) {
   const chatId = useCodexChatStore.getState().sessions[leafId]?.chatId;
   if (chatId != null) void invoke("codex_chat_stop", { id: chatId });

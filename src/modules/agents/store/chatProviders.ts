@@ -11,6 +11,7 @@ import {
   sendChat,
   setChatMode,
   setChatModel,
+  suspendChat,
   useClaudeChatStore,
   useQoderChatStore,
 } from "./claudeChatStore";
@@ -28,6 +29,7 @@ import {
   setCodexMode,
   setCodexModel,
   setCodexServiceTier,
+  suspendCodex,
   useCodexChatStore,
 } from "./codexChatStore";
 
@@ -56,6 +58,8 @@ export type ChatApi = {
   requestCommands: (leafId: number) => void;
   compact: (leafId: number) => void;
   restart: (leafId: number, cwd: string) => void;
+  /** 会话交给命令行:停掉聊天这边的进程,记录留着以后接着读。 */
+  suspend: (leafId: number) => void;
   /** 推理强度、快速档:只有 Codex 有。 */
   setEffort?: (leafId: number, effort: string) => void;
   setServiceTier?: (leafId: number, tier: string) => void;
@@ -74,6 +78,7 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     requestCommands,
     compact: (leafId) => sendChat(leafId, "/compact"),
     restart: restartChat,
+    suspend: suspendChat,
   },
   codex: {
     ensure: (leafId, cwd) => ensureCodexChat(leafId, cwd),
@@ -87,6 +92,7 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     requestCommands: requestCodexCommands,
     compact: compactCodex,
     restart: restartCodex,
+    suspend: suspendCodex,
     setEffort: setCodexEffort,
     setServiceTier: setCodexServiceTier,
   },
@@ -102,6 +108,7 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     requestCommands: qoderChat.requestCommands,
     compact: (leafId) => qoderChat.sendChat(leafId, "/compact"),
     restart: qoderChat.restartChat,
+    suspend: qoderChat.suspendChat,
   },
 };
 
@@ -110,6 +117,20 @@ export const AGENT_NAMES: Record<ChatAgent, string> = {
   codex: "Codex",
   qoder: "Qoder",
 };
+
+/** 这个窗格眼下的聊天会话(不订阅,事件处理里用)。 */
+export function chatSessionNow(
+  agent: ChatAgent,
+  leafId: number,
+): ChatSession | undefined {
+  const store =
+    agent === "codex"
+      ? useCodexChatStore
+      : agent === "qoder"
+        ? useQoderChatStore
+        : useClaudeChatStore;
+  return store.getState().sessions[leafId];
+}
 
 /** 这个窗格在用的那个聊天会话。 */
 export function useChatSession(

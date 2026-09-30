@@ -405,6 +405,24 @@ function createSdkChat(cmds: SdkChatCommands) {
     send(leafId, { op: "usage" });
   }
 
+  /**
+   * 把会话交给命令行:停掉这边的进程,会话记录留在磁盘上;切回聊天时
+   * ensureChat 按"这个目录上次的会话"读回来,命令行里聊的也在。
+   */
+  function suspendChat(leafId: number) {
+    const cur = store.getState().sessions[leafId];
+    const cwd = leafCwd.get(leafId);
+    if (cwd && cur?.sessionId) rememberSession(cwd, cur.sessionId);
+    if (cur?.chatId != null) void invoke(cmds.stop, { id: cur.chatId });
+    store.setState((s) => {
+      const { [leafId]: _, ...rest } = s.sessions;
+      return { sessions: rest };
+    });
+    models.delete(leafId);
+    queued.delete(leafId);
+    unconfirmed.delete(leafId);
+  }
+
   /** 结束当前会话,换一个新的(相当于终端里的 /clear)。 */
   function restartChat(leafId: number, cwd: string) {
     const chatId = store.getState().sessions[leafId]?.chatId;
@@ -431,6 +449,7 @@ function createSdkChat(cmds: SdkChatCommands) {
     requestUsage,
     requestCommands,
     restartChat,
+    suspendChat,
   };
 }
 
@@ -453,6 +472,7 @@ export const {
   requestUsage,
   requestCommands,
   restartChat,
+  suspendChat,
 } = claude;
 
 /** Qoder 聊天:Rust 直接起 qoderclicn,协议和 Claude 一样。 */
