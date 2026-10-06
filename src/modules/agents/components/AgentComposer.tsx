@@ -936,7 +936,13 @@ export function AgentComposer({
             >
               {modelLabel(model, models, agentName)}
               {agent === "codex" && effort && (
-                <span className="text-muted-foreground">
+                <span
+                  className={
+                    effort === "ultra"
+                      ? "text-[#b48cf7]"
+                      : "text-muted-foreground"
+                  }
+                >
                   {effortLabel(effort)}
                 </span>
               )}

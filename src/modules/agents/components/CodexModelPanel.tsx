@@ -18,8 +18,26 @@ const EFFORT_LABELS: Record<string, string> = {
   high: "高",
   xhigh: "超高",
   max: "极高",
-  ultra: "最高",
+  // 照 Codex:最高一档是单独的产品名,不翻译
+  ultra: "Ultra",
 };
+
+const ULTRA = "ultra";
+
+/** Ultra 档滑条上的星点:位置固定,错开闪,不用随机数免得每次渲染跳。 */
+const SPARKS = [
+  [6, 30, 0],
+  [14, 68, 0.9],
+  [23, 42, 1.6],
+  [31, 74, 0.4],
+  [40, 26, 1.2],
+  [48, 58, 2],
+  [57, 36, 0.7],
+  [65, 70, 1.5],
+  [73, 30, 0.2],
+  [81, 60, 1.1],
+  [89, 40, 1.8],
+] as const;
 
 export function effortLabel(effort: string | null | undefined): string {
   return effort ? (EFFORT_LABELS[effort] ?? effort) : "";
@@ -54,6 +72,7 @@ function EffortSlider({
   const index = Math.max(0, value ? efforts.indexOf(value) : 0);
   const last = Math.max(1, efforts.length - 1);
   const pct = (index / last) * 100;
+  const ultra = value === ULTRA;
 
   const pick = (clientX: number) => {
     const el = trackRef.current;
@@ -103,19 +122,38 @@ function EffortSlider({
       {/* 圆钮和点都放在去掉两头留白的这一段里,两端的点正好在圆钮中心 */}
       <div ref={trackRef} className="relative h-full">
         <div
-          className="absolute top-0 bottom-0 -left-3.5 rounded-full bg-[#2c67c5] transition-[width] duration-100"
+          className={cn(
+            "absolute top-0 bottom-0 -left-3.5 overflow-hidden rounded-full transition-[width] duration-100",
+            ultra
+              ? "bg-[linear-gradient(90deg,#2f3fd0_0%,#6a5cf0_45%,#a578f5_75%,#c9a0fa_100%)]"
+              : "bg-[#2c67c5]",
+          )}
           style={{ width: `calc(${pct}% + 1.75rem)` }}
-        />
-        {efforts.map((e, i) => (
-          <span
-            key={e}
-            className={cn(
-              "absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
-              i <= index ? "bg-white/70" : "bg-foreground/40",
-            )}
-            style={{ left: `${(i / last) * 100}%` }}
-          />
-        ))}
+        >
+          {ultra &&
+            SPARKS.map(([x, y, delay]) => (
+              <span
+                key={`${x}-${y}`}
+                className="absolute size-[2px] animate-pulse rounded-full bg-white"
+                style={{
+                  left: `${x}%`,
+                  top: `${y}%`,
+                  animationDelay: `${delay}s`,
+                }}
+              />
+            ))}
+        </div>
+        {!ultra &&
+          efforts.map((e, i) => (
+            <span
+              key={e}
+              className={cn(
+                "absolute top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 rounded-full",
+                i <= index ? "bg-white/70" : "bg-foreground/40",
+              )}
+              style={{ left: `${(i / last) * 100}%` }}
+            />
+          ))}
         <span
           className="absolute top-1/2 size-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-md transition-[left] duration-100"
           style={{ left: `${pct}%` }}
@@ -220,7 +258,14 @@ export function CodexModelPanel({
           <HugeiconsIcon icon={FlashIcon} size={15} strokeWidth={1.75} />
         </button>
         <div className="flex min-w-0 flex-col items-center gap-0.5">
-          <span className="text-[13.5px] font-medium text-[#4d8ef7]">
+          <span
+            className={cn(
+              "text-[13.5px] font-medium",
+              (effort ?? current?.defaultEffort) === ULTRA
+                ? "text-[#b48cf7]"
+                : "text-[#4d8ef7]",
+            )}
+          >
             {effortLabel(effort ?? current?.defaultEffort) || "默认"}
           </span>
           <button
