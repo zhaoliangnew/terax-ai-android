@@ -3,10 +3,11 @@ import { useShallow } from "zustand/react/shallow";
 import {
   type AdbDevice,
   discoverModules,
-  findProjectRoot,
+  findProject,
   listDevices,
   setAdbOverride,
 } from "./lib/adb";
+import { hasDeviceSupport, type ProjectKind } from "./lib/projectKind";
 
 const ADB_PATH_KEY = "terax.android.adbPath";
 // Apply any saved override before the first adb call.
@@ -76,8 +77,9 @@ type AndroidRunState = {
   devices: AdbDevice[];
   devicesLoading: boolean;
 
-  /** Gradle project root of the active terminal tab; null outside a project. */
+  /** Project root of the active terminal tab; null outside a project. */
   projectRoot: string | null;
+  projectKind: ProjectKind | null;
   /** Per-product panel config, keyed by project root. */
   byProduct: Record<string, ProductConfig>;
   /** 用户手动配置的 adb 绝对路径(空=自动解析)。 */
@@ -105,6 +107,7 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
   devices: [],
   devicesLoading: false,
   projectRoot: null,
+  projectKind: null,
   byProduct: {},
   adbPath: savedAdbPath ?? "",
   deviceNotes: loadDeviceNotes(),
@@ -196,9 +199,12 @@ export const useAndroidRunStore = create<AndroidRunState>((set, get) => ({
   },
 
   setProjectRoot: async (cwd) => {
-    const root = cwd ? await findProjectRoot(cwd) : null;
-    set({ projectRoot: root });
-    if (!root || get().byProduct[root]) return;
+    const found = cwd ? await findProject(cwd) : null;
+    const root = found?.root ?? null;
+    set({ projectRoot: root, projectKind: found?.kind ?? null });
+    // 设备配置(选机、模块)只有安卓/Flutter 用得上
+    if (!root || !hasDeviceSupport(found?.kind ?? null)) return;
+    if (get().byProduct[root]) return;
     // First time seeing this product: seed config + discover modules.
     const firstOnline = get().devices.find((d) => d.state === "device");
     set((s) => ({

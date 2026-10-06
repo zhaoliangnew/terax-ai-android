@@ -41,6 +41,7 @@ import {
   findProjectRoot,
   getProjectLink,
   getTaskLink,
+  hasDeviceSupport,
   OpenInToolMenu,
   ProductLinkChip,
   ProjectLinksBar,
@@ -181,6 +182,18 @@ import { useTabCloseGuards } from "./hooks/useTabCloseGuards";
 import { useWorkspaceSwitcher } from "./hooks/useWorkspaceSwitcher";
 
 const RIGHT_TAB_KEY = "terax.rightPanel.tab";
+
+// 目录没了(工程搬家、置顶的旧路径)pty 会悄悄退到家目录:每点一次就多一个
+// 家目录终端,和点的那个目录对不上,也去不了重。不开,直接说清楚。
+async function dirUsable(path: string): Promise<boolean> {
+  try {
+    await native.canonicalize(path);
+    return true;
+  } catch {
+    sonnerToast.error("目录不存在,打不开终端", { description: path });
+    return false;
+  }
+}
 
 export default function App() {
   const {
@@ -416,6 +429,9 @@ export default function App() {
 
   // 当前产品(gradle 工程根),由 android-run 从活动终端 cwd 发现。
   const androidProjectRoot = useAndroidRunStore((s) => s.projectRoot);
+  const projectHasDevice = useAndroidRunStore((s) =>
+    hasDeviceSupport(s.projectKind),
+  );
   // worktree 目录藏在主工程的 .worktree 里,面包屑按原样切段会显示成
   // ".worktree / worktree_xxx",认不出是谁的 —— 展示一律换算成主工程,
   // worktree 名单独作为一段接在后面。
@@ -433,7 +449,7 @@ export default function App() {
     } catch {}
     return "device";
   });
-  const currentRightTab = effectiveRightTab(rightTab, !!androidProjectRoot);
+  const currentRightTab = effectiveRightTab(rightTab, projectHasDevice);
   const devicePanelRef = useRef<PanelImperativeHandle | null>(null);
   const deviceElementRef = useRef<HTMLDivElement | null>(null);
   const workspaceElementRef = useRef<HTMLDivElement | null>(null);
@@ -764,7 +780,8 @@ export default function App() {
 
   // 强制新开一个终端(右键「Open New Terminal」),不去重。
   const openNewTerminalAt = useCallback(
-    (path: string) => {
+    async (path: string) => {
+      if (!(await dirUsable(path))) return;
       const tabId = newTab(path);
       setTimeout(() => {
         const tab = tabsRef.current.find((x) => x.id === tabId);
@@ -949,6 +966,7 @@ export default function App() {
       // 顶部 tab 栏撤了,切工程全靠树:目标目录(安卓工程还认它的工程根)
       // 已有终端 tab 就切过去,不重复开。要多开一个走右键"新终端"。
       void (async () => {
+        if (!(await dirUsable(path))) return;
         const projectRoot = await findProjectRoot(path);
         const existing = tabsRef.current.find((t) => {
           if (t.kind !== "terminal" || t.spaceId !== activeSpaceIdRef.current)
@@ -960,7 +978,7 @@ export default function App() {
           setActiveId(existing.id);
           return;
         }
-        openNewTerminalAt(path);
+        void openNewTerminalAt(path);
       })();
     },
     [openNewTerminalAt, setActiveId],
@@ -2092,7 +2110,7 @@ export default function App() {
                         tabBarHost={zenMode ? null : rightTabBarHost}
                         tab={currentRightTab}
                         onTabChange={selectRightTab}
-                        hasDevice={!!androidProjectRoot}
+                        hasDevice={projectHasDevice}
                         root={rightPanelRoot}
                         filesState={
                           rightPanelRoot

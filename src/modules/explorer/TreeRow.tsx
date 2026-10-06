@@ -7,6 +7,8 @@ import {
   getCodeupOrgId,
   getProjectLink,
   openExternally,
+  PROJECT_KIND_BADGE,
+  PROJECT_KIND_LABEL,
   type ProjectKind,
   projexUrl,
 } from "@/modules/android-run";
@@ -18,7 +20,7 @@ import { FolderGlyph } from "./FolderGlyph";
 import { InlineInput } from "./InlineInput";
 import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
-import { fileIconUrl, namedIconUrl } from "./lib/iconResolver";
+import { fileIconUrl } from "./lib/iconResolver";
 
 /** 每一层缩进多少:12px 时子行名字几乎和父行对齐,层级看不出来。 */
 const INDENT = 18;
@@ -171,24 +173,7 @@ function EntryRowImpl(props: EntryRowProps) {
           >
             {AGENT_STATE_EMOJI[agentState]}
           </span>
-        ) : projectKind === "flutter" ? (
-          // 图标集里不一定有 flutter,拿不到就别渲染一个 src="" 的破图,
-          // 直接写个 Flutter 标签更清楚
-          (namedIconUrl("flutter") ?? "") ? (
-            <img
-              src={namedIconUrl("flutter") ?? ""}
-              alt=""
-              className="size-4 shrink-0"
-            />
-          ) : (
-            <span
-              title="Flutter 工程"
-              className="shrink-0 rounded bg-sky-500/15 px-1 text-[9px] font-semibold leading-4 text-sky-400"
-            >
-              Flutter
-            </span>
-          )
-        ) : (
+        ) : projectKind === "android" ? (
           <HugeiconsIcon
             icon={AndroidIcon}
             size={16}
@@ -201,7 +186,20 @@ function EntryRowImpl(props: EntryRowProps) {
                 : "text-muted-foreground/45",
             )}
           />
-        )
+        ) : projectKind ? (
+          // 其他工程的图标大多认不出来,直接写类型名
+          <span
+            title={PROJECT_KIND_LABEL[projectKind]}
+            className={cn(
+              "shrink-0 rounded px-1 text-[9px] font-semibold leading-4",
+              isActiveProject || isOpenedProject
+                ? "bg-emerald-500/15 text-emerald-500"
+                : "bg-muted-foreground/10 text-muted-foreground/70",
+            )}
+          >
+            {PROJECT_KIND_BADGE[projectKind]}
+          </span>
+        ) : null
       ) : isDir ? (
         <FolderGlyph open={isExpanded} />
       ) : iconUrl ? (

@@ -1,10 +1,18 @@
 import { IS_WINDOWS } from "@/lib/platform";
-import { native } from "@/modules/ai/lib/native";
+import { type DirEntry, native } from "@/modules/ai/lib/native";
 import {
   type AdbShellPlatform,
   buildAdbCommand,
   buildAdbDiscoveryCommand,
 } from "@/modules/android-run/lib/adbShell";
+import {
+  factsNeeded,
+  mayBeProjectDir,
+  type ProjectKind,
+  projectKindFromEntries,
+} from "@/modules/android-run/lib/projectKind";
+import { currentWorkspaceEnv } from "@/modules/workspace";
+import { invoke } from "@tauri-apps/api/core";
 
 export type AdbDevice = {
   serial: string;
@@ -186,28 +194,32 @@ export async function isAndroidProjectDir(dir: string): Promise<boolean> {
   );
 }
 
-/** Walk up from `startDir` looking for a runnable project root:
- * gradle(settings.gradle[.kts])或 Flutter(带 flutter: 段的 pubspec.yaml)。
- *
- * Flutter 也要认:右侧那块设备栏(投屏/logcat/adb)对 Flutter 工程一样有用,
- * 只认 gradle 的话在 Flutter 工程里整块都不出现。 */
-export async function findProjectRoot(
+/** 从 `startDir` 往上找最近的工程根(任意一种 ProjectKind)。
+ * 家目录这一层不算:~ 下放个 package.json 很常见,整个家目录被当成工程,
+ * 所有没归属的终端都会挂到它头上。 */
+export async function findProject(
   startDir: string,
-): Promise<string | null> {
+): Promise<{ root: string; kind: ProjectKind } | null> {
   let dir = startDir.replace(/\/+$/, "");
-  for (let i = 0; i < 8 && dir.length > 1; i++) {
-    if (
-      (await hasFile(`${dir}/settings.gradle`)) ||
-      (await hasFile(`${dir}/settings.gradle.kts`)) ||
-      (await isFlutterProjectDir(dir))
-    ) {
-      return dir;
-    }
+  for (let i = 0; i < 8 && depthBelowRoot(dir) > 2; i++) {
+    const kind = await classifyProjectKind(dir);
+    if (kind) return { root: dir, kind };
     const parent = dir.slice(0, dir.lastIndexOf("/"));
     if (!parent || parent === dir) break;
     dir = parent;
   }
   return null;
+}
+
+// "/Users/me" 和 "C:/Users/me" 都是 2:盘符不算一层
+function depthBelowRoot(dir: string): number {
+  return dir.split(/[\\/]/).filter((p) => p && !/^[A-Za-z]:$/.test(p)).length;
+}
+
+export async function findProjectRoot(
+  startDir: string,
+): Promise<string | null> {
+  return (await findProject(startDir))?.root ?? null;
 }
 
 const INCLUDE_RE =
@@ -235,15 +247,29 @@ export async function discoverModules(projectRoot: string): Promise<string[]> {
   return ["app"];
 }
 
-export type ProjectKind = "android" | "flutter";
-
-/** Which kind of runnable project `dir` is, or null when it's a plain folder. */
+/** Which kind of project `dir` is, or null when it's a plain folder. */
 export async function classifyProjectKind(
   dir: string,
 ): Promise<ProjectKind | null> {
-  if (await isFlutterProjectDir(dir)) return "flutter";
-  if (await isAndroidProjectDir(dir)) return "android";
-  return null;
+  if (!mayBeProjectDir(dir)) return null;
+  const d = dir.replace(/\/+$/, "");
+  let entries: DirEntry[];
+  try {
+    entries = await invoke<DirEntry[]>("fs_read_dir", {
+      path: d,
+      showHidden: true,
+      gitDecorations: false,
+      workspace: currentWorkspaceEnv(),
+    });
+  } catch {
+    return null;
+  }
+  const names = new Set(entries.map((e) => e.name));
+  const need = factsNeeded(names);
+  return projectKindFromEntries(names, {
+    flutter: need.flutter && (await isFlutterProjectDir(d)),
+    ideaModules: need.ideaModules && (await hasFile(`${d}/.idea/modules.xml`)),
+  });
 }
 
 async function isFlutterProjectDir(dir: string): Promise<boolean> {

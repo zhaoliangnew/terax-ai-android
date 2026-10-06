@@ -21,6 +21,7 @@ export { KnowledgeBaseMenu } from "./KnowledgeBaseMenu";
 export {
   type AdbDevice,
   classifyProjectKind,
+  findProject,
   findProjectRoot,
   installCommand,
   isAndroidProjectDir,
@@ -28,12 +29,17 @@ export {
   launchApp,
   listDevices,
   logcatCommand,
-  type ProjectKind,
   pidOf,
   readApplicationId,
 } from "./lib/adb";
 export { getCodeupOrgId, projexUrl } from "./lib/codeupApi";
 export { openExternally } from "./lib/openExternally";
+export {
+  hasDeviceSupport,
+  PROJECT_KIND_BADGE,
+  PROJECT_KIND_LABEL,
+  type ProjectKind,
+} from "./lib/projectKind";
 export {
   type ProjectGitInfo,
   type ProjectWorktree,

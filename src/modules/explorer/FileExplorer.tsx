@@ -584,8 +584,8 @@ export const FileExplorer = memo(
       pinnedPaths,
     ]);
 
-    // Classify visible directories as gradle projects (async, cached). Project
-    // dirs get the 安卓工程 treatment: robot icon, no expand, click opens terminal.
+    // Classify visible directories as projects (async, cached). Project dirs
+    // get the 工程 treatment: kind icon, no expand, click opens terminal.
     const projectCacheRef = useRef<Map<string, ProjectKind | null>>(new Map());
     const [projectDirs, setProjectDirs] = useState<Map<string, ProjectKind>>(
       new Map(),
