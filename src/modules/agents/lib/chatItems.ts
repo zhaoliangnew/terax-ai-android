@@ -1,3 +1,17 @@
+/** 工具调用拉起的子代理 / 后台任务的状态,跟着 SDK 的 task_* 消息走。 */
+export type ToolTask = {
+  status: "running" | "completed" | "failed" | "stopped";
+  /** 后台跑:主对话已经往下走了,它还在做。 */
+  background: boolean;
+  startedAt: number;
+  toolUses: number;
+  durationMs: number | null;
+  /** 正在干什么:"Read Foo.kt"、或者 SDK 给的一行进度。 */
+  activity: string;
+  /** 结束时 SDK 给的一句总结。 */
+  summary: string;
+};
+
 /** 聊天视图里的一条。 */
 export type ChatItem =
   | {
@@ -24,6 +38,7 @@ export type ChatItem =
       input: Record<string, unknown>;
       result: { text: string; isError: boolean } | null;
       ts: number;
+      task?: ToolTask;
     }
   | { kind: "note"; id: string; text: string; ts: number };
 

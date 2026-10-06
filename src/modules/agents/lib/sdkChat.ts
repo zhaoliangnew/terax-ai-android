@@ -1,4 +1,4 @@
-import { type ChatItem, toolSummary } from "./chatItems";
+import { type ChatItem, type ToolTask, toolSummary } from "./chatItems";
 import {
   commandsFromInit,
   normalizeCommands,
@@ -36,8 +36,8 @@ export type SdkMessage = {
   permissionMode?: string;
   is_error?: boolean;
   result?: string;
-  /** result:这一轮的用量;Qoder 在里面给上下文占比。 */
-  usage?: SdkUsage & { context_usage_ratio?: number };
+  /** result:这一轮的用量;Qoder 在里面给上下文占比。task_*:子代理的用量。 */
+  usage?: SdkUsage & { context_usage_ratio?: number } & TaskUsage;
   /** result:按模型的用量,带上下文窗口大小。 */
   modelUsage?: Record<string, { contextWindow?: number }>;
   /** system/init:可用的命令、技能名字;commands_changed:带说明的完整列表。 */
@@ -45,8 +45,18 @@ export type SdkMessage = {
   skills?: string[];
   terminal_slash_commands?: string[];
   commands?: unknown[];
-  /** system/status:"compacting" 表示正在压缩上下文。 */
+  /** system/status:"compacting" 表示正在压缩上下文;task_notification:结束状态。 */
   status?: string | null;
+  /** system/task_*:子代理、后台命令这类任务,tool_use_id 指回拉起它的工具调用。 */
+  task_id?: string;
+  tool_use_id?: string;
+  is_backgrounded?: boolean;
+  last_tool_name?: string;
+  summary?: string;
+  /** 不算"在干活"的内务任务,界面不显示。 */
+  ambient?: boolean;
+  skip_transcript?: boolean;
+  patch?: { status?: string; is_backgrounded?: boolean };
   /** system/compact_boundary:压缩前后的 token 数。 */
   compact_metadata?: { pre_tokens?: number; post_tokens?: number };
   /** Claude Code 自己塞的用户消息(压缩后的摘要等),不是用户说的话。 */
@@ -59,6 +69,11 @@ export type SdkMessage = {
     delta?: { type?: string; text?: string };
   };
   message?: { id?: string; content?: string | Block[]; usage?: SdkUsage };
+};
+
+type TaskUsage = {
+  tool_uses?: number;
+  duration_ms?: number;
 };
 
 type SdkUsage = {
@@ -90,6 +105,22 @@ function resultText(content: unknown): string {
     .join("\n");
 }
 
+function taskStatus(s: string | null | undefined): ToolTask["status"] | null {
+  switch (s) {
+    case "completed":
+    case "failed":
+      return s;
+    case "stopped":
+    case "killed":
+      return "stopped";
+    case "running":
+    case "pending":
+      return "running";
+    default:
+      return null;
+  }
+}
+
 export class SdkChatModel {
   items: ChatItem[] = [];
   sessionId: string | null = null;
@@ -106,6 +137,8 @@ export class SdkChatModel {
   private commandsDetailed = false;
 
   private toolIndex = new Map<string, number>();
+  /** task_id → 拉起它的 tool_use_id(task_updated 只带 task_id)。 */
+  private taskTool = new Map<string, string>();
   /** 流式拼出来的回复:`message id:块序号` → items 下标。 */
   private streamIndex = new Map<string, number>();
   /**
@@ -171,11 +204,15 @@ export class SdkChatModel {
     }
   }
 
-  /** 返回是否有变化。子 agent(parent_tool_use_id 非空)的过程不展开。 */
+  /**
+   * 返回是否有变化。子 agent(parent_tool_use_id 非空)的过程不展开成条目,
+   * 只把"正在干什么"记到拉起它的那张工具卡片上。
+   */
   apply(msg: SdkMessage, ts = Date.now()): boolean {
-    if (msg.parent_tool_use_id) return false;
+    if (msg.parent_tool_use_id) return this.applyChild(msg, ts);
     switch (msg.type) {
       case "system":
+        if (msg.subtype?.startsWith("task_")) return this.applyTask(msg, ts);
         if (msg.subtype === "init") {
           this.sessionId = msg.session_id ?? this.sessionId;
           this.model = msg.model ?? this.model;
@@ -355,6 +392,84 @@ export class SdkChatModel {
     return changed;
   }
 
+  private patchTask(
+    toolUseId: string | undefined,
+    ts: number,
+    update: (t: ToolTask) => Partial<ToolTask>,
+  ): boolean {
+    const i = toolUseId ? this.toolIndex.get(toolUseId) : undefined;
+    const it = i === undefined ? undefined : this.items[i];
+    if (it?.kind !== "tool") return false;
+    const cur: ToolTask = it.task ?? {
+      status: "running",
+      background: false,
+      startedAt: ts,
+      toolUses: 0,
+      durationMs: null,
+      activity: "",
+      summary: "",
+    };
+    this.items[i as number] = { ...it, task: { ...cur, ...update(cur) } };
+    return true;
+  }
+
+  private applyTask(msg: SdkMessage, ts: number): boolean {
+    if (msg.ambient || msg.skip_transcript) return false;
+    const toolUseId =
+      msg.tool_use_id ?? (msg.task_id ? this.taskTool.get(msg.task_id) : "");
+    if (msg.task_id && msg.tool_use_id) {
+      this.taskTool.set(msg.task_id, msg.tool_use_id);
+    }
+    const usage = (t: ToolTask): Partial<ToolTask> => ({
+      toolUses: Math.max(t.toolUses, msg.usage?.tool_uses ?? 0),
+      durationMs: msg.usage?.duration_ms ?? t.durationMs,
+    });
+    switch (msg.subtype) {
+      case "task_started":
+        return this.patchTask(toolUseId, ts, () => ({
+          status: "running",
+          background: msg.is_backgrounded === true,
+          startedAt: ts,
+        }));
+      case "task_progress":
+        return this.patchTask(toolUseId, ts, (t) => ({
+          ...usage(t),
+          activity: msg.summary || t.activity || msg.last_tool_name || "",
+        }));
+      case "task_updated": {
+        const p = msg.patch ?? {};
+        return this.patchTask(toolUseId, ts, (t) => ({
+          background: p.is_backgrounded ?? t.background,
+          status: taskStatus(p.status) ?? t.status,
+        }));
+      }
+      case "task_notification":
+        return this.patchTask(toolUseId, ts, (t) => ({
+          ...usage(t),
+          status: taskStatus(msg.status) ?? "completed",
+          summary: msg.summary ?? "",
+          durationMs: msg.usage?.duration_ms ?? ts - t.startedAt,
+        }));
+      default:
+        return false;
+    }
+  }
+
+  /** 子代理自己调了个工具:卡片上换成它正在干的事,工具次数加一。 */
+  private applyChild(msg: SdkMessage, ts: number): boolean {
+    if (msg.type !== "assistant") return false;
+    const content = msg.message?.content;
+    if (!Array.isArray(content)) return false;
+    const calls = content.filter((b) => b.type === "tool_use" && b.name);
+    const last = calls[calls.length - 1];
+    if (!last?.name) return false;
+    const what = toolSummary(last.name, last.input ?? {});
+    return this.patchTask(msg.parent_tool_use_id ?? undefined, ts, (t) => ({
+      toolUses: t.toolUses + calls.length,
+      activity: what ? `${last.name} ${what}` : (last.name ?? ""),
+    }));
+  }
+
   private applyUser(msg: SdkMessage): boolean {
     const content = msg.message?.content;
     if (!Array.isArray(content)) return false;
@@ -364,9 +479,19 @@ export class SdkChatModel {
       const i = this.toolIndex.get(b.tool_use_id);
       const it = i === undefined ? undefined : this.items[i];
       if (it?.kind !== "tool") continue;
+      const isError = b.is_error === true;
+      // 前台子代理的工具结果回来就是它做完了;后台的要等 task_notification
+      const task =
+        it.task?.status === "running" && !it.task.background
+          ? {
+              ...it.task,
+              status: isError ? ("failed" as const) : ("completed" as const),
+            }
+          : it.task;
       this.items[i as number] = {
         ...it,
-        result: { text: resultText(b.content), isError: b.is_error === true },
+        result: { text: resultText(b.content), isError },
+        ...(task ? { task } : {}),
       };
       changed = true;
     }

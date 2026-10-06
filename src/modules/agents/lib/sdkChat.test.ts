@@ -154,6 +154,96 @@ describe("SdkChatModel", () => {
     ]);
   });
 
+  it("tracks a background subagent on the card that launched it", () => {
+    const m = new SdkChatModel();
+    m.addUser("做引导页", [], 0);
+    m.apply(
+      assistant("msg5", [
+        {
+          type: "tool_use",
+          id: "t1",
+          name: "Agent",
+          input: { description: "引导页", prompt: "做引导页" },
+        },
+      ]),
+      1000,
+    );
+    m.apply(
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "k1",
+        tool_use_id: "t1",
+        is_backgrounded: true,
+      },
+      1000,
+    );
+    m.apply({
+      type: "user",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "t1", content: "launched" },
+        ],
+      },
+    });
+    m.apply({ type: "result", subtype: "success" });
+    m.apply({
+      ...assistant("c1", [
+        {
+          type: "tool_use",
+          id: "c-t",
+          name: "Read",
+          input: { file_path: "/p/Guide.kt" },
+        },
+      ]),
+      parent_tool_use_id: "t1",
+    });
+    const card = () => m.items.find((i) => i.id === "t1");
+    expect(card()).toMatchObject({
+      task: {
+        status: "running",
+        background: true,
+        toolUses: 1,
+        activity: "Read Guide.kt",
+      },
+    });
+    m.apply({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "k1",
+      status: "completed",
+      summary: "做完了",
+      usage: { tool_uses: 7, duration_ms: 90_000 },
+    });
+    expect(card()).toMatchObject({
+      task: { status: "completed", toolUses: 7, durationMs: 90_000 },
+    });
+  });
+
+  it("finishes a foreground subagent when its result comes back", () => {
+    const m = new SdkChatModel();
+    m.apply(
+      assistant("msg6", [
+        { type: "tool_use", id: "t2", name: "Agent", input: {} },
+      ]),
+    );
+    m.apply({
+      ...assistant("c2", [
+        { type: "tool_use", id: "c-b", name: "Bash", input: { command: "ls" } },
+      ]),
+      parent_tool_use_id: "t2",
+    });
+    m.apply({
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "t2", content: "ok" }],
+      },
+    });
+    expect(m.items[0]).toMatchObject({
+      task: { status: "completed", background: false, toolUses: 1 },
+    });
+  });
+
   it("keeps a message without streaming, and ignores subagent traffic", () => {
     const m = new SdkChatModel();
     m.apply(assistant("msg3", [{ type: "text", text: "直接到了" }]));

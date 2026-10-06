@@ -26,7 +26,12 @@ import {
   useRef,
   useState,
 } from "react";
-import { type ChatItem, chatTurns, isImagePath } from "../lib/chatItems";
+import {
+  type ChatItem,
+  chatTurns,
+  isImagePath,
+  type ToolTask,
+} from "../lib/chatItems";
 import { useSmoothText } from "../lib/useSmoothText";
 import type { PermissionAsk } from "../store/claudeChatStore";
 import { ImageThumb } from "./ImageLightbox";
@@ -215,6 +220,8 @@ function ToolDetail({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
     );
   } else if (name === "Write") {
     body = <div className={pre}>{clip(str(input.content))}</div>;
+  } else if (isSubagent(name) && str(input.prompt)) {
+    body = <div className={pre}>{clip(str(input.prompt))}</div>;
   } else {
     body = <div className={pre}>{clip(JSON.stringify(input, null, 2))}</div>;
   }
@@ -232,7 +239,147 @@ function ToolDetail({ item }: { item: Extract<ChatItem, { kind: "tool" }> }) {
       {result?.isError && (name === "Edit" || name === "Write") && (
         <div className={cn(pre, "text-red-400")}>{clip(result.text)}</div>
       )}
+      {item.task?.summary && (
+        <div
+          className={cn(pre, item.task.status === "failed" && "text-red-400")}
+        >
+          {clip(item.task.summary)}
+        </div>
+      )}
     </div>
+  );
+}
+
+const isSubagent = (name: string) => name === "Agent" || name === "Task";
+
+function toolLabel(item: Extract<ChatItem, { kind: "tool" }>): string {
+  if (!isSubagent(item.name)) return item.name;
+  const type = str(item.input.subagent_type);
+  return type && type !== "general-purpose" ? `子代理 ${type}` : "子代理";
+}
+
+function duration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}秒`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}分${s % 60}秒`;
+  return `${Math.floor(m / 60)}小时${m % 60}分`;
+}
+
+/** 只在有任务跑着时挂上,每秒走一下;没有任务就没有定时器。 */
+function useElapsed(since: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now - since;
+}
+
+function useRunningText(task: ToolTask): string {
+  const elapsed = useElapsed(task.startedAt);
+  return [
+    task.background ? "后台运行中" : "运行中",
+    task.toolUses > 0 ? `${task.toolUses} 次工具` : "",
+    duration(Math.max(elapsed, task.durationMs ?? 0)),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function TaskActivity({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/60">
+      {text}
+    </span>
+  );
+}
+
+function RunningTask({ task }: { task: ToolTask }) {
+  const text = useRunningText(task);
+  return (
+    <div className="flex min-w-0 items-center gap-1.5 pl-[18px] text-[11.5px] text-muted-foreground/80">
+      <Shimmer className="shrink-0">{text}</Shimmer>
+      <TaskActivity text={task.activity} />
+    </div>
+  );
+}
+
+type RunningItem = Extract<ChatItem, { kind: "tool" }> & { task: ToolTask };
+
+function DockRow({
+  item,
+  onJump,
+}: {
+  item: RunningItem;
+  onJump: (id: string) => void;
+}) {
+  const text = useRunningText(item.task);
+  return (
+    <button
+      type="button"
+      title="跳到它在对话里的位置"
+      onClick={() => onJump(item.id)}
+      className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-[12px] text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground"
+    >
+      <span className="size-1.5 shrink-0 animate-pulse rounded-full bg-[#6f9ce8]" />
+      <span className="shrink-0 font-medium">{toolLabel(item)}</span>
+      <span className="min-w-0 max-w-[40%] shrink truncate text-muted-foreground/80">
+        {item.summary}
+      </span>
+      <span className="shrink-0 text-[11.5px] text-muted-foreground/70">
+        {text}
+      </span>
+      <TaskActivity text={item.task.activity} />
+    </button>
+  );
+}
+
+/**
+ * 输入框正上方常驻:还在跑的子代理 / 后台任务,一个一行,跑完自动消失。
+ * 消息流里那一行会被聊天顶上去,这里一直看得见。
+ */
+function TaskDock({
+  tasks,
+  onJump,
+}: {
+  tasks: RunningItem[];
+  onJump: (id: string) => void;
+}) {
+  if (tasks.length === 0) return null;
+  return (
+    <div className="shrink-0 border-t border-border/60 bg-background">
+      <div className="mx-auto flex max-h-36 max-w-3xl flex-col overflow-y-auto px-4 py-1.5">
+        {tasks.map((t) => (
+          <DockRow key={t.id} item={t} onJump={onJump} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TaskDone({ task }: { task: ToolTask }) {
+  const label =
+    task.status === "failed"
+      ? "失败"
+      : task.status === "stopped"
+        ? "已停止"
+        : "完成";
+  const parts = [
+    label,
+    task.toolUses > 0 ? `${task.toolUses} 次工具` : "",
+    task.durationMs ? duration(task.durationMs) : "",
+  ].filter(Boolean);
+  return (
+    <span
+      className={cn(
+        "shrink-0 text-[11px]",
+        task.status === "failed" ? "text-red-400" : "text-muted-foreground/60",
+      )}
+    >
+      {parts.join(" · ")}
+    </span>
   );
 }
 
@@ -263,7 +410,7 @@ function ToolRow({
           strokeWidth={2.25}
           className={cn("shrink-0 transition-transform", open && "rotate-90")}
         />
-        <span className="shrink-0 font-medium">{item.name}</span>
+        <span className="shrink-0 font-medium">{toolLabel(item)}</span>
         <span className="min-w-0 truncate text-muted-foreground/80">
           {item.summary}
         </span>
@@ -289,13 +436,18 @@ function ToolRow({
             打开
           </span>
         )}
-        {item.result?.isError && (
-          <span className="shrink-0 text-[11px] text-red-400">失败</span>
+        {item.task && item.task.status !== "running" ? (
+          <TaskDone task={item.task} />
+        ) : (
+          item.result?.isError && (
+            <span className="shrink-0 text-[11px] text-red-400">失败</span>
+          )
         )}
-        {!item.result && running && (
+        {!item.result && running && !item.task && (
           <Shimmer className="shrink-0 text-[11px]">执行中</Shimmer>
         )}
       </button>
+      {item.task?.status === "running" && <RunningTask task={item.task} />}
       {open && <ToolDetail item={item} />}
     </div>
   );
@@ -641,6 +793,14 @@ export function AgentChatView({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const turns = useMemo(() => chatTurns(items), [items]);
+  const runningTasks = useMemo(
+    () =>
+      items.filter(
+        (i): i is RunningItem =>
+          i.kind === "tool" && i.task?.status === "running",
+      ),
+    [items],
+  );
   const [activeTurn, setActiveTurn] = useState<string | null>(null);
   // 选中文字后弹出的小工具条,坐标是滚动内容里的位置(跟着内容一起滚)
   const [selection, setSelection] = useState<{
@@ -724,6 +884,22 @@ export function AgentChatView({
     return () => ro.disconnect();
   }, []);
 
+  const jumpToTool = (id: string) => {
+    const el = scrollRef.current?.querySelector<HTMLElement>(
+      `[data-tool="${CSS.escape(id)}"]`,
+    );
+    if (!el) return;
+    stickRef.current = false;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.animate(
+      [
+        { backgroundColor: "rgba(111, 156, 232, 0.16)" },
+        { backgroundColor: "transparent" },
+      ],
+      { duration: 1400, easing: "ease-out" },
+    );
+  };
+
   const scrollToBottom = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -738,211 +914,220 @@ export function AgentChatView({
   return (
     // z-10:压在终端(xterm 的几层画布自带层级)上面,滚轮和点击都归聊天
     <ChatCwd.Provider value={cwd}>
-      <div className="absolute inset-0 z-10 bg-background">
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: 鼠标只用来读选区、收起工具条,消息本身不可交互 */}
-        <div
-          ref={scrollRef}
-          onWheel={(e) => {
-            if (e.deltaY < 0) stickRef.current = false;
-          }}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-            if (gap < 24) stickRef.current = true;
-            // 差一屏以上才算"离开了底部",贴底时的细小抖动不让按钮闪
-            setAwayFromBottom(gap > el.clientHeight * 0.5);
-            updateActiveTurn(el);
-          }}
-          // 点工具条上的按钮也会冒上来一个 mouseup:那时选区还在,不跳过的话
-          // 刚收起的工具条又被弹出来
-          onMouseUp={(e) => {
-            if ((e.target as HTMLElement).closest("[data-selection-bar]"))
-              return;
-            setTimeout(readSelection, 0);
-          }}
-          onMouseDown={(e) => {
-            if (!(e.target as HTMLElement).closest("[data-selection-bar]")) {
-              setSelection(null);
-            }
-          }}
-          className="absolute inset-0 overflow-y-auto overscroll-contain"
-        >
-          {selection && (
-            <div
-              data-selection-bar=""
-              style={{ top: selection.top, left: selection.left }}
-              className="absolute z-30 flex -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-popover text-[12.5px] shadow-xl"
-            >
-              <button
-                type="button"
-                onClick={() => {
-                  onQuote(selection.text);
-                  setSelection(null);
-                  window.getSelection()?.removeAllRanges();
-                }}
-                className="cursor-pointer px-2.5 py-1.5 hover:bg-foreground/10"
-              >
-                添加到对话
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void copyToClipboard(selection.text);
-                  setSelection(null);
-                  window.getSelection()?.removeAllRanges();
-                }}
-                className="cursor-pointer border-l border-border px-2.5 py-1.5 hover:bg-foreground/10"
-              >
-                复制
-              </button>
-            </div>
-          )}
-          {/* 全局默认不让选字(桌面应用的习惯),聊天内容要能选中复制 */}
+      <div className="absolute inset-0 z-10 flex flex-col bg-background">
+        <div className="relative min-h-0 flex-1">
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: 鼠标只用来读选区、收起工具条,消息本身不可交互 */}
           <div
-            ref={contentRef}
-            className="select-text mx-auto flex max-w-3xl cursor-text flex-col px-6 pt-8 pb-12"
+            ref={scrollRef}
+            onWheel={(e) => {
+              if (e.deltaY < 0) stickRef.current = false;
+            }}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+              if (gap < 24) stickRef.current = true;
+              // 差一屏以上才算"离开了底部",贴底时的细小抖动不让按钮闪
+              setAwayFromBottom(gap > el.clientHeight * 0.5);
+              updateActiveTurn(el);
+            }}
+            // 点工具条上的按钮也会冒上来一个 mouseup:那时选区还在,不跳过的话
+            // 刚收起的工具条又被弹出来
+            onMouseUp={(e) => {
+              if ((e.target as HTMLElement).closest("[data-selection-bar]"))
+                return;
+              setTimeout(readSelection, 0);
+            }}
+            onMouseDown={(e) => {
+              if (!(e.target as HTMLElement).closest("[data-selection-bar]")) {
+                setSelection(null);
+              }
+            }}
+            className="absolute inset-0 overflow-y-auto overscroll-contain"
           >
-            {items.length === 0 && !working && !statusText && (
-              <div className="pt-24 text-center text-[13px] text-muted-foreground">
-                给 {agentName} 发条消息开始吧
-              </div>
-            )}
-            {items.map((item, i) => {
-              const prev = items[i - 1];
-              const showTime =
-                item.ts > 0 && (!prev || item.ts - prev.ts > TIME_GAP_MS);
-              return (
-                <div
-                  key={item.id}
-                  data-turn={item.kind === "user" ? item.id : undefined}
-                  className={cn(
-                    "flex scroll-mt-6 flex-col",
-                    showTime ? "mt-10" : gapAbove(item, prev),
-                  )}
+            {selection && (
+              <div
+                data-selection-bar=""
+                style={{ top: selection.top, left: selection.left }}
+                className="absolute z-30 flex -translate-x-1/2 overflow-hidden rounded-lg border border-border bg-popover text-[12.5px] shadow-xl"
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    onQuote(selection.text);
+                    setSelection(null);
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                  className="cursor-pointer px-2.5 py-1.5 hover:bg-foreground/10"
                 >
-                  {showTime && (
-                    <div className="mb-6 text-center text-[12px] text-muted-foreground/70">
-                      {timeLabel(item.ts)}
-                    </div>
-                  )}
-                  {item.kind === "user" && (
-                    <div className="flex justify-end">
-                      <div className="group/user flex max-w-[80%] flex-col items-end gap-1.5">
-                        {item.text && (
-                          <div className="whitespace-pre-wrap break-words rounded-[18px] bg-[#173e77] px-4 py-2.5 text-[14px] leading-relaxed text-white">
-                            {item.text}
-                          </div>
-                        )}
-                        {item.attachments && (
-                          <div className="flex flex-wrap justify-end gap-1">
-                            {item.attachments.map((f) =>
-                              isImagePath(f) ? (
-                                <ImageThumb
-                                  key={f}
-                                  path={f}
-                                  className="max-h-20 max-w-32 rounded-lg border border-border object-cover"
-                                />
-                              ) : (
-                                <span
-                                  key={f}
-                                  title={f}
-                                  className="max-w-56 truncate rounded-md bg-foreground/[0.08] px-2 py-0.5 text-[11.5px] text-muted-foreground"
-                                >
-                                  {f.split("/").pop()}
-                                </span>
-                              ),
-                            )}
-                          </div>
-                        )}
-                        {item.text && (
-                          <div className="-mr-1 flex opacity-0 transition-opacity group-hover/user:opacity-100">
-                            <CopyButton text={item.text} />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                  {item.kind === "assistant" && (
-                    <div className="flex flex-col gap-1.5">
-                      {/* Markdown 渲染默认的标题是大号字,放在对话里一个"##"就
-                        比正文大一截;照 Codex 只比正文略大 */}
-                      <div className="text-[14px] leading-[1.75] text-foreground/95 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[16.5px] [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14.5px] [&_h3]:font-semibold [&_h4]:text-[14px] [&_h4]:font-semibold [&_table]:text-[13px] [&_pre]:text-[12.5px]">
-                        <AssistantText
-                          text={item.text}
-                          streaming={item.streaming === true}
-                        />
-                      </div>
-                      <div className="-ml-1 flex gap-0.5">
-                        <CopyButton text={item.text} />
-                      </div>
-                    </div>
-                  )}
-                  {item.kind === "tool" && (
-                    <ToolRow item={item} running={working && i === lastIndex} />
-                  )}
-                  {item.kind === "note" && (
-                    <div className="text-center text-[11.5px] text-muted-foreground/70">
-                      {item.text}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {permissions.map((p) =>
-              p.toolName === "ExitPlanMode" && str(p.input.plan) ? (
-                <PlanCard
-                  key={p.id}
-                  ask={p}
-                  onAnswer={(allow, always, input, message) =>
-                    onPermission(p.id, allow, always, input, message)
-                  }
-                />
-              ) : p.toolName === "AskUserQuestion" &&
-                Array.isArray(p.input.questions) ? (
-                <QuestionCard
-                  key={p.id}
-                  ask={p}
-                  onAnswer={(allow, always, input) =>
-                    onPermission(p.id, allow, always, input)
-                  }
-                />
-              ) : (
-                <PermissionCard
-                  key={p.id}
-                  ask={p}
-                  onAnswer={(allow, always) =>
-                    onPermission(p.id, allow, always)
-                  }
-                />
-              ),
-            )}
-            {statusText && (
-              <div className="mt-6 text-center text-[12px] text-muted-foreground">
-                {statusText}
+                  添加到对话
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void copyToClipboard(selection.text);
+                    setSelection(null);
+                    window.getSelection()?.removeAllRanges();
+                  }}
+                  className="cursor-pointer border-l border-border px-2.5 py-1.5 hover:bg-foreground/10"
+                >
+                  复制
+                </button>
               </div>
             )}
-            {/* 回复已经在往外流了就不再挂"正在思考":它在文字下面跟着一跳一跳 */}
-            {working && permissions.length === 0 && !replying && (
-              <Shimmer className="mt-4 text-[13px]">
-                {compacting ? "正在压缩上下文,会话大的话要几分钟" : "正在思考"}
-              </Shimmer>
-            )}
+            {/* 全局默认不让选字(桌面应用的习惯),聊天内容要能选中复制 */}
+            <div
+              ref={contentRef}
+              className="select-text mx-auto flex max-w-3xl cursor-text flex-col px-6 pt-8 pb-12"
+            >
+              {items.length === 0 && !working && !statusText && (
+                <div className="pt-24 text-center text-[13px] text-muted-foreground">
+                  给 {agentName} 发条消息开始吧
+                </div>
+              )}
+              {items.map((item, i) => {
+                const prev = items[i - 1];
+                const showTime =
+                  item.ts > 0 && (!prev || item.ts - prev.ts > TIME_GAP_MS);
+                return (
+                  <div
+                    key={item.id}
+                    data-turn={item.kind === "user" ? item.id : undefined}
+                    data-tool={item.kind === "tool" ? item.id : undefined}
+                    className={cn(
+                      "flex scroll-mt-6 flex-col",
+                      showTime ? "mt-10" : gapAbove(item, prev),
+                    )}
+                  >
+                    {showTime && (
+                      <div className="mb-6 text-center text-[12px] text-muted-foreground/70">
+                        {timeLabel(item.ts)}
+                      </div>
+                    )}
+                    {item.kind === "user" && (
+                      <div className="flex justify-end">
+                        <div className="group/user flex max-w-[80%] flex-col items-end gap-1.5">
+                          {item.text && (
+                            <div className="whitespace-pre-wrap break-words rounded-[18px] bg-[#173e77] px-4 py-2.5 text-[14px] leading-relaxed text-white">
+                              {item.text}
+                            </div>
+                          )}
+                          {item.attachments && (
+                            <div className="flex flex-wrap justify-end gap-1">
+                              {item.attachments.map((f) =>
+                                isImagePath(f) ? (
+                                  <ImageThumb
+                                    key={f}
+                                    path={f}
+                                    className="max-h-20 max-w-32 rounded-lg border border-border object-cover"
+                                  />
+                                ) : (
+                                  <span
+                                    key={f}
+                                    title={f}
+                                    className="max-w-56 truncate rounded-md bg-foreground/[0.08] px-2 py-0.5 text-[11.5px] text-muted-foreground"
+                                  >
+                                    {f.split("/").pop()}
+                                  </span>
+                                ),
+                              )}
+                            </div>
+                          )}
+                          {item.text && (
+                            <div className="-mr-1 flex opacity-0 transition-opacity group-hover/user:opacity-100">
+                              <CopyButton text={item.text} />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                    {item.kind === "assistant" && (
+                      <div className="flex flex-col gap-1.5">
+                        {/* Markdown 渲染默认的标题是大号字,放在对话里一个"##"就
+                        比正文大一截;照 Codex 只比正文略大 */}
+                        <div className="text-[14px] leading-[1.75] text-foreground/95 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[16.5px] [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14.5px] [&_h3]:font-semibold [&_h4]:text-[14px] [&_h4]:font-semibold [&_table]:text-[13px] [&_pre]:text-[12.5px]">
+                          <AssistantText
+                            text={item.text}
+                            streaming={item.streaming === true}
+                          />
+                        </div>
+                        <div className="-ml-1 flex gap-0.5">
+                          <CopyButton text={item.text} />
+                        </div>
+                      </div>
+                    )}
+                    {item.kind === "tool" && (
+                      <ToolRow
+                        item={item}
+                        running={working && i === lastIndex}
+                      />
+                    )}
+                    {item.kind === "note" && (
+                      <div className="text-center text-[11.5px] text-muted-foreground/70">
+                        {item.text}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {permissions.map((p) =>
+                p.toolName === "ExitPlanMode" && str(p.input.plan) ? (
+                  <PlanCard
+                    key={p.id}
+                    ask={p}
+                    onAnswer={(allow, always, input, message) =>
+                      onPermission(p.id, allow, always, input, message)
+                    }
+                  />
+                ) : p.toolName === "AskUserQuestion" &&
+                  Array.isArray(p.input.questions) ? (
+                  <QuestionCard
+                    key={p.id}
+                    ask={p}
+                    onAnswer={(allow, always, input) =>
+                      onPermission(p.id, allow, always, input)
+                    }
+                  />
+                ) : (
+                  <PermissionCard
+                    key={p.id}
+                    ask={p}
+                    onAnswer={(allow, always) =>
+                      onPermission(p.id, allow, always)
+                    }
+                  />
+                ),
+              )}
+              {statusText && (
+                <div className="mt-6 text-center text-[12px] text-muted-foreground">
+                  {statusText}
+                </div>
+              )}
+              {/* 回复已经在往外流了就不再挂"正在思考":它在文字下面跟着一跳一跳 */}
+              {working && permissions.length === 0 && !replying && (
+                <Shimmer className="mt-4 text-[13px]">
+                  {compacting
+                    ? "正在压缩上下文,会话大的话要几分钟"
+                    : "正在思考"}
+                </Shimmer>
+              )}
+            </div>
           </div>
+          {awayFromBottom && (
+            <button
+              type="button"
+              title="回到底部"
+              aria-label="回到底部"
+              onClick={scrollToBottom}
+              className="absolute bottom-4 left-1/2 z-20 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-popover text-muted-foreground shadow-lg transition-colors hover:text-foreground"
+            >
+              <HugeiconsIcon icon={ArrowDown02Icon} size={15} strokeWidth={2} />
+            </button>
+          )}
+          {turns.length > 1 && (
+            <TurnRail turns={turns} active={activeTurn} onJump={jumpTo} />
+          )}
         </div>
-        {awayFromBottom && (
-          <button
-            type="button"
-            title="回到底部"
-            aria-label="回到底部"
-            onClick={scrollToBottom}
-            className="absolute bottom-4 left-1/2 z-20 flex size-8 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-border bg-popover text-muted-foreground shadow-lg transition-colors hover:text-foreground"
-          >
-            <HugeiconsIcon icon={ArrowDown02Icon} size={15} strokeWidth={2} />
-          </button>
-        )}
-        {turns.length > 1 && (
-          <TurnRail turns={turns} active={activeTurn} onJump={jumpTo} />
-        )}
+        <TaskDock tasks={runningTasks} onJump={jumpToTool} />
       </div>
     </ChatCwd.Provider>
   );
