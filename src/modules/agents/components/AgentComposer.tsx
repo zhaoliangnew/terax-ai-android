@@ -26,6 +26,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { isImagePath } from "../lib/chatItems";
+import { findModel, modelIdName } from "../lib/modelMatch";
 import type { ContextUsage } from "../lib/sdkChat";
 import {
   commandQuery,
@@ -242,19 +243,11 @@ function modelLabel(
     const def = models.find((m) => m.value === "default");
     return (def && modelNameOf(def)) || fallback;
   }
-  const hit = models.find(
-    (m) => m.value === model || model.startsWith(m.value),
-  );
+  const hit = findModel(model, models);
   // 菜单项名字是"Opus (1M context)"这种不带版本的,按钮上用说明里的
   // 具体型号("Opus 5.5 with 1M context" → Opus 5.5 1M)
   if (hit) return modelNameOf(hit) || hit.displayName;
-  if (!model.startsWith("claude-")) return model;
-  // claude-opus-5-5[1m] → Opus 5.5 1M,和菜单里的写法一样首字母大写
-  const name = model
-    .replace(/^claude-/, "")
-    .replace(/\[1m\]$/, " 1M")
-    .replace(/-(\d+)-(\d+)/, " $1.$2");
-  return name.charAt(0).toUpperCase() + name.slice(1);
+  return modelIdName(model);
 }
 
 /** 从模型说明里取具体型号:"Opus 5.5 with 1M context · …" → "Opus 5.5 1M"。 */
@@ -976,9 +969,7 @@ export function AgentComposer({
                     models.map((m) => (
                       <MenuItem
                         key={m.value}
-                        active={
-                          m.value === model || !!model?.startsWith(m.value)
-                        }
+                        active={!!model && findModel(model, models) === m}
                         onClick={() => {
                           onSetModel(m.value);
                           closeMenu();
