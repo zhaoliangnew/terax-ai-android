@@ -20,11 +20,16 @@ import {
   testAgentOsNotification,
 } from "@/modules/agents/lib/notify";
 import { usePreferencesStore } from "@/modules/settings/preferences";
-import type { ThemePref } from "@/modules/settings/store";
+import {
+  coerceDefaultChatAgent,
+  type DefaultChatAgent,
+  type ThemePref,
+} from "@/modules/settings/store";
 import {
   setAgentNotifications,
   setAutostart,
   setConfirmCloseRunningTerminal,
+  setDefaultChatAgent,
   setDefaultWorkspaceEnv,
   setExplorerGitDecorations,
   setRestoreWindowState,
@@ -54,6 +59,12 @@ import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
+
+const CHAT_AGENT_OPTIONS: { value: DefaultChatAgent; label: string }[] = [
+  { value: "claude", label: "Claude" },
+  { value: "codex", label: "Codex" },
+  { value: "qoder", label: "Qoder" },
+];
 
 const APPEARANCE: {
   id: ThemePref;
@@ -121,6 +132,7 @@ export function GeneralSection() {
   );
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
+  const defaultChatAgent = usePreferencesStore((s) => s.defaultChatAgent);
   const [notificationTest, setNotificationTest] =
     useState<NotificationTestState>("idle");
   const notificationTestPending =
@@ -501,6 +513,35 @@ export function GeneralSection() {
 
       <div className="flex flex-col gap-2">
         <Label>Agents</Label>
+        <SettingRow
+          title="默认聊天 AI"
+          description="终端窗格切到聊天或命令行时默认用谁。窗格里手动选过的、终端里正在跑的、这个目录上次用过的优先。"
+        >
+          <Select
+            value={defaultChatAgent}
+            onValueChange={(v) =>
+              void setDefaultChatAgent(coerceDefaultChatAgent(v))
+            }
+          >
+            <SelectTrigger
+              value={defaultChatAgent}
+              className="h-8 w-28 text-[12px]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CHAT_AGENT_OPTIONS.map((o) => (
+                <SelectItem
+                  key={o.value}
+                  value={o.value}
+                  className="text-[12px]"
+                >
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingRow>
         <SettingRow
           title="Coding agent notifications"
           description="Alert when a coding agent needs your input or finishes. Native notification when Terax is unfocused, in-app otherwise."

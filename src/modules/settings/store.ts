@@ -30,6 +30,8 @@ export const DEFAULT_THEME_ID = "terax-default";
 export type BackgroundKind = "none" | "image";
 
 export type TerminalCursorStyle = "bar" | "block" | "underline";
+/** 终端窗格切聊天/命令行时,没选过、终端里也没在跑 AI 的目录默认用谁。 */
+export type DefaultChatAgent = "claude" | "codex" | "qoder";
 
 /**
  * 跳到定义/找调用用哪套:
@@ -177,6 +179,7 @@ export type Preferences = {
   terminalFontSize: number;
   terminalScrollback: number;
   confirmCloseRunningTerminal: boolean;
+  defaultChatAgent: DefaultChatAgent;
   lastWslDistro: string | null;
   zoomLevel: number;
   agentNotifications: boolean;
@@ -272,6 +275,7 @@ const KEY_TERMINAL_LETTER_SPACING = "terminalLetterSpacing";
 const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_CONFIRM_CLOSE_RUNNING_TERMINAL = "confirmCloseRunningTerminal";
+const KEY_DEFAULT_CHAT_AGENT = "defaultChatAgent";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
@@ -363,6 +367,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalFontSize: TERMINAL_FONT_SIZE_DEFAULT,
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
   confirmCloseRunningTerminal: true,
+  defaultChatAgent: "claude",
   lastWslDistro: null,
   zoomLevel: 1.0,
   agentNotifications: true,
@@ -544,6 +549,9 @@ export async function loadPreferences(): Promise<Preferences> {
     confirmCloseRunningTerminal:
       get<boolean>(KEY_CONFIRM_CLOSE_RUNNING_TERMINAL) ??
       DEFAULT_PREFERENCES.confirmCloseRunningTerminal,
+    defaultChatAgent: coerceDefaultChatAgent(
+      get<string>(KEY_DEFAULT_CHAT_AGENT),
+    ),
     lastWslDistro:
       get<string | null>(KEY_LAST_WSL_DISTRO) ??
       DEFAULT_PREFERENCES.lastWslDistro,
@@ -818,6 +826,12 @@ export async function setTerminalCursorBlink(value: boolean): Promise<void> {
   await writePref(KEY_TERMINAL_CURSOR_BLINK, value);
 }
 
+export function coerceDefaultChatAgent(value: unknown): DefaultChatAgent {
+  return value === "claude" || value === "codex" || value === "qoder"
+    ? value
+    : DEFAULT_PREFERENCES.defaultChatAgent;
+}
+
 export function coerceTerminalCursorStyle(value: unknown): TerminalCursorStyle {
   return value === "bar" || value === "block" || value === "underline"
     ? value
@@ -880,6 +894,12 @@ export async function setConfirmCloseRunningTerminal(
   value: boolean,
 ): Promise<void> {
   await writePref(KEY_CONFIRM_CLOSE_RUNNING_TERMINAL, value);
+}
+
+export async function setDefaultChatAgent(
+  value: DefaultChatAgent,
+): Promise<void> {
+  await writePref(KEY_DEFAULT_CHAT_AGENT, value);
 }
 
 export async function setLastWslDistro(value: string | null): Promise<void> {
@@ -1014,6 +1034,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_FONT_SIZE]: "terminalFontSize",
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_CONFIRM_CLOSE_RUNNING_TERMINAL]: "confirmCloseRunningTerminal",
+    [KEY_DEFAULT_CHAT_AGENT]: "defaultChatAgent",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",

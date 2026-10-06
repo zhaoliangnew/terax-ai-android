@@ -20,6 +20,7 @@ import {
 } from "@/modules/agents/store/chatProviders";
 import { native } from "@/modules/ai/lib/native";
 import { AGENT_QUICK_COMMANDS } from "@/modules/android-run/AgentQuickLaunch";
+import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   ptyIdForLeaf,
   TerminalPane,
@@ -106,14 +107,14 @@ function runningAgent(leafId: number): ChatAgent | null {
 }
 
 /**
- * 聊天用谁:这个窗格手动选过的 > 终端里正在跑的 > 这个目录上次用的 > Claude。
+ * 聊天用谁:这个窗格手动选过的 > 终端里正在跑的 > 这个目录上次用的 > 设置里的默认。
  */
 function resolveAgent(leafId: number, cwd: string | null): ChatAgent {
   return (
     useAgentViewStore.getState().agents[leafId] ??
     runningAgent(leafId) ??
     savedAgent(cwd) ??
-    "claude"
+    usePreferencesStore.getState().defaultChatAgent
   );
 }
 
@@ -124,7 +125,8 @@ function useLeafAgent(leafId: number, cwd: string | null): ChatAgent {
     const pty = ptyIdForLeaf(leafId);
     return pty === null ? null : asChatAgent(s.agents[pty]);
   });
-  return picked ?? running ?? savedAgent(cwd) ?? "claude";
+  const fallback = usePreferencesStore((s) => s.defaultChatAgent);
+  return picked ?? running ?? savedAgent(cwd) ?? fallback;
 }
 
 function statusText(
