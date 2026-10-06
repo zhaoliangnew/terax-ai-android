@@ -496,6 +496,7 @@ type AskQuestion = {
 /**
  * AI 用 AskUserQuestion 问你:把问题和选项画成能点的样子(不是一坨 JSON),
  * 选好了回答放进 updatedInput.answers 带回去(单选是选项名,多选用", "连起来)。
+ * 单选题里"其他"也算一个选项:点方案清掉自己写的,写了就取消已选的方案。
  */
 function QuestionCard({
   ask,
@@ -513,7 +514,8 @@ function QuestionCard({
   ) as AskQuestion[];
   const [picked, setPicked] = useState<Record<number, string[]>>({});
   const [other, setOther] = useState<Record<number, string>>({});
-  const toggle = (qi: number, label: string, multi: boolean) =>
+  const toggle = (qi: number, label: string, multi: boolean) => {
+    if (!multi) setOther((cur) => ({ ...cur, [qi]: "" }));
     setPicked((cur) => {
       const now = cur[qi] ?? [];
       const next = multi
@@ -523,6 +525,7 @@ function QuestionCard({
         : [label];
       return { ...cur, [qi]: next };
     });
+  };
   const answerOf = (qi: number) => {
     const typed = other[qi]?.trim();
     const labels = [...(picked[qi] ?? []), ...(typed ? [typed] : [])];
@@ -579,9 +582,13 @@ function QuestionCard({
             })}
             <input
               value={other[qi] ?? ""}
-              onChange={(e) =>
-                setOther((cur) => ({ ...cur, [qi]: e.target.value }))
-              }
+              onChange={(e) => {
+                const text = e.target.value;
+                setOther((cur) => ({ ...cur, [qi]: text }));
+                if (!q.multiSelect && text.trim()) {
+                  setPicked((cur) => ({ ...cur, [qi]: [] }));
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && ready) submit();
               }}
