@@ -160,6 +160,10 @@ export type GitBranchEntry = {
   /** 相对上游领先/落后的提交数;没有上游就都是 0。 */
   ahead: number;
   behind: number;
+  /** 跟踪的上游(如 origin/master);没设上游是 null。 */
+  upstream: string | null;
+  /** 设了上游但远程分支已被删。 */
+  upstreamGone: boolean;
 };
 
 export type GitBranchListResult = {

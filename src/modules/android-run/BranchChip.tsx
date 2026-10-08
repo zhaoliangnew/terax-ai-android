@@ -432,6 +432,10 @@ function ChangedFilesPreview({
 }
 
 /** `origin/feature/foo` → `feature/foo`:去掉的是 remote 名,不是路径段。 */
+const LIST_WIDTH_KEY = "terax:repo-branch-list-width";
+const LIST_MIN_WIDTH = 160;
+const LIST_MAX_WIDTH = 520;
+
 function remoteShortName(name: string): string {
   const slash = name.indexOf("/");
   return slash >= 0 ? name.slice(slash + 1) : name;
@@ -570,6 +574,43 @@ export function BranchChip({
   const [pushingBranch, setPushingBranch] = useState<string | null>(null);
   const [commitOnlyOpen, setCommitOnlyOpen] = useState(false);
   const [listVersion, setListVersion] = useState(0);
+  // 右栏仓库 tab 里左边分支列表的宽度,拖分界线调整,记住
+  const [listWidth, setListWidth] = useState(() => {
+    try {
+      const v = Number(localStorage.getItem(LIST_WIDTH_KEY));
+      if (v >= LIST_MIN_WIDTH && v <= LIST_MAX_WIDTH) return v;
+    } catch {}
+    return 224;
+  });
+  const startListResize = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const el = e.currentTarget;
+      el.setPointerCapture(e.pointerId);
+      const startX = e.clientX;
+      const startW = listWidth;
+      let w = startW;
+      const move = (ev: PointerEvent) => {
+        w = Math.min(
+          LIST_MAX_WIDTH,
+          Math.max(LIST_MIN_WIDTH, startW + ev.clientX - startX),
+        );
+        setListWidth(w);
+      };
+      const up = () => {
+        el.removeEventListener("pointermove", move);
+        el.removeEventListener("pointerup", up);
+        el.removeEventListener("pointercancel", up);
+        try {
+          localStorage.setItem(LIST_WIDTH_KEY, String(w));
+        } catch {}
+      };
+      el.addEventListener("pointermove", move);
+      el.addEventListener("pointerup", up);
+      el.addEventListener("pointercancel", up);
+    },
+    [listWidth],
+  );
   // 单击选中的分支(右侧展示它的提交记录),双击才是切换
   const [selected, setSelected] = useState<{
     display: string;
@@ -722,6 +763,15 @@ export function BranchChip({
     };
   }, [repoRoot, openCommitSha]);
 
+  const localNames = useMemo(
+    () =>
+      new Set(
+        (branches ?? [])
+          .filter((b) => b.kind === "local" || b.kind === "worktree")
+          .map((b) => b.name),
+      ),
+    [branches],
+  );
   // 被 worktree 占用的分支也算本地分支,一并列出来(带标记);
   // 排除 worktree 里 detached 的假名目
   const localBranches = useMemo(
@@ -1093,6 +1143,25 @@ export function BranchChip({
     },
     [repoRoot, pendingDelete, deleteBusy, deleteRemoteCounterpart],
   );
+
+  /**
+   * 本地分支有没有对应的远程分支:设了上游且还在,或者远程上有同名分支
+   * (没 set-upstream 但推过的也算有)。上游被删、远程也没同名的 = gone。
+   */
+  const remoteShortNames = useMemo(
+    () =>
+      new Set(
+        (branches ?? [])
+          .filter((r) => r.kind === "remote")
+          .map((r) => remoteShortName(r.name)),
+      ),
+    [branches],
+  );
+  const remoteState = (b: GitBranchEntry): "ok" | "gone" | "none" => {
+    if (b.upstream && !b.upstreamGone) return "ok";
+    if (remoteShortNames.has(b.name)) return "ok";
+    return b.upstream ? "gone" : "none";
+  };
 
   /** 远端名(删远端标签要用):有远程分支就取它的前缀,否则按 origin。 */
   const defaultRemote = useMemo(() => {
@@ -1552,8 +1621,9 @@ export function BranchChip({
           <div
             className={cn(
               "shrink-0 overflow-y-auto pr-1",
-              isPanel ? "h-full w-56" : "h-[72vh] w-72",
+              isPanel ? "h-full" : "h-[72vh] w-72",
             )}
+            style={isPanel ? { width: listWidth } : undefined}
           >
             {/* 搜索框钉在列表顶上,滚到下面也能直接改搜索词 */}
             <div className="sticky top-0 z-10 bg-background pb-1">
@@ -1734,9 +1804,10 @@ export function BranchChip({
                     ) : (
                       <span className="size-3.5 shrink-0" />
                     )}
+                    {/* 名字长就折行,不省略号 —— 分支名往往后半截才是区别 */}
                     <span
                       className={cn(
-                        "min-w-0 truncate",
+                        "min-w-0 break-all",
                         b.isHead && "font-semibold text-emerald-500",
                       )}
                     >
@@ -1750,14 +1821,32 @@ export function BranchChip({
                         worktree
                       </span>
                     )}
-                    {/* 相对上游的领先/落后,和 SourceTree 的 2↑ 一个意思 */}
-                    {(b.ahead > 0 || b.behind > 0) && (
-                      <span className="ml-auto shrink-0 rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground tabular-nums">
-                        {b.ahead > 0 && `${b.ahead}↑`}
-                        {b.ahead > 0 && b.behind > 0 && " "}
-                        {b.behind > 0 && `${b.behind}↓`}
-                      </span>
-                    )}
+                    <span className="ml-auto flex shrink-0 items-center gap-1">
+                      {/* 没有对应远程分支的标出来:推送前一眼看出哪些只在本机 */}
+                      {remoteState(b) === "gone" ? (
+                        <span
+                          title={`跟踪的远程分支 ${b.upstream} 已被删除`}
+                          className="rounded bg-amber-500/15 px-1 text-[9.5px] text-amber-500/80"
+                        >
+                          远程已删
+                        </span>
+                      ) : remoteState(b) === "none" ? (
+                        <span
+                          title="远程没有同名分支,只在本机"
+                          className="rounded bg-foreground/10 px-1 text-[9.5px] text-muted-foreground"
+                        >
+                          仅本地
+                        </span>
+                      ) : null}
+                      {/* 相对上游的领先/落后,和 SourceTree 的 2↑ 一个意思 */}
+                      {(b.ahead > 0 || b.behind > 0) && (
+                        <span className="rounded bg-foreground/10 px-1 text-[10px] text-muted-foreground tabular-nums">
+                          {b.ahead > 0 && `${b.ahead}↑`}
+                          {b.ahead > 0 && b.behind > 0 && " "}
+                          {b.behind > 0 && `${b.behind}↓`}
+                        </span>
+                      )}
+                    </span>
                   </button>
                 </ContextMenuTrigger>
                 <ContextMenuContent className="min-w-52 max-w-96">
@@ -1889,21 +1978,26 @@ export function BranchChip({
                         )}
                       >
                         <span className="size-3.5 shrink-0" />
-                        <span className="min-w-0 truncate">{b.name}</span>
+                        <span className="min-w-0 break-all">{b.name}</span>
                       </button>
                     </ContextMenuTrigger>
                     <ContextMenuContent className="min-w-52 max-w-96">
                       {/* 检出远程分支 = 建一个跟踪它的同名本地分支;
-                              本地已经有同名分支时 git 直接切过去 */}
+                              本地已经有同名分支就置灰 —— 再点只是切过去,
+                              不是"检出为本地分支",要切去本地那行 */}
                       <ContextMenuItem
                         className="text-[12px]"
-                        disabled={checkingOut}
+                        disabled={
+                          checkingOut || localNames.has(remoteShortName(b.name))
+                        }
                         onSelect={() =>
                           void handleCheckout(remoteShortName(b.name))
                         }
                       >
                         <span className="min-w-0 truncate">
                           检出为本地分支 {remoteShortName(b.name)}
+                          {localNames.has(remoteShortName(b.name)) &&
+                            "(本地已有)"}
                         </span>
                       </ContextMenuItem>
                       <ContextMenuSeparator />
@@ -1982,10 +2076,18 @@ export function BranchChip({
                   上下分区 —— diff 通栏比挤在窄的第三栏里好读得多) */}
           <div
             className={cn(
-              "flex min-w-0 flex-col border-l border-border",
+              "relative flex min-w-0 flex-col border-l border-border",
               isPanel ? "h-full flex-1 pl-3" : "h-[72vh] w-[64rem] pl-4",
             )}
           >
+            {/* 左右分界线可以拖,分支名长的仓库把左栏拉宽 */}
+            {isPanel && (
+              <div
+                title="拖动调整宽度"
+                onPointerDown={startListResize}
+                className="absolute inset-y-0 -left-1.5 z-20 w-3 cursor-col-resize transition-colors after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 hover:after:bg-foreground/30"
+              />
+            )}
             {/* 上:提交记录。开着改动区时让出下面一大半 */}
             <div
               className={cn(

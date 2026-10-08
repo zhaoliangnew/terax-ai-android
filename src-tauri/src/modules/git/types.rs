@@ -159,6 +159,10 @@ pub struct GitBranchEntry {
     // 相对上游领先/落后的提交数;没有上游就都是 0
     pub ahead: u32,
     pub behind: u32,
+    // 本地分支跟踪的上游(如 origin/master);没设上游就是 None
+    pub upstream: Option<String>,
+    // 设了上游但远程分支已经被删了([gone])
+    pub upstream_gone: bool,
 }
 
 #[derive(Serialize)]

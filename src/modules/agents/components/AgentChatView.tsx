@@ -870,9 +870,17 @@ export function AgentChatView({
   /** 离底部还远:右下角挂一个"回到底部"。 */
   const [awayFromBottom, setAwayFromBottom] = useState(false);
 
+  // 自己刚发了一条:不管之前翻到哪,都回到底部重新贴上 —— 发完还停在
+  // 上面看旧内容,得自己再滚下去才看得到回复
+  const lastTurnId = turns[turns.length - 1]?.id ?? null;
+  const seenTurnRef = useRef(lastTurnId);
   // biome-ignore lint/correctness/useExhaustiveDependencies: 内容变了才需要跟到底
   useLayoutEffect(() => {
     const el = scrollRef.current;
+    if (lastTurnId !== seenTurnRef.current) {
+      seenTurnRef.current = lastTurnId;
+      stickRef.current = true;
+    }
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [items, working, permissions, statusText]);
 

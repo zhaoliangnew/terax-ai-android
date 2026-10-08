@@ -1194,7 +1194,10 @@ pub fn list_branches(
     if let Ok(lines) = git_stdout_lines(
         &repo_root.workspace,
         &repo_root.git_path,
-        ["branch", "--format=%(refname:short)%00%(HEAD)%00%(upstream:track)"],
+        [
+            "branch",
+            "--format=%(refname:short)%00%(HEAD)%00%(upstream:track)%00%(upstream:short)",
+        ],
     ) {
         for line in &lines {
             let mut parts = line.split('\0');
@@ -1204,6 +1207,10 @@ pub fn list_branches(
             // "[ahead 2, behind 1]" / "[ahead 2]" / "[gone]" / 空
             // (LC_ALL=C 固定,不会被本地化成中文)
             let track = parts.next().unwrap_or("");
+            let upstream = Some(parts.next().unwrap_or("").trim())
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let upstream_gone = track.trim() == "[gone]";
             let mut ahead = 0u32;
             let mut behind = 0u32;
             if let Some(inner) = track
@@ -1229,6 +1236,8 @@ pub fn list_branches(
                     is_detached: is_head && is_detached_head,
                     ahead,
                     behind,
+                    upstream,
+                    upstream_gone,
                 });
             }
         }
@@ -1253,6 +1262,8 @@ pub fn list_branches(
                 is_detached: false,
                 ahead: 0,
                 behind: 0,
+                upstream: None,
+                upstream_gone: false,
             });
         }
     }
@@ -1325,10 +1336,14 @@ pub fn list_branches(
                 // worktree 条目自己不带 ahead/behind,沿用本地条目算好的
                 let ahead = existing.ahead;
                 let behind = existing.behind;
+                let upstream = existing.upstream.clone();
+                let upstream_gone = existing.upstream_gone;
                 deduped[existing_idx] = GitBranchEntry {
                     is_head,
                     ahead,
                     behind,
+                    upstream,
+                    upstream_gone,
                     ..b
                 };
             } else if b.is_head && !existing.is_head {
@@ -1396,6 +1411,8 @@ fn push_worktree(
         is_detached: branch.is_none(),
         ahead: 0,
         behind: 0,
+        upstream: None,
+        upstream_gone: false,
     });
 }
 

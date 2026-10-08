@@ -633,7 +633,9 @@ export function AgentComposer({
               type="button"
               title="提交这些改动"
               onClick={() => onOpenRepo?.(true)}
-              className="ml-auto shrink-0 tabular-nums text-amber-500/80 hover:underline"
+              // 输入框圆角半径 24px,文字右缘贴着角会像夹在里面:
+              // 往左让到圆角以内(行本身 px-2,再加 16px)
+              className="mr-4 ml-auto shrink-0 text-[11px] tabular-nums text-amber-500/80 hover:underline"
             >
               {branch.changed} 个文件未提交
             </button>
