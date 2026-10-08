@@ -5,6 +5,7 @@ import {
   EMPTY_TABS,
   NO_PROJECT_ROOT,
   OPEN_IN_BROWSER,
+  OPEN_REPO_TAB,
   REVEAL_RIGHT_PANEL,
   useWebTabsStore,
 } from "@/modules/browser/webTabsStore";
@@ -211,6 +212,15 @@ export function RightPanel({
     setActiveWeb(null);
     onTabChange(t);
   };
+  // 聊天输入框上方点分支名 → 切到仓库 tab(开着网页也得让位)
+  useEffect(() => {
+    const open = () => {
+      setActiveWeb(null);
+      onTabChange("repo");
+    };
+    window.addEventListener(OPEN_REPO_TAB, open);
+    return () => window.removeEventListener(OPEN_REPO_TAB, open);
+  }, [setActiveWeb, onTabChange]);
 
   const empty = (
     <div className="flex h-full items-center justify-center px-4 text-center text-[12px] text-muted-foreground">

@@ -27,6 +27,10 @@ import {
   type GitTagEntry,
   native,
 } from "@/modules/ai/lib/native";
+import {
+  OPEN_REPO_TAB,
+  pendingRepoCommit,
+} from "@/modules/browser/webTabsStore";
 import { GitDiffPane } from "@/modules/editor/GitDiffPane";
 import { invalidateRepoDiffs } from "@/modules/editor/lib/diffCache";
 import {
@@ -986,6 +990,27 @@ export function BranchChip({
 
   /** 工作区干净时,"提交"框改成只改上一条提交的说明(git commit --amend)。 */
   const amendMode = commitOnlyOpen && (workingFiles?.length ?? 0) === 0;
+  // 聊天输入框上方点"N 个文件未提交":切过来后直接弹提交框。面板早就开着
+  // 时只会收到事件、依赖不变,靠 commitAsk 跳一下重新检查
+  const [commitAsk, setCommitAsk] = useState(0);
+  useEffect(() => {
+    if (!isPanel) return;
+    const ask = () => setCommitAsk((n) => n + 1);
+    window.addEventListener(OPEN_REPO_TAB, ask);
+    return () => window.removeEventListener(OPEN_REPO_TAB, ask);
+  }, [isPanel]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: commitAsk 是"再看一眼有没有请求"的信号
+  useEffect(() => {
+    // 工作区还没读到时别弹:改动数当 0 会被当成"修改上次提交"
+    if (!isPanel || !open || workingFiles == null) return;
+    // 只认刚点的:过了几秒还没轮上就作废,免得过后莫名其妙弹出来
+    if (Date.now() - pendingRepoCommit.at > 5000) return;
+    // 切过来时手上可能还是上次读的旧列表(是空的),等这次重读回来再定
+    if (workingFiles.length === 0) return;
+    pendingRepoCommit.at = 0;
+    setCommitMsg("");
+    setCommitOnlyOpen(true);
+  }, [isPanel, open, workingFiles, commitAsk]);
   // 每次开框只预填一次,填完用户改了字不能被覆盖
   const amendPrefilledRef = useRef(false);
   useEffect(() => {
@@ -1153,38 +1178,48 @@ export function BranchChip({
 
   // 打开弹框默认选中当前分支;关闭清掉,免得下次带着旧选中打开
   const currentBranch = repo?.branch ?? null;
+  // 选中是在哪个仓库里做的:换了工程/worktree,旧选中的分支在新仓库里
+  // 多半不存在,git log 查不到就是一片空白,得回落到新仓库的当前分支
+  const selectedRepoRef = useRef<string | null>(null);
   useEffect(() => {
     if (!open) {
       setSelected(null);
       return;
     }
-    if (currentBranch) {
-      setSelected(
-        (cur) =>
-          cur ?? {
-            display: currentBranch,
-            refName: currentBranch,
-            checkoutName: currentBranch,
-            isHead: true,
-          },
-      );
-    }
-  }, [open, currentBranch]);
+    if (!currentBranch) return;
+    const head = {
+      display: currentBranch,
+      refName: currentBranch,
+      checkoutName: currentBranch,
+      isHead: true,
+    };
+    const sameRepo = selectedRepoRef.current === repoRoot;
+    selectedRepoRef.current = repoRoot;
+    setSelected((cur) => {
+      if (!cur || !sameRepo) return head;
+      // 终端里切了分支:原来看的"当前分支"已经不是当前的了,跟着走
+      if (cur.isHead && cur.refName !== currentBranch) return head;
+      if (!cur.isHead && cur.refName === currentBranch) return head;
+      return cur;
+    });
+  }, [open, currentBranch, repoRoot]);
 
   // 只认 refName 字符串,不认 selected 对象本身:双击会连发两次单击,
   // 每次都造新对象的话这里就重载两遍,右栏跟着闪
   const selectedRef = selected?.refName ?? null;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 换分支/标签就重新自动选一次
+  // 换仓库后同名分支也得重新自动选:上一个仓库的提交在这里不存在
+  const autoPickKey = selectedRef ? `${repoRoot}\0${selectedRef}` : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 换分支/标签/仓库就重新自动选一次
   useEffect(() => {
     autoPickedRef.current = null;
-  }, [selectedRef]);
+  }, [autoPickKey]);
   useEffect(() => {
-    if (!open || !selectedRef) return;
-    if (autoPickedRef.current === selectedRef) return;
+    if (!open || !autoPickKey) return;
+    if (autoPickedRef.current === autoPickKey) return;
     if (logEntries == null) return;
     // 当前分支得等工作区状态到齐再定,否则会先选中提交、再跳到未提交,闪一下
     if (selected?.isHead && workingFiles == null) return;
-    autoPickedRef.current = selectedRef;
+    autoPickedRef.current = autoPickKey;
     if (selected?.isHead && (workingFiles?.length ?? 0) > 0) {
       setWorkingOpen(true);
       setWorkingFile(workingFiles?.[0] ?? null);
@@ -1193,7 +1228,7 @@ export function BranchChip({
       setWorkingOpen(false);
       setOpenCommit(logEntries[0] ?? null);
     }
-  }, [open, selectedRef, logEntries, workingFiles, selected?.isHead]);
+  }, [open, autoPickKey, logEntries, workingFiles, selected?.isHead]);
 
   useEffect(() => {
     if (!open || !repoRoot || !selectedRef) return;
@@ -1989,16 +2024,12 @@ export function BranchChip({
                     <span className="w-28 shrink-0 text-[10.5px] text-muted-foreground/50">
                       现在
                     </span>
-                    <span
-                      className={cn(
-                        "min-w-0 flex-1 break-words text-[12px] leading-snug font-medium",
-                        workingOpen && "text-emerald-500/75",
-                      )}
-                    >
-                      未提交的更改
-                    </span>
-                    <span className="shrink-0 rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
-                      {workingFiles?.length} 个文件
+                    {/* 和聊天输入框上方那个"N 个文件未提交"同一个橘色 */}
+                    <span className="min-w-0 flex-1 break-words text-[12px] leading-snug font-medium text-amber-500/80">
+                      <span className="tabular-nums">
+                        {workingFiles?.length}
+                      </span>{" "}
+                      个文件未提交的更改
                     </span>
                     <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/50">
                       ·

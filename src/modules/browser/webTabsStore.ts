@@ -74,6 +74,15 @@ export const useWebTabsStore = create<Store>((set) => ({
 /** 让 App 把收起的右栏展开(AI 在内嵌浏览器里操作时要看得见)。 */
 export const REVEAL_RIGHT_PANEL = "terax:reveal-right-panel";
 
+/** 让右栏切到"仓库"tab(聊天输入框上方点分支名 / 未提交文件数)。 */
+export const OPEN_REPO_TAB = "terax:open-repo-tab";
+
+/**
+ * 切到仓库 tab 后顺手弹出提交框的请求。仓库面板没打开过就还没挂载,
+ * 收不到事件,所以先记在这里,面板露出来、工作区读到了再自己取走。
+ */
+export const pendingRepoCommit = { at: 0 };
+
 /** 右栏没进任何工程时,网页标签页放在这一组里。 */
 export const NO_PROJECT_ROOT = "(no-project)";
 

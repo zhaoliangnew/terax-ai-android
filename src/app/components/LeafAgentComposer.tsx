@@ -20,6 +20,10 @@ import {
 } from "@/modules/agents/store/chatProviders";
 import { native } from "@/modules/ai/lib/native";
 import { AGENT_QUICK_COMMANDS } from "@/modules/android-run/AgentQuickLaunch";
+import {
+  OPEN_REPO_TAB,
+  pendingRepoCommit,
+} from "@/modules/browser/webTabsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   ptyIdForLeaf,
@@ -441,7 +445,8 @@ export function LeafAgentChat({
 }
 
 /**
- * 窗格目录当前的分支(worktree 里再带上 worktree 名),给输入框上方显示。
+ * 窗格目录当前的分支(worktree 里再带上 worktree 名)和未提交文件数,
+ * 给输入框上方显示。
  * 终端里随时可能切分支、cd 走,每隔几秒重新看一眼。
  */
 function useLeafBranch(
@@ -452,6 +457,7 @@ function useLeafBranch(
   const [branch, setBranch] = useState<{
     name: string;
     worktree: string | null;
+    changed: number;
   } | null>(null);
   useEffect(() => {
     if (!on) return;
@@ -461,7 +467,7 @@ function useLeafBranch(
       if (!dir) return;
       native
         .gitResolveRepo(dir)
-        .then((r) => {
+        .then(async (r) => {
           if (!alive) return;
           if (!r) {
             setBranch(null);
@@ -471,10 +477,18 @@ function useLeafBranch(
           // worktree 放在主工程的 .worktree/<名字> 下
           const worktree =
             /\/\.worktree\/([^/]+)$/.exec(r.repoRoot)?.[1] ?? null;
+          // 读不到改动数就当 0,不该连分支一起不显示
+          const changed = await native
+            .gitStatus(r.repoRoot)
+            .then((st) => st.changedFiles.length)
+            .catch(() => 0);
+          if (!alive) return;
           setBranch((cur) =>
-            cur?.name === name && cur.worktree === worktree
+            cur?.name === name &&
+            cur.worktree === worktree &&
+            cur.changed === changed
               ? cur
-              : { name, worktree },
+              : { name, worktree, changed },
           );
         })
         .catch(() => {});
@@ -552,6 +566,10 @@ export function LeafAgentComposer({
         onSetServiceTier={(t) => api.setServiceTier?.(leafId, t)}
         usage={session?.usage}
         branch={branch}
+        onOpenRepo={(commit) => {
+          if (commit) pendingRepoCommit.at = Date.now();
+          window.dispatchEvent(new Event(OPEN_REPO_TAB));
+        }}
         context={session?.context}
         compact={compact}
         onOpenUsage={() => api.requestUsage(leafId)}

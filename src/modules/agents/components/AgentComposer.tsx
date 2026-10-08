@@ -79,7 +79,13 @@ type Props = {
   /** 当前上下文大小和占比(底栏"用量"前面显示)。 */
   context?: ContextUsage | null;
   /** 输入框上方显示的当前分支;在 worktree 里再带上 worktree 名。 */
-  branch?: { name: string; worktree: string | null } | null;
+  branch?: {
+    name: string;
+    worktree: string | null;
+    changed: number;
+  } | null;
+  /** 点分支:切到右栏仓库 tab;点未提交文件数时 commit=true,直接弹提交框。 */
+  onOpenRepo?: (commit?: boolean) => void;
   onOpenUsage: () => void;
   /** 输入 / (Codex 是 $)能选的技能和命令;undefined = 还在读。 */
   commands?: SlashCommandOption[];
@@ -368,6 +374,7 @@ export function AgentComposer({
   onSetServiceTier,
   usage,
   branch,
+  onOpenRepo,
   context,
   compact = false,
   onOpenUsage,
@@ -595,24 +602,42 @@ export function AgentComposer({
         </div>
       )}
       {branch && !compact && (
-        <div className="mx-auto flex max-w-3xl items-center gap-1 px-2 pb-1.5 text-[12px] text-muted-foreground">
-          <HugeiconsIcon
-            icon={GitBranchIcon}
-            size={12}
-            strokeWidth={1.75}
-            className="shrink-0"
-          />
-          {branch.worktree && (
-            <>
-              <span className="shrink-0 text-foreground/80">
-                {branch.worktree}
-              </span>
-              <span className="shrink-0 text-muted-foreground/50">·</span>
-            </>
+        <div className="mx-auto flex max-w-3xl items-center gap-2 px-2 pb-1.5 text-[12px] text-muted-foreground">
+          <button
+            type="button"
+            title="打开仓库"
+            onClick={() => onOpenRepo?.()}
+            className="flex min-w-0 items-center gap-1 rounded transition-colors hover:text-foreground"
+          >
+            <HugeiconsIcon
+              icon={GitBranchIcon}
+              size={12}
+              strokeWidth={1.75}
+              className="shrink-0"
+            />
+            {branch.worktree && (
+              <>
+                <span className="shrink-0 text-foreground/80">
+                  {branch.worktree}
+                </span>
+                <span className="shrink-0 text-muted-foreground/50">·</span>
+              </>
+            )}
+            <span className="min-w-0 truncate" title={branch.name}>
+              {branch.name}
+            </span>
+          </button>
+          {/* 工作区干净就不占位置,一眼看出有没有要提交的 */}
+          {branch.changed > 0 && (
+            <button
+              type="button"
+              title="提交这些改动"
+              onClick={() => onOpenRepo?.(true)}
+              className="ml-auto shrink-0 tabular-nums text-amber-500/80 hover:underline"
+            >
+              {branch.changed} 个文件未提交
+            </button>
           )}
-          <span className="min-w-0 truncate" title={branch.name}>
-            {branch.name}
-          </span>
         </div>
       )}
       <div
