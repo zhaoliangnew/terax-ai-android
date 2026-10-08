@@ -1161,13 +1161,36 @@ function TurnRail({
   active: string | null;
   onJump: (id: string) => void;
 }) {
+  // 提问一多,横线从上到下排满一整列、压在正文上。最多露 RAIL_MAX 条,
+  // 以正在看的那一问为中心滑动;两头还有的话淡淡标一下剩几条
+  const activeIdx = Math.max(
+    0,
+    turns.findIndex((t) => t.id === active),
+  );
+  const start = Math.min(
+    Math.max(0, activeIdx - Math.floor(RAIL_MAX / 2)),
+    Math.max(0, turns.length - RAIL_MAX),
+  );
+  const shown = turns.slice(start, start + RAIL_MAX);
+  const hiddenAbove = start;
+  const hiddenBelow = turns.length - start - shown.length;
   return (
     <nav
       aria-label="对话导航"
       // group/rail:鼠标一进这一列,所有横线一起拉长(照 Codex)
-      className="group/rail absolute top-1/2 left-3 z-20 flex max-h-[70%] -translate-y-1/2 flex-col"
+      className="group/rail absolute top-1/2 left-3 z-20 flex -translate-y-1/2 flex-col"
     >
-      {turns.map((t) => {
+      {hiddenAbove > 0 && (
+        <button
+          type="button"
+          title={`上面还有 ${hiddenAbove} 个提问`}
+          onClick={() => onJump(turns[start - 1].id)}
+          className="cursor-pointer pb-1 pl-1 text-left text-[9px] leading-none text-muted-foreground/60 tabular-nums hover:text-foreground"
+        >
+          +{hiddenAbove}
+        </button>
+      )}
+      {shown.map((t) => {
         const on = t.id === active;
         return (
           <div key={t.id} className="group/turn relative">
@@ -1200,6 +1223,19 @@ function TurnRail({
           </div>
         );
       })}
+      {hiddenBelow > 0 && (
+        <button
+          type="button"
+          title={`下面还有 ${hiddenBelow} 个提问`}
+          onClick={() => onJump(turns[start + shown.length].id)}
+          className="cursor-pointer pt-1 pl-1 text-left text-[9px] leading-none text-muted-foreground/60 tabular-nums hover:text-foreground"
+        >
+          +{hiddenBelow}
+        </button>
+      )}
     </nav>
   );
 }
+
+/** 对话导航最多露几条横线。 */
+const RAIL_MAX = 15;

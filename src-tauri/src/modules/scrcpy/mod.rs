@@ -96,6 +96,71 @@ fn spawn_log_drain<R: Read + Send + 'static>(r: R, tag: &'static str) {
     });
 }
 
+/// 带超时跑一条 adb 命令。网络设备断过一次后 adb 手里的连接可能半死不活:
+/// `adb devices` 还报 device,push/forward 却卡住不返回,投屏就一直"连接中"。
+fn run_timeout(mut cmd: Command, secs: u64, what: &str) -> Result<std::process::Output, String> {
+    let mut child = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{what} failed: {e}"))?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|e| format!("{what} failed: {e}"))
+            }
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{what} 超时({secs} 秒没响应)"));
+            }
+            Err(e) => return Err(format!("{what} failed: {e}")),
+        }
+    }
+}
+
+/// 设备这会儿真能通吗:跑个 echo,有回音才算。
+fn transport_alive(adb_path: &str, serial: &str) -> bool {
+    let mut c = adb(adb_path, serial);
+    c.args(["shell", "echo", "ok"]);
+    matches!(run_timeout(c, 3, "adb shell"), Ok(o) if o.status.success()
+        && String::from_utf8_lossy(&o.stdout).trim() == "ok")
+}
+
+/// 网络设备(ip:port)投屏前先确认连接活着;不通就 disconnect + connect 重连一次。
+/// 网络闪断后 adb 不会自己把连接修好,以前得去终端手动 `adb connect` 才能
+/// 重新投屏,这里替人做了。USB 设备不需要。
+fn ensure_network_transport(adb_path: &str, serial: &str) -> Result<(), String> {
+    if !serial.contains(':') || transport_alive(adb_path, serial) {
+        return Ok(());
+    }
+    log::info!("scrcpy: {serial} 连接不通,重连");
+    let mut bin = Command::new(adb_path);
+    crate::modules::proc::hide_console(&mut bin);
+    bin.args(["disconnect", serial]);
+    let _ = run_timeout(bin, 5, "adb disconnect");
+    let mut bin = Command::new(adb_path);
+    crate::modules::proc::hide_console(&mut bin);
+    bin.args(["connect", serial]);
+    let out = run_timeout(bin, 10, "adb connect")?;
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    // connect 刚返回时设备可能还没进 device 状态,给它几秒
+    for _ in 0..6 {
+        if transport_alive(adb_path, serial) {
+            log::info!("scrcpy: {serial} 重连成功");
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Err(format!("设备 {serial} 网络不通,重连失败:{}", text.trim()))
+}
+
 fn read_exact(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Result<()> {
     stream.read_exact(buf)
 }
@@ -138,13 +203,12 @@ pub async fn scrcpy_start(
         )
         .map_err(|e| format!("resolve server jar: {e}"))?;
 
+    ensure_network_transport(&adb_path, &serial)?;
+
     // Push server.
-    let push = adb(&adb_path, &serial)
-        .arg("push")
-        .arg(&server_path)
-        .arg(DEVICE_SERVER_PATH)
-        .output()
-        .map_err(|e| format!("adb push failed: {e}"))?;
+    let mut push = adb(&adb_path, &serial);
+    push.arg("push").arg(&server_path).arg(DEVICE_SERVER_PATH);
+    let push = run_timeout(push, 30, "adb push")?;
     if !push.status.success() {
         return Err(format!(
             "adb push failed: {}",
@@ -164,12 +228,11 @@ pub async fn scrcpy_start(
 
     // Pick a free local port and set up the forward.
     let local_port = pick_local_port().ok_or("no free local port")?;
-    let fwd = adb(&adb_path, &serial)
-        .arg("forward")
+    let mut fwd = adb(&adb_path, &serial);
+    fwd.arg("forward")
         .arg(format!("tcp:{local_port}"))
-        .arg(format!("localabstract:{socket_name}"))
-        .output()
-        .map_err(|e| format!("adb forward failed: {e}"))?;
+        .arg(format!("localabstract:{socket_name}"));
+    let fwd = run_timeout(fwd, 10, "adb forward")?;
     if !fwd.status.success() {
         return Err(format!(
             "adb forward failed: {}",

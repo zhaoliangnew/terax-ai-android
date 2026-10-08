@@ -194,6 +194,8 @@ const ROW_HEIGHT = 28;
  * 之后,这是唯一退回去的路。 */
 const LEFT_TREE_ACTIONS = ["up", "refresh", "filter"] as const;
 const OVERSCAN = 8;
+/** 判成"不是工程"的目录多久后允许重判(目录内容可能还在落盘)。 */
+const NOT_PROJECT_RECHECK_MS = 3000;
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -587,6 +589,10 @@ export const FileExplorer = memo(
     // Classify visible directories as projects (async, cached). Project dirs
     // get the 工程 treatment: kind icon, no expand, click opens terminal.
     const projectCacheRef = useRef<Map<string, ProjectKind | null>>(new Map());
+    // 判成"不是工程"的目录记下判定时间,过一会儿允许重判:git clone /
+    // 解压时目录先空着出现,这一刻判成普通文件夹,文件落齐后若不重判,
+    // 整个会话都认不出来。
+    const notProjectAtRef = useRef<Map<string, number>>(new Map());
     const [projectDirs, setProjectDirs] = useState<Map<string, ProjectKind>>(
       new Map(),
     );
@@ -600,9 +606,15 @@ export const FileExplorer = memo(
       let cancelled = false;
       void (async () => {
         for (const p of dirPaths) {
-          if (projectCacheRef.current.has(p)) continue;
+          if (projectCacheRef.current.has(p)) {
+            const at = notProjectAtRef.current.get(p);
+            if (at === undefined || Date.now() - at < NOT_PROJECT_RECHECK_MS)
+              continue;
+          }
           const kind = await classifyProjectDir(p);
           projectCacheRef.current.set(p, kind);
+          if (kind) notProjectAtRef.current.delete(p);
+          else notProjectAtRef.current.set(p, Date.now());
           // 工程目录不该展开:若在归类前已被展开,自动收起。
           if (kind && tree.expanded.has(p)) tree.toggle(p);
         }
