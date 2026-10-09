@@ -7,7 +7,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import type { ModelOption } from "../store/claudeChatStore";
 
 const EFFORT_LABELS: Record<string, string> = {
@@ -54,25 +54,53 @@ type Props = {
   onSetModel: (model: string) => void;
   onSetEffort: (effort: string) => void;
   onSetServiceTier: (tier: string) => void;
-  onDone: () => void;
 };
 
+/**
+ * 面板左上角开关的悬停说明(照 Codex:"1.5 倍速度 / 用量更多")。往下弹:
+ * 菜单是 overflow-hidden,往上弹会被裁掉。
+ */
+export function PanelHint({
+  title,
+  detail,
+  children,
+}: {
+  title: string;
+  detail: string;
+  children: ReactNode;
+}) {
+  return (
+    <span className="group/hint relative flex">
+      {children}
+      <span className="pointer-events-none absolute top-full left-0 z-40 mt-1 hidden flex-col rounded-lg border border-border bg-popover px-2.5 py-1.5 whitespace-nowrap shadow-lg group-hover/hint:flex">
+        <span className="text-[12px] font-medium text-foreground">{title}</span>
+        <span className="text-[11px] text-muted-foreground">{detail}</span>
+      </span>
+    </span>
+  );
+}
+
 /** 推理强度滑条:每档一个点,蓝色铺到当前档,白色圆钮可拖可点。 */
-function EffortSlider({
+export function EffortSlider({
   efforts,
   value,
   onChange,
+  ultra: ultraProp,
+  formatLabel = effortLabel,
 }: {
   efforts: string[];
   value: string | null;
   onChange: (effort: string) => void;
+  /** 强制走 Ultra 的紫色渐变(Claude 开 ultracode 时用)。 */
+  ultra?: boolean;
+  formatLabel?: (effort: string | null) => string;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const index = Math.max(0, value ? efforts.indexOf(value) : 0);
   const last = Math.max(1, efforts.length - 1);
   const pct = (index / last) * 100;
-  const ultra = value === ULTRA;
+  const ultra = ultraProp ?? value === ULTRA;
 
   const pick = (clientX: number) => {
     const el = trackRef.current;
@@ -97,7 +125,7 @@ function EffortSlider({
       aria-valuemin={0}
       aria-valuemax={last}
       aria-valuenow={index}
-      aria-valuetext={effortLabel(value)}
+      aria-valuetext={formatLabel(value)}
       onPointerDown={(e) => {
         dragging.current = true;
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -175,7 +203,6 @@ export function CodexModelPanel({
   onSetModel,
   onSetEffort,
   onSetServiceTier,
-  onDone,
 }: Props) {
   const [view, setView] = useState<"effort" | "models">("effort");
   const current =
@@ -205,7 +232,8 @@ export function CodexModelPanel({
             role="menuitem"
             onClick={() => {
               onSetModel(recommended.value);
-              onDone();
+              // 选完回到强度页(新模型支持的档位可能不一样),菜单不关
+              setView("effort");
             }}
             className="flex w-full cursor-pointer flex-col rounded-lg px-2.5 py-1.5 text-left hover:bg-foreground/10"
           >
@@ -223,7 +251,8 @@ export function CodexModelPanel({
             aria-checked={m.value === current?.value}
             onClick={() => {
               onSetModel(m.value);
-              onDone();
+              // 选完回到强度页(新模型支持的档位可能不一样),菜单不关
+              setView("effort");
             }}
             className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-foreground/10"
           >
@@ -240,23 +269,26 @@ export function CodexModelPanel({
   return (
     <div className="flex w-64 flex-col gap-3 px-2 pt-2 pb-2.5">
       <div className="flex items-start justify-between">
-        <button
-          type="button"
-          disabled={!fastTier}
+        <PanelHint
           title={
-            fastTier
-              ? `${fast ? "关闭" : "开启"}快速模式(${fastTier.description})`
-              : "这个模型没有快速模式"
+            fastTier ? `1.5 倍速度${fast ? " · 已开启" : ""}` : "没有快速模式"
           }
-          aria-pressed={fast}
-          onClick={() => onSetServiceTier(fast ? "default" : FAST_TIER)}
-          className={cn(
-            "flex size-7 cursor-pointer items-center justify-center rounded-lg transition-colors hover:bg-foreground/10 disabled:cursor-default disabled:opacity-40",
-            fast ? "text-[#4d8ef7]" : "text-muted-foreground",
-          )}
+          detail={fastTier ? "用量更多" : "这个模型不支持"}
         >
-          <HugeiconsIcon icon={FlashIcon} size={15} strokeWidth={1.75} />
-        </button>
+          <button
+            type="button"
+            disabled={!fastTier}
+            aria-label="快速模式"
+            aria-pressed={fast}
+            onClick={() => onSetServiceTier(fast ? "default" : FAST_TIER)}
+            className={cn(
+              "flex size-7 cursor-pointer items-center justify-center rounded-lg transition-colors hover:bg-foreground/10 disabled:cursor-default disabled:opacity-40",
+              fast ? "text-[#4d8ef7]" : "text-muted-foreground",
+            )}
+          >
+            <HugeiconsIcon icon={FlashIcon} size={15} strokeWidth={1.75} />
+          </button>
+        </PanelHint>
         <div className="flex min-w-0 flex-col items-center gap-0.5">
           <span
             className={cn(

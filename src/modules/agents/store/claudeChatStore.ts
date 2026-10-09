@@ -41,8 +41,13 @@ export type ChatSession = {
   sessionId: string | null;
   permissions: PermissionAsk[];
   models: ModelOption[];
-  /** Codex:推理强度、服务档位(快速);Claude 没有,留空。 */
+  /** 推理强度(Claude/Codex);服务档位(快速)只有 Codex。 */
   effort?: string | null;
+  /** Claude:ultracode 开关,和强度分开设。 */
+  ultracode?: boolean;
+  /** Claude:实际在用的强度(effort 为空 = auto 时就是模型默认档)。 */
+  appliedEffort?: string | null;
+  ultracodeAvailable?: boolean;
   serviceTier?: string | null;
   /** 套餐用量;还没查过是 undefined,查不到是 null。 */
   usage?: UsageInfo | null;
@@ -62,7 +67,37 @@ type SdkChatCommands = {
   send: string;
   stop: string;
   keyPrefix: string;
+  /** 桥接进程认 set_effort / set_ultracode / settings(只有 Claude)。 */
+  effortOps?: boolean;
 };
+
+const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+
+/** /effort 的回复:会话报的实际值,和输入框右下角面板同一个来源。 */
+function effortReport(
+  heading: string,
+  model: string | null,
+  chosen: string | null,
+  applied: { effort?: string | null; ultracode?: boolean },
+): string {
+  const eff = applied.effort ?? "(不发强度参数)";
+  const effNote = applied.ultracode
+    ? "ultracode 开着,按 xhigh 跑"
+    : chosen
+      ? "聊天里指定的"
+      : "auto:没指定,用模型默认档";
+  return [
+    `**${heading}**(会话实际在用的值,和右下角模型面板同一来源)`,
+    "",
+    "| 项 | 值 |",
+    "|---|---|",
+    `| effort | \`${eff}\`(${effNote}) |`,
+    `| ultracode | ${applied.ultracode ? "开" : "关"} |`,
+    `| 模型 | \`${model ?? "未知"}\` |`,
+    "",
+    "只对聊天这个会话生效,命令行是另一个进程,各用各的。改法:`/effort low|medium|high|xhigh|max|auto`、`/effort ultracode on|off`,或点右下角模型名。",
+  ].join("\n");
+}
 
 /**
  * 说 Claude Code 协议(stream-json + 控制请求)的聊天:Claude(经 Agent SDK
@@ -122,6 +157,10 @@ function createSdkChat(cmds: SdkChatCommands) {
       working: m.working,
       model: m.model,
       permissionMode: m.permissionMode,
+      effort: m.effort,
+      ultracode: m.ultracode,
+      appliedEffort: m.appliedEffort,
+      ultracodeAvailable: m.ultracodeAvailable,
       sessionId: m.sessionId,
       context: m.context,
       commands: m.commands ?? undefined,
@@ -154,6 +193,10 @@ function createSdkChat(cmds: SdkChatCommands) {
       messages?: SdkMessage[];
       message?: string;
       models?: ModelOption[];
+      effort?: string | null;
+      ultracode?: boolean;
+      ultracodeAvailable?: boolean;
+      model?: string | null;
       usage?: ClaudeUsage;
       commands?: unknown[];
     } & Partial<PermissionAsk>;
@@ -210,6 +253,28 @@ function createSdkChat(cmds: SdkChatCommands) {
       }
       case "models":
         patch(leafId, { models: evt.models ?? [] });
+        return;
+      case "settings":
+        // 以会话报的为准:ultracode 开没开成、auto 实际是哪档
+        m.appliedEffort = evt.effort ?? null;
+        m.ultracode = evt.ultracode === true;
+        m.ultracodeAvailable = evt.ultracodeAvailable !== false;
+        {
+          const pending = effortReplies.get(leafId);
+          if (pending) {
+            effortReplies.delete(leafId);
+            m.addLocalExchange(
+              pending.question,
+              effortReport(
+                pending.heading,
+                evt.model ?? m.model,
+                m.effort,
+                evt,
+              ),
+            );
+          }
+        }
+        snapshot(leafId);
         return;
       case "commands":
         m.setCommands(evt.commands);
@@ -295,6 +360,10 @@ function createSdkChat(cmds: SdkChatCommands) {
     // 会话要等第一条消息才上报当前模式;在那之前先把要用的模式显示出来,
     // 不然左下角一直是空的"权限模式"
     model.permissionMode = permissionMode;
+    const effort = startEffort();
+    model.effort = effort;
+    const ultracode = startUltracode();
+    model.ultracode = ultracode;
     models.set(leafId, model);
     leafCwd.set(leafId, cwd);
     const resume = fresh ? null : lastSession(cwd);
@@ -309,12 +378,17 @@ function createSdkChat(cmds: SdkChatCommands) {
           working: false,
           model: null,
           permissionMode,
+          effort,
+          ultracode,
           sessionId: null,
           permissions: [],
           models: [],
         },
       },
     }));
+    // 上次选过强度就带上;会话还没起来时 send 会排队,起来后补发
+    if (effort) send(leafId, { op: "set_effort", effort });
+    if (ultracode) send(leafId, { op: "set_ultracode", on: true });
     const channel = new Channel<string>();
     channel.onmessage = (line) => handleLine(leafId, model, line);
     invoke<number>(cmds.start, {
@@ -337,9 +411,48 @@ function createSdkChat(cmds: SdkChatCommands) {
       .catch((e) => patch(leafId, { status: "error", error: String(e) }));
   }
 
+  /** 等会话报实际设置回来再回复的 /effort:窗格 → 用户那句和标题。 */
+  const effortReplies = new Map<
+    number,
+    { question: string; heading: string }
+  >();
+
+  /**
+   * 聊天里打的 /effort 由这边接住,不交给命令行:改强度走和面板同一条路
+   * (两边才不会不一致),回复写的是会话实际在用的值,能拿来对照面板。
+   * 认不出的写法照旧发给 Claude Code,让它报用法。
+   */
+  function effortCommand(leafId: number, text: string): boolean {
+    if (!cmds.effortOps) return false;
+    const hit = /^\/effort(?:\s+(\S+)(?:\s+(\S+))?)?$/i.exec(text.trim());
+    if (!hit) return false;
+    const arg = hit[1]?.toLowerCase();
+    const arg2 = hit[2]?.toLowerCase();
+    let heading: string;
+    if (!arg) {
+      heading = "当前推理强度";
+      send(leafId, { op: "settings" });
+    } else if (!arg2 && (arg === "auto" || EFFORT_LEVELS.includes(arg))) {
+      heading = `已切到 ${arg}`;
+      setChatEffort(leafId, arg === "auto" ? "" : arg);
+    } else if (
+      arg === "ultracode" &&
+      (!arg2 || arg2 === "on" || arg2 === "off")
+    ) {
+      const on = arg2 !== "off";
+      heading = on ? "已打开 ultracode" : "已关闭 ultracode";
+      setChatUltracode(leafId, on);
+    } else {
+      return false;
+    }
+    effortReplies.set(leafId, { question: text.trim(), heading });
+    return true;
+  }
+
   function sendChat(leafId: number, text: string, attachments: string[] = []) {
     const m = models.get(leafId);
     if (!m) return;
+    if (attachments.length === 0 && effortCommand(leafId, text)) return;
     m.addUser(text, attachments);
     snapshot(leafId);
     send(leafId, { op: "send", text, attachments });
@@ -389,6 +502,62 @@ function createSdkChat(cmds: SdkChatCommands) {
       snapshot(leafId);
     }
     send(leafId, { op: "set_mode", mode });
+  }
+
+  const EFFORT_KEY = `${cmds.keyPrefix}.effort`;
+
+  const ULTRACODE_KEY = `${cmds.keyPrefix}.ultracode`;
+
+  /** 新会话用的推理强度:上次在聊天里选的;没选过是 null(用默认)。 */
+  function startEffort(): string | null {
+    try {
+      const v = localStorage.getItem(EFFORT_KEY);
+      // 早先 ultracode 混在强度里存过,现在它是单独的开关
+      if (v === "ultracode") {
+        localStorage.removeItem(EFFORT_KEY);
+        localStorage.setItem(ULTRACODE_KEY, "1");
+        return null;
+      }
+      return v;
+    } catch {
+      return null;
+    }
+  }
+
+  function startUltracode(): boolean {
+    try {
+      return localStorage.getItem(ULTRACODE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  /** 开关 ultracode,记住给以后的新会话用。 */
+  function setChatUltracode(leafId: number, on: boolean) {
+    try {
+      if (on) localStorage.setItem(ULTRACODE_KEY, "1");
+      else localStorage.removeItem(ULTRACODE_KEY);
+    } catch {}
+    const m = models.get(leafId);
+    if (m) {
+      m.ultracode = on;
+      snapshot(leafId);
+    }
+    send(leafId, { op: "set_ultracode", on });
+  }
+
+  /** 改推理强度,记住给以后的新会话用;"" = 回到默认。 */
+  function setChatEffort(leafId: number, effort: string) {
+    try {
+      if (effort) localStorage.setItem(EFFORT_KEY, effort);
+      else localStorage.removeItem(EFFORT_KEY);
+    } catch {}
+    const m = models.get(leafId);
+    if (m) {
+      m.effort = effort || null;
+      snapshot(leafId);
+    }
+    send(leafId, { op: "set_effort", effort });
   }
 
   function requestModels(leafId: number) {
@@ -445,6 +614,8 @@ function createSdkChat(cmds: SdkChatCommands) {
     interruptChat,
     setChatModel,
     setChatMode,
+    setChatEffort,
+    setChatUltracode,
     requestModels,
     requestUsage,
     requestCommands,
@@ -458,6 +629,7 @@ const claude = createSdkChat({
   send: "claude_chat_send",
   stop: "claude_chat_stop",
   keyPrefix: "terax.chat",
+  effortOps: true,
 });
 
 export const useClaudeChatStore = claude.store;
@@ -468,6 +640,8 @@ export const {
   interruptChat,
   setChatModel,
   setChatMode,
+  setChatEffort,
+  setChatUltracode,
   requestModels,
   requestUsage,
   requestCommands,

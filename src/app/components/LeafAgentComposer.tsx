@@ -561,6 +561,10 @@ export function LeafAgentComposer({
         }}
         onSetModel={(m) => api.setModel(leafId, m)}
         effort={session?.effort ?? null}
+        ultracode={session?.ultracode ?? false}
+        appliedEffort={session?.appliedEffort ?? null}
+        ultracodeAvailable={session?.ultracodeAvailable ?? true}
+        onSetUltracode={(on) => api.setUltracode?.(leafId, on)}
         serviceTier={session?.serviceTier ?? null}
         onSetEffort={(e) => api.setEffort?.(leafId, e)}
         onSetServiceTier={(t) => api.setServiceTier?.(leafId, t)}

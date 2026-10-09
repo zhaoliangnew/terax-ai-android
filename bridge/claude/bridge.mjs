@@ -6,6 +6,9 @@
 //   {op:"send", text, attachments?: string[]}   absolute paths picked by the user
 //   {op:"permission", id, allow, always?, message?}
 //   {op:"interrupt"} | {op:"set_model", model} | {op:"set_mode", mode}
+//   {op:"set_effort", effort}   low|medium|high|xhigh|max, "" = back to default
+//   {op:"set_ultracode", on}    ultracode on/off (separate switch, not a level)
+//   {op:"settings"}             report what the session actually runs with
 //   {op:"models"} | {op:"usage"} | {op:"commands"}
 // bridge -> host (stdout, one JSON object per line)
 //   {type:"sdk", msg}                      every SDK message, untouched
@@ -14,6 +17,8 @@
 //   {type:"usage", usage}                  plan rate-limit windows (/usage)
 //   {type:"commands", commands:[{name, description, argumentHint, builtin?}]}
 //   {type:"history", messages}             earlier turns of a resumed session
+//   {type:"settings", model, effort, ultracode, ultracodeAvailable}
+//                                          what the session actually runs with
 //   {type:"error", message} | {type:"closed"}
 // Diagnostics go to stderr only; stdout carries protocol lines exclusively.
 
@@ -164,6 +169,27 @@ async function start(cmd) {
   }
 }
 
+/**
+ * 会话实际用的强度 / ultracode(get_settings 的 applied):不指定时各模型
+ * 默认档不一样(Opus 5.5 是 medium),界面要显示真实值而不是猜。
+ * getSettings 没写进类型声明,但 Query 上有。
+ */
+async function reportSettings() {
+  try {
+    const a = (await session?.getSettings?.())?.applied;
+    if (!a) return;
+    out({
+      type: "settings",
+      model: a.model ?? null,
+      effort: a.effort ?? null,
+      ultracode: a.ultracode === true,
+      ultracodeAvailable: a.ultracodeAvailable !== false,
+    });
+  } catch (e) {
+    log("settings unavailable", String(e?.message ?? e));
+  }
+}
+
 async function handle(cmd) {
   switch (cmd.op) {
     case "start":
@@ -204,11 +230,38 @@ async function handle(cmd) {
       return;
     case "set_model":
       await session?.setModel(cmd.model || undefined);
+      // 换模型默认强度也跟着变
+      void reportSettings();
       return;
     case "set_mode":
       await session?.setPermissionMode(cmd.mode);
       return;
+    case "set_effort":
+      // 只改这个会话(flag 层),不写进 settings.json;null 回到模型默认
+      try {
+        await session?.applyFlagSettings({ effortLevel: cmd.effort || null });
+      } catch (e) {
+        // 不走 error:那会把正在进行的一轮标成结束
+        log("set_effort failed", String(e?.message ?? e));
+      }
+      void reportSettings();
+      return;
+    case "set_ultracode":
+      // 和强度是两回事:单独的开关,开了按 xhigh 跑并带多代理工作流编排;
+      // null = 关掉,强度保持原样
+      try {
+        await session?.applyFlagSettings({ ultracode: cmd.on ? true : null });
+      } catch (e) {
+        log("set_ultracode failed", String(e?.message ?? e));
+      }
+      void reportSettings();
+      return;
+    case "settings":
+      await reportSettings();
+      return;
     case "models": {
+      // 打开模型菜单时来要;顺便报一次实际强度
+      void reportSettings();
       const models = (await session?.supportedModels()) ?? [];
       out({
         type: "models",
@@ -216,6 +269,7 @@ async function handle(cmd) {
           value: m.value,
           displayName: m.displayName,
           description: m.description ?? "",
+          efforts: m.supportsEffort ? (m.supportedEffortLevels ?? []) : [],
         })),
       });
       return;

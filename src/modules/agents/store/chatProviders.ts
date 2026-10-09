@@ -9,8 +9,10 @@ import {
   respondPermission,
   restartChat,
   sendChat,
+  setChatEffort,
   setChatMode,
   setChatModel,
+  setChatUltracode,
   suspendChat,
   useClaudeChatStore,
   useQoderChatStore,
@@ -60,8 +62,10 @@ export type ChatApi = {
   restart: (leafId: number, cwd: string) => void;
   /** 会话交给命令行:停掉聊天这边的进程,记录留着以后接着读。 */
   suspend: (leafId: number) => void;
-  /** 推理强度、快速档:只有 Codex 有。 */
+  /** 推理强度:Claude、Codex 有;快速档只有 Codex。 */
   setEffort?: (leafId: number, effort: string) => void;
+  /** ultracode 开关:只有 Claude 有,和强度分开。 */
+  setUltracode?: (leafId: number, on: boolean) => void;
   setServiceTier?: (leafId: number, tier: string) => void;
 };
 
@@ -79,6 +83,8 @@ export const CHAT_APIS: Record<ChatAgent, ChatApi> = {
     compact: (leafId) => sendChat(leafId, "/compact"),
     restart: restartChat,
     suspend: suspendChat,
+    setEffort: setChatEffort,
+    setUltracode: setChatUltracode,
   },
   codex: {
     ensure: (leafId, cwd) => ensureCodexChat(leafId, cwd),

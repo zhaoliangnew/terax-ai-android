@@ -34,6 +34,8 @@ export type SdkMessage = {
   parent_tool_use_id?: string | null;
   model?: string;
   permissionMode?: string;
+  /** init:下一次请求会用的推理强度(low…max);null = 不发强度参数。 */
+  effort?: string | null;
   is_error?: boolean;
   result?: string;
   /** result:这一轮的用量;Qoder 在里面给上下文占比。task_*:子代理的用量。 */
@@ -126,6 +128,14 @@ export class SdkChatModel {
   sessionId: string | null = null;
   model: string | null = null;
   permissionMode: string | null = null;
+  /** 推理强度;null = 不知道 / 用默认。 */
+  effort: string | null = null;
+  /** ultracode 开关(和强度是两回事)。 */
+  ultracode = false;
+  /** 会话实际在用的强度(get_settings 报的);不指定时就是模型默认档。 */
+  appliedEffort: string | null = null;
+  /** 这个会话能不能开 ultracode。 */
+  ultracodeAvailable = true;
   /** 一轮对话还没结束(从发出去到收到 result)。 */
   working = false;
   /** 正在压缩上下文(大会话要好几分钟)。 */
@@ -169,6 +179,17 @@ export class SdkChatModel {
   setCommands(raw: unknown) {
     this.commands = normalizeCommands(raw);
     this.commandsDetailed = true;
+  }
+
+  /** 本地处理掉的命令(不发给模型):用户那句和回复都直接放进对话里。 */
+  addLocalExchange(question: string, answer: string, ts = Date.now()) {
+    this.items.push({ kind: "user", id: this.nextId("u"), text: question, ts });
+    this.items.push({
+      kind: "assistant",
+      id: this.nextId("a"),
+      text: answer,
+      ts,
+    });
   }
 
   addNote(text: string, ts = Date.now()) {
@@ -217,6 +238,8 @@ export class SdkChatModel {
           this.sessionId = msg.session_id ?? this.sessionId;
           this.model = msg.model ?? this.model;
           this.permissionMode = msg.permissionMode ?? this.permissionMode;
+          // 有的版本在 init 里报实际强度;记成"实际",不动用户选的(auto 还是 auto)
+          if (msg.effort !== undefined) this.appliedEffort = msg.effort;
           if (!this.commandsDetailed) this.commands = commandsFromInit(msg);
           return true;
         }

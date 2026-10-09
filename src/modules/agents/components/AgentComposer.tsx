@@ -36,6 +36,7 @@ import {
 import type { UsageInfo } from "../lib/usage";
 import { AGENT_NAMES, type ChatAgent } from "../store/chatProviders";
 import type { ModelOption } from "../store/claudeChatStore";
+import { ClaudeModelPanel } from "./ClaudeModelPanel";
 import { CodexModelPanel, effortLabel } from "./CodexModelPanel";
 import { ImageThumb } from "./ImageLightbox";
 import { UsagePanel } from "./UsagePanel";
@@ -71,6 +72,12 @@ type Props = {
   effort?: string | null;
   serviceTier?: string | null;
   onSetEffort?: (effort: string) => void;
+  /** Claude 的 ultracode 开关(和强度是两个设置)。 */
+  ultracode?: boolean;
+  onSetUltracode?: (on: boolean) => void;
+  /** Claude 会话实际在用的强度(auto 时是模型默认档)。 */
+  appliedEffort?: string | null;
+  ultracodeAvailable?: boolean;
   onSetServiceTier?: (tier: string) => void;
   /** 套餐用量:打开面板时去查,undefined = 还在查。 */
   usage?: UsageInfo | null;
@@ -369,6 +376,10 @@ export function AgentComposer({
   quote,
   injection = null,
   effort = null,
+  ultracode = false,
+  onSetUltracode,
+  appliedEffort = null,
+  ultracodeAvailable = true,
   serviceTier = null,
   onSetEffort,
   onSetServiceTier,
@@ -962,7 +973,7 @@ export function AgentComposer({
               className="flex h-7 cursor-pointer items-center gap-1 rounded-lg px-2 text-[12.5px] text-foreground/85 transition-colors hover:bg-foreground/10"
             >
               {modelLabel(model, models, agentName)}
-              {agent === "codex" && effort && (
+              {(agent === "codex" || agent === "claude") && effort && (
                 <span
                   className={
                     effort === "ultra"
@@ -970,8 +981,11 @@ export function AgentComposer({
                       : "text-muted-foreground"
                   }
                 >
-                  {effortLabel(effort)}
+                  {agent === "claude" ? effort : effortLabel(effort)}
                 </span>
+              )}
+              {agent === "claude" && ultracode && (
+                <span className="text-[#b48cf7]">ultracode</span>
               )}
               <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={2} />
             </button>
@@ -990,7 +1004,18 @@ export function AgentComposer({
                   onSetModel={onSetModel}
                   onSetEffort={(e) => onSetEffort?.(e)}
                   onSetServiceTier={(t) => onSetServiceTier?.(t)}
-                  onDone={closeMenu}
+                />
+              ) : agent === "claude" ? (
+                <ClaudeModelPanel
+                  model={model}
+                  models={models}
+                  effort={effort}
+                  ultracode={ultracode}
+                  appliedEffort={appliedEffort}
+                  ultracodeAvailable={ultracodeAvailable}
+                  onSetModel={onSetModel}
+                  onSetEffort={(e) => onSetEffort?.(e)}
+                  onSetUltracode={(on) => onSetUltracode?.(on)}
                 />
               ) : (
                 <>
