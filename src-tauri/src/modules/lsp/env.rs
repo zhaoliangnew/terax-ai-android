@@ -3,7 +3,7 @@
 //! `node`. Capture the login shell env once, reuse for detect and spawn.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 #[cfg(unix)]
@@ -40,7 +40,50 @@ pub fn resolve_binary(command: &str) -> Option<PathBuf> {
         .get("PATH")
         .cloned()
         .or_else(|| std::env::var("PATH").ok());
-    which::which_in(command, path, cwd).ok()
+    which::which_in(command, path, cwd).ok().or_else(|| {
+        #[cfg(windows)]
+        {
+            resolve_windows_codex(command)
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    })
+}
+
+/// A GUI-launched Windows app may inherit a PATH that predates a Codex update
+/// or omits the per-version directory added by the Codex installer. The CLI
+/// installs versioned executables below this stable user-local directory, so
+/// look there as a fallback without changing the environment of other tools.
+#[cfg(windows)]
+fn resolve_windows_codex(command: &str) -> Option<PathBuf> {
+    let bin_dir = dirs::data_local_dir()?.join("OpenAI").join("Codex").join("bin");
+    resolve_windows_codex_from(command, &bin_dir)
+}
+
+#[cfg(windows)]
+fn resolve_windows_codex_from(command: &str, bin_dir: &Path) -> Option<PathBuf> {
+    if !command.eq_ignore_ascii_case("codex") {
+        return None;
+    }
+    let mut candidates: Vec<_> = std::fs::read_dir(bin_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("codex.exe"))
+        .filter(|path| path.is_file())
+        .collect();
+    // A stable order makes selection deterministic when an older version is
+    // still present alongside the current one.
+    candidates.sort_by_key(|path| {
+        (
+            std::fs::metadata(path)
+                .and_then(|metadata| metadata.modified())
+                .ok(),
+            path.clone(),
+        )
+    });
+    candidates.pop()
 }
 
 #[cfg(unix)]
@@ -116,5 +159,25 @@ mod tests {
         assert!(resolve_binary("").is_none());
         assert!(resolve_binary("   ").is_none());
         assert!(resolve_binary("terax-definitely-not-a-real-binary").is_none());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn resolves_codex_from_versioned_install_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let install = root.path().join("version-hash");
+        std::fs::create_dir(&install).unwrap();
+        let executable = install.join("codex.exe");
+        std::fs::write(&executable, b"test").unwrap();
+
+        assert_eq!(
+            resolve_windows_codex_from("codex", root.path()),
+            Some(executable)
+        );
+        assert!(resolve_windows_codex_from("node", root.path()).is_none());
     }
 }

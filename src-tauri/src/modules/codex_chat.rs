@@ -99,7 +99,9 @@ pub async fn codex_chat_start(
     let id = state.next_id.fetch_add(1, Ordering::Relaxed) + 1;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let codex = login_env::resolve_binary("codex").ok_or("codex chat: codex not found")?;
+        let codex = login_env::resolve_binary("codex").ok_or(
+            "codex chat: Codex CLI not found. Install Codex CLI or add codex.exe to PATH, then restart Terax.",
+        )?;
         let mut child = Command::new(codex)
             .arg("app-server")
             .current_dir(&cwd)
