@@ -105,10 +105,13 @@ function EntryRowImpl(props: EntryRowProps) {
   } = props;
 
   const asProject = projectKind !== null && !!onOpenProject;
+  // 开着终端的普通文件夹:能展开看文件,也能像工程一样点回它的终端
+  const openedFolder =
+    isDir && !asProject && isOpenedProject && !!onOpenProject;
   const iconUrl = isDir ? null : fileIconUrl(name);
   const paddingLeft = 6 + depth * INDENT;
   const agentState = useProjectAgentState(
-    asProject ? path : null,
+    asProject || openedFolder ? path : null,
     projectPtyIds ?? {},
   );
 
@@ -138,7 +141,11 @@ function EntryRowImpl(props: EntryRowProps) {
     if (renameInProgress) return;
     onSelectPath(path);
     if (asProject) onOpenProject?.(path);
-    else if (isDir) actions.toggle(path);
+    else if (openedFolder && !isActiveProject) {
+      // 先切到它的终端;没展开就顺手展开,已经展开的不收起
+      onOpenProject?.(path);
+      if (!isExpanded) actions.toggle(path);
+    } else if (isDir) actions.toggle(path);
     else onOpenFile(path);
   };
 
@@ -200,8 +207,22 @@ function EntryRowImpl(props: EntryRowProps) {
             {PROJECT_KIND_BADGE[projectKind]}
           </span>
         ) : null
+      ) : openedFolder && agentState ? (
+        <span
+          title={AGENT_STATE_LABEL[agentState]}
+          className={cn(
+            "inline-block size-4 shrink-0 text-center text-[13px] leading-4",
+            agentState === "attention" && "animate-pulse",
+          )}
+        >
+          {AGENT_STATE_EMOJI[agentState]}
+        </span>
       ) : isDir ? (
-        <FolderGlyph open={isExpanded} />
+        <FolderGlyph
+          open={isExpanded}
+          // 开着终端的普通文件夹:图标点绿,和开着的工程一个意思
+          className={openedFolder ? "text-emerald-500" : undefined}
+        />
       ) : iconUrl ? (
         <img src={iconUrl} alt="" className="size-4 shrink-0" />
       ) : (

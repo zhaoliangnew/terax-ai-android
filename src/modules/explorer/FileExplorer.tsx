@@ -235,18 +235,25 @@ function buildRows(
   pinned: Set<string>,
   /** 用哪份"展开集合"决定递归 —— 置顶区有自己的一份,和树互不影响。 */
   expandedSet: Set<string>,
+  /** 过滤时这些目录里面的东西全留着(开着终端的普通文件夹:展开要能看文件)。 */
+  keepInside: Set<string> | null = null,
 ): { rows: Row[]; entryIndexByPath: Map<string, number> } {
   const rows: Row[] = [];
   const entryIndexByPath = new Map<string, number>();
 
-  const walk = (parent: string, depth: number, parentIgnored: boolean) => {
+  const walk = (
+    parent: string,
+    depth: number,
+    parentIgnored: boolean,
+    inside = false,
+  ) => {
     const node = tree.nodes[parent];
     if (!node || node.status !== "loaded") return;
     // 置顶不动这里的顺序:置顶的单独在树顶上开一块列出来,树本身保持
     // 原样 —— 常用目录在原位置的肌肉记忆比"排到最前"更值钱
     for (const entry of node.entries) {
       const path = tree.joinPath(parent, entry.name);
-      if (keep && !keep.has(path)) continue;
+      if (keep && !inside && !keep.has(path)) continue;
       const isDir = entry.kind === "dir";
       const expanded = isDir && expandedSet.has(path);
       const isRenaming = tree.renaming === path;
@@ -319,7 +326,7 @@ function buildRows(
             message: child.message,
           });
         } else if (child?.status === "loaded") {
-          walk(path, depth + 1, gitignored);
+          walk(path, depth + 1, gitignored, inside || !!keepInside?.has(path));
         }
       }
     }
@@ -417,7 +424,7 @@ export const FileExplorer = memo(
     }, [canSwitchDrive]);
 
     // 产品目录动辄上百个,平时只关心开着 tab 的那几个 —— 这个开关把树收成
-    // "只留有打开 tab 的工程 + 它们的父目录"。
+    // "只留有打开 tab 的工程/文件夹 + 它们的父目录"。
     const canFilterOpened = !!openedProjectPaths?.size;
     const [onlyOpened, setOnlyOpened] = useState(
       () => localStorage.getItem("terax.explorer.onlyOpened") === "1",
@@ -570,6 +577,7 @@ export const FileExplorer = memo(
         projectGitByPath ? (dir) => projectGitByPath[dir]?.worktrees : null,
         pinnedPaths,
         tree.expanded,
+        keepPaths ? (openedProjectPaths ?? null) : null,
       );
       // `tree` is intentionally omitted: its identity changes every render, but
       // the listed fields are the only inputs buildRows actually reads.
@@ -582,6 +590,7 @@ export const FileExplorer = memo(
       tree.pendingCreate,
       lookupGitStatus,
       keepPaths,
+      openedProjectPaths,
       projectGitByPath,
       pinnedPaths,
     ]);
@@ -1626,6 +1635,19 @@ export const FileExplorer = memo(
                       新开终端
                     </ContextMenuItem>
                   )}
+                  {/* 开着终端的普通文件夹也能一键关,和工程一样 */}
+                  {menuTarget.isDir &&
+                    onCloseProjectTerminals &&
+                    openedProjectPaths?.has(menuTarget.path) && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() =>
+                          onCloseProjectTerminals(menuTarget.path)
+                        }
+                      >
+                        关闭终端
+                      </ContextMenuItem>
+                    )}
                   {/* 产品目录绑云效项目,底下的工程继承 */}
                   {menuTarget.isDir &&
                     !projectDirs.has(menuTarget.path) &&

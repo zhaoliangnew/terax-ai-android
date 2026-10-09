@@ -195,6 +195,13 @@ async function dirUsable(path: string): Promise<boolean> {
   }
 }
 
+/** 普通文件夹能不能当"打开的目录":家目录(/Users/me)及以上不算。 */
+function isPlainFolderRoot(dir: string): boolean {
+  return (
+    dir.split(/[\\/]/).filter((p) => p && !/^[A-Za-z]:$/.test(p)).length > 2
+  );
+}
+
 export default function App() {
   const {
     tabs,
@@ -926,7 +933,12 @@ export default function App() {
         if (!cwd) continue;
         let root = projectRootCacheRef.current.get(cwd);
         if (root === undefined) {
-          root = await findProjectRoot(cwd);
+          // 不在任何工程里的普通文件夹(个人任务、资料目录)也算"打开的",
+          // 归到终端所在目录本身:树上能标出来、点回去、参与过滤,和工程
+          // 一样。家目录及以上不算,不然没归属的终端全挂到 ~ 头上。
+          root =
+            (await findProjectRoot(cwd)) ??
+            (isPlainFolderRoot(cwd) ? cwd : null);
           projectRootCacheRef.current.set(cwd, root);
         }
         if (!root) continue;
@@ -1837,7 +1849,13 @@ export default function App() {
                               onOpenNewTerminal={openNewTerminalAt}
                               classifyProjectDir={classifyProjectKind}
                               onOpenProject={cdInNewTab}
-                              activeProjectPath={androidProjectRoot}
+                              activeProjectPath={
+                                androidProjectRoot ??
+                                // 普通文件夹:当前终端就开在它上面时也算"当前"
+                                (activeCwd && openedProjectPaths.has(activeCwd)
+                                  ? activeCwd
+                                  : null)
+                              }
                               openedProjectPaths={openedProjectPaths}
                               projectPtyIds={projectPtyIds}
                               projectGitByPath={projectGitByPath}
