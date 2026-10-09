@@ -37,18 +37,27 @@ export function ImageThumb({
       </button>
       {open &&
         createPortal(
-          <button
-            type="button"
-            aria-label="关闭大图"
-            onClick={() => setOpen(false)}
-            className="fixed inset-0 z-[1000] flex cursor-zoom-out items-center justify-center bg-black/80 p-8"
+          // role=dialog:右栏内嵌浏览器是原生 webview,压在所有界面上面,
+          // 只有认出这是个浮层才会把自己藏起来,不然大图右半边被它挡住
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="查看大图"
+            className="fixed inset-0 z-[1000]"
           >
-            <img
-              src={localFileUrl(path)}
-              alt={name}
-              className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
-            />
-          </button>,
+            <button
+              type="button"
+              aria-label="关闭大图"
+              onClick={() => setOpen(false)}
+              className="flex size-full cursor-zoom-out items-center justify-center bg-black/80 p-8"
+            >
+              <img
+                src={localFileUrl(path)}
+                alt={name}
+                className="max-h-full max-w-full rounded-lg object-contain shadow-2xl"
+              />
+            </button>
+          </div>,
           document.body,
         )}
     </>
