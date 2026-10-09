@@ -14,10 +14,21 @@ import LogcatPanel from "./LogcatDock";
 import { highlightSerial } from "./lib/highlightSerial";
 import { useMirrorAnnotate } from "./lib/mirrorAnnotate";
 import {
+  type MirrorQuality,
+  resolveMirrorQuality,
+  useMirrorQuality,
+} from "./lib/mirrorQuality";
+import {
   useActiveProductConfig,
   useAndroidRunStore,
   useMirroringSerials,
 } from "./store";
+
+const QUALITY_OPTIONS: [MirrorQuality, string][] = [
+  ["auto", "自动"],
+  ["smooth", "流畅"],
+  ["hd", "高清"],
+];
 
 /** 右栏"投屏"tab:上半屏幕镜像(含设备/运行工具栏),下半 Logcat。 */
 export default function DevicePanel() {
@@ -28,6 +39,8 @@ export default function DevicePanel() {
   );
   const { serial: selectedSerial, mirroring } = useActiveProductConfig();
   const annotatingSerial = useMirrorAnnotate((s) => s.serial);
+  const quality = useMirrorQuality((s) => s.quality);
+  const setQuality = useMirrorQuality((s) => s.setQuality);
   const toggleAnnotate = useMirrorAnnotate((s) => s.toggle);
   const device = devices.find((d) => d.serial === selectedSerial) ?? null;
   const online = device?.state === "device";
@@ -61,6 +74,31 @@ export default function DevicePanel() {
               >
                 批注
               </button>
+            )}
+            {online && mirroring && selectedSerial && (
+              // 画质:自动按地址判断(10.x 虚拟 IP 走公网 → 流畅),也能手动固定
+              <div
+                className="flex items-center rounded border border-border text-[12px]"
+                title={`流畅:2 Mbps · 20 帧 · 1280,跨公网用\n高清:8 Mbps · 60 帧 · 1600,内网用\n自动:10.x 虚拟 IP 用流畅,其余用高清\n当前实际:${resolveMirrorQuality(quality, selectedSerial) === "smooth" ? "流畅" : "高清"}`}
+              >
+                {QUALITY_OPTIONS.map(([q, text]) => (
+                  <button
+                    key={q}
+                    type="button"
+                    onClick={() => setQuality(q)}
+                    className={cn(
+                      "px-1.5 py-0.5 transition-colors first:rounded-l last:rounded-r",
+                      quality === q
+                        ? "bg-foreground/15 text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    {q === "auto"
+                      ? `自动·${resolveMirrorQuality("auto", selectedSerial) === "smooth" ? "流畅" : "高清"}`
+                      : text}
+                  </button>
+                ))}
+              </div>
             )}
             <div className="ml-auto flex items-center gap-1">
               {online &&

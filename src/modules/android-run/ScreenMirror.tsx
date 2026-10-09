@@ -13,6 +13,11 @@ import {
   useMirrorAnnotate,
 } from "./lib/mirrorAnnotate";
 import {
+  MIRROR_PRESETS,
+  resolveMirrorQuality,
+  useMirrorQuality,
+} from "./lib/mirrorQuality";
+import {
   KEY_ACTION_DOWN,
   KEY_ACTION_UP,
   KEY_APP_SWITCH,
@@ -69,6 +74,11 @@ export function ScreenMirror({
   onSize,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 切画质要重连一次(码率/帧率是启动 server 时定的)
+  const quality = resolveMirrorQuality(
+    useMirrorQuality((s) => s.quality),
+    serial,
+  );
   const [status, setStatus] = useState<Status>("connecting");
   const [error, setError] = useState<string | null>(null);
   const sessionIdRef = useRef<number | null>(null);
@@ -203,7 +213,7 @@ export function ScreenMirror({
     configuredRef.current = false;
     configBytesRef.current = null;
     resyncingRef.current = false;
-    scrcpyStart(serial, 1600, displayId, onEvent)
+    scrcpyStart(serial, MIRROR_PRESETS[quality], displayId, onEvent)
       .then((id) => {
         if (cancelled) {
           void scrcpyStop(id);
@@ -231,7 +241,7 @@ export function ScreenMirror({
         decoderRef.current = null;
       }
     };
-  }, [serial, displayId, onEvent]);
+  }, [serial, displayId, onEvent, quality]);
 
   // Map a canvas pointer event to video-frame coordinates. The canvas now
   // fills its panel via `object-contain`, which letterboxes (adds blank

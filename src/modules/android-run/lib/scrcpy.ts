@@ -46,7 +46,7 @@ function parseVideoMessage(bytes: ArrayBuffer): VideoEvent | null {
 
 export async function scrcpyStart(
   serial: string,
-  maxSize: number | null,
+  quality: { maxSize: number; bitRate: number; maxFps: number },
   displayId: number | null,
   onEvent: (e: VideoEvent) => void,
 ): Promise<number> {
@@ -59,7 +59,9 @@ export async function scrcpyStart(
   return invoke<number>("scrcpy_start", {
     serial,
     adbPath: adbBin(),
-    maxSize,
+    maxSize: quality.maxSize,
+    bitRate: quality.bitRate,
+    maxFps: quality.maxFps,
     displayId,
     onVideo: channel,
   });

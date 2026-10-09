@@ -172,6 +172,8 @@ pub async fn scrcpy_start(
     serial: String,
     adb_path: String,
     max_size: Option<u16>,
+    bit_rate: Option<u32>,
+    max_fps: Option<u16>,
     display_id: Option<u32>,
     on_video: Channel<Response>,
 ) -> Result<u32, String> {
@@ -255,6 +257,13 @@ pub async fn scrcpy_start(
     ];
     if let Some(ms) = max_size {
         server_args.push(format!("max_size={ms}"));
+    }
+    // 不传就是 scrcpy 默认的 8 Mbps / 60 帧;跨公网时压低才不容易断
+    if let Some(br) = bit_rate {
+        server_args.push(format!("video_bit_rate={br}"));
+    }
+    if let Some(fps) = max_fps {
+        server_args.push(format!("max_fps={fps}"));
     }
     if display != 0 {
         server_args.push(format!("display_id={display}"));
