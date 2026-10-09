@@ -1,18 +1,33 @@
 import { useImeGuard } from "@/lib/ime";
+import { useArmedConfirm } from "@/lib/useArmedConfirm";
 import { cn } from "@/lib/utils";
 import {
   AlertCircleIcon,
   ArrowDown01Icon,
   ArrowUp02Icon,
+  BookOpen01Icon,
+  Bug01Icon,
+  CheckmarkCircle02Icon,
+  CloudUploadIcon,
+  CodeIcon,
+  FolderSearchIcon,
   GitBranchIcon,
+  GitCommitIcon,
   Hold02Icon,
+  Idea01Icon,
   Message01Icon,
+  PackageIcon,
   PencilEdit02Icon,
+  PlayIcon,
   PlusSignIcon,
+  Refresh01Icon,
+  SentIcon,
+  Settings02Icon,
   Shield01Icon,
   StopIcon,
   Task01Icon,
   Tick02Icon,
+  Wrench01Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -27,6 +42,11 @@ import {
 import { toast } from "sonner";
 import { isImagePath } from "../lib/chatItems";
 import { findModel, modelIdName } from "../lib/modelMatch";
+import {
+  groupQuickPrompts,
+  type QuickPrompt,
+  useQuickPrompts,
+} from "../lib/quickPrompts";
 import type { ContextUsage } from "../lib/sdkChat";
 import {
   commandQuery,
@@ -39,6 +59,11 @@ import type { ModelOption } from "../store/claudeChatStore";
 import { ClaudeModelPanel } from "./ClaudeModelPanel";
 import { CodexModelPanel, effortLabel } from "./CodexModelPanel";
 import { ImageThumb } from "./ImageLightbox";
+import {
+  QuickPromptFillDialog,
+  quickPromptBlanks,
+} from "./QuickPromptFillDialog";
+import { QuickPromptsDialog } from "./QuickPromptsDialog";
 import { UsagePanel } from "./UsagePanel";
 
 type Props = {
@@ -332,6 +357,47 @@ function InlineMenu({
   );
 }
 
+/**
+ * 分组摊成两列:按顺序往下排,累计条数过半(组标题算一条)就换到右列,
+ * 两列高度差不多、组的先后顺序不乱。
+ */
+function splitQuickColumns<T extends { items: unknown[] }>(groups: T[]): T[][] {
+  const weight = (g: T) => g.items.length + 1;
+  const half = groups.reduce((n, g) => n + weight(g), 0) / 2;
+  const left: T[] = [];
+  const right: T[] = [];
+  let acc = 0;
+  for (const g of groups) {
+    // 一旦换到右列就一直往右放,组的先后顺序不乱
+    const toLeft =
+      right.length === 0 && (left.length === 0 || acc + weight(g) / 2 <= half);
+    if (toLeft) {
+      left.push(g);
+      acc += weight(g);
+    } else right.push(g);
+  }
+  return [left, right];
+}
+
+/** 内置快捷指令的图标(自己加的用通用图标)。 */
+const QUICK_PROMPT_ICONS: Record<string, typeof CodeIcon> = {
+  review: CodeIcon,
+  fix: Wrench01Icon,
+  sync: Refresh01Icon,
+  verify: CheckmarkCircle02Icon,
+  debug: Bug01Icon,
+  explain: BookOpen01Icon,
+  commit: GitCommitIcon,
+  summary: Task01Icon,
+  plan: Idea01Icon,
+  continue: PlayIcon,
+  project: FolderSearchIcon,
+  push: CloudUploadIcon,
+  install: PackageIcon,
+  "dt-check": Message01Icon,
+  "dt-reply": SentIcon,
+};
+
 function MenuItem({
   active = false,
   onClick,
@@ -398,9 +464,11 @@ export function AgentComposer({
   const currentMode = modeOptions.find((o) => o.mode === permissionMode);
   const [text, setText] = useState("");
   const { imeProps, isImeKey } = useImeGuard();
-  const [menu, setMenu] = useState<"mode" | "model" | "usage" | null>(null);
+  const [menu, setMenu] = useState<"mode" | "model" | "usage" | "quick" | null>(
+    null,
+  );
   const closeMenu = useCallback(() => setMenu(null), []);
-  const toggleMenu = (m: "mode" | "model" | "usage") =>
+  const toggleMenu = (m: "mode" | "model" | "usage" | "quick") =>
     setMenu((cur) => (cur === m ? null : m));
   const [attachments, setAttachments] = useState<string[]>([]);
   const pickFiles = async () => {
@@ -481,6 +549,13 @@ export function AgentComposer({
     }
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [injection]);
+
+  const quickPrompts = useQuickPrompts((s) => s.prompts);
+  const [quickEditOpen, setQuickEditOpen] = useState(false);
+  // 正在填空的快捷指令(带【】的那几条)
+  const [filling, setFilling] = useState<QuickPrompt | null>(null);
+  // 要二次确认的快捷指令:点了第一下是哪条,3 秒不点第二下自动松开
+  const [quickArmed, setQuickArmed] = useArmedConfirm<string>(3000);
 
   const send = () => {
     const typed = text.trim();
@@ -638,19 +713,20 @@ export function AgentComposer({
               {branch.name}
             </span>
           </button>
-          {/* 工作区干净就不占位置,一眼看出有没有要提交的 */}
-          {branch.changed > 0 && (
-            <button
-              type="button"
-              title="提交这些改动"
-              onClick={() => onOpenRepo?.(true)}
-              // 输入框圆角半径 24px,文字右缘贴着角会像夹在里面:
-              // 往左让到圆角以内(行本身 px-2,再加 16px)
-              className="mr-4 ml-auto shrink-0 text-[11px] tabular-nums text-amber-500/80 hover:underline"
-            >
-              {branch.changed} 个文件未提交
-            </button>
-          )}
+          <span className="mr-4 ml-auto flex shrink-0 items-center gap-3 text-[11px]">
+            {/* 工作区干净就不占位置,一眼看出有没有要提交的。输入框圆角半径
+                24px,文字右缘贴着角会像夹在里面:整组往左让到圆角以内 */}
+            {branch.changed > 0 && (
+              <button
+                type="button"
+                title="提交这些改动"
+                onClick={() => onOpenRepo?.(true)}
+                className="tabular-nums text-amber-500/80 hover:underline"
+              >
+                {branch.changed} 个文件未提交
+              </button>
+            )}
+          </span>
         </div>
       )}
       <div
@@ -920,6 +996,129 @@ export function AgentComposer({
             </InlineMenu>
           </div>
           <span className={cn("flex-1", compact && "hidden")} />
+          {/* 快捷指令:点开选一条,整理好的话直接发出去(Review、修复、同步…,
+              能自己加);AI 正在回的时候不让发,免得插进当前这一轮 */}
+          {/* 菜单以整行为准往上弹,在输入框中间居中(不跟着按钮偏到一边) */}
+          <div className={cn(compact && "hidden")}>
+            <button
+              type="button"
+              disabled={working}
+              title={
+                working
+                  ? "AI 正在回复,等这一轮结束"
+                  : "快捷指令:Review、修复、同步,也能加自己的"
+              }
+              onClick={() => toggleMenu("quick")}
+              className={cn(
+                toolText,
+                "disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent",
+              )}
+            >
+              快捷指令
+            </button>
+            <InlineMenu
+              open={menu === "quick" && !working}
+              onClose={closeMenu}
+              align="start"
+              className="left-1/2 max-h-[70vh] w-[34rem] max-w-full -translate-x-1/2 overflow-y-auto"
+            >
+              {/* 分组、两列排:十几条竖着一长串太难找 */}
+              {/* 两列各自从上往下排(不用 CSS columns:那个第二列会从
+                  上一列断开处带着间距起头,两列顶部对不齐) */}
+              <div className="grid grid-cols-2 items-start gap-2 p-1">
+                {splitQuickColumns(groupQuickPrompts(quickPrompts)).map(
+                  (col, ci) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: 固定两列
+                    <div key={ci} className="flex flex-col gap-2">
+                      {col.map(({ group, items }) => (
+                        // 每组一块浅底圆角卡片,组和组之间一眼分得开
+                        <div
+                          key={group}
+                          className="rounded-lg bg-foreground/[0.04] p-1"
+                        >
+                          <div className="flex items-center gap-1.5 px-2 pt-1 pb-1 text-[11.5px] font-medium text-foreground/70">
+                            <span className="h-3 w-0.5 rounded-full bg-[#4d8ef7]" />
+                            {group}
+                          </div>
+                          {items.map((q) => (
+                            <button
+                              key={q.id}
+                              type="button"
+                              role="menuitem"
+                              title={q.text}
+                              onClick={() => {
+                                // 会动到外面的(提交推送、装设备…):第一下只上膛,3 秒内
+                                // 再点一次才发
+                                if (q.confirm && quickArmed !== q.id) {
+                                  setQuickArmed(q.id);
+                                  return;
+                                }
+                                setQuickArmed(null);
+                                closeMenu();
+                                // 带【姓名】这类空要填的:弹框逐个填、能补充几句,点发送才发;
+                                // 其余直接发出去
+                                if (quickPromptBlanks(q.text).length > 0) {
+                                  setFilling(q);
+                                  return;
+                                }
+                                onSend(q.text, []);
+                              }}
+                              className={cn(
+                                "flex w-full cursor-pointer items-start gap-2 rounded-lg px-2.5 py-1 text-left hover:bg-foreground/10",
+                                quickArmed === q.id &&
+                                  "bg-amber-500/15 hover:bg-amber-500/20",
+                              )}
+                            >
+                              <span className="flex w-3.5 shrink-0 justify-center pt-0.5 text-muted-foreground">
+                                <HugeiconsIcon
+                                  icon={
+                                    QUICK_PROMPT_ICONS[q.id] ?? Message01Icon
+                                  }
+                                  size={13}
+                                  strokeWidth={1.75}
+                                />
+                              </span>
+                              <span className="flex min-w-0 flex-col">
+                                <span className="text-[12.5px]">{q.label}</span>
+                                {quickArmed === q.id ? (
+                                  <span className="text-[11px] leading-snug text-amber-500">
+                                    再点一次确认发送
+                                  </span>
+                                ) : (
+                                  <span className="truncate text-[11px] leading-snug text-muted-foreground">
+                                    {q.text.split("\n")[0]}
+                                  </span>
+                                )}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ),
+                )}
+              </div>
+              <div className="my-1 border-t border-border/60" />
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  closeMenu();
+                  setQuickEditOpen(true);
+                }}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+              >
+                <span className="flex w-3.5 shrink-0 justify-center">
+                  <HugeiconsIcon
+                    icon={Settings02Icon}
+                    size={13}
+                    strokeWidth={1.75}
+                  />
+                </span>
+                编辑快捷指令…
+              </button>
+            </InlineMenu>
+          </div>
           {/* 用量、压缩、新会话直接摆出来,不收进"更多"菜单 */}
           <div className={cn(compact && "hidden")}>
             <button
@@ -1068,6 +1267,18 @@ export function AgentComposer({
           </button>
         </div>
       </div>
+      <QuickPromptFillDialog
+        prompt={filling}
+        onCancel={() => setFilling(null)}
+        onSend={(t) => {
+          setFilling(null);
+          onSend(t, []);
+        }}
+      />
+      <QuickPromptsDialog
+        open={quickEditOpen}
+        onOpenChange={setQuickEditOpen}
+      />
     </div>
   );
 }
