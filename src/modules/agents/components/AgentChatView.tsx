@@ -4,6 +4,7 @@ import {
 } from "@/components/ai-elements/markdown-code";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
+import { isExternalUrl, openExternalUrl } from "@/lib/external-link";
 import { cn } from "@/lib/utils";
 import { localHtmlPath } from "@/modules/browser/lib/url";
 import { openInBrowser } from "@/modules/browser/webTabsStore";
@@ -136,6 +137,32 @@ function ChatCode({
 }
 
 const CHAT_COMPONENTS = { code: ChatCode };
+/**
+ * 关掉 Markdown 渲染器自带的"打开外部链接?"确认框:它的 Open link 走
+ * window.open,桌面 WebView 里点了没反应。链接改由下面的点击拦截处理,
+ * 直接在右栏浏览器里打开。
+ */
+const CHAT_LINK_SAFETY = { enabled: false };
+
+/**
+ * 聊天里点链接:网页和指向本地 html 的链接(file://、绝对/相对路径)都在
+ * 右栏浏览器里打开;mailto 之类交给系统。挂在外层的 onClickCapture 上。
+ */
+function openChatLink(e: React.MouseEvent, cwd: string | null) {
+  const a = (e.target as HTMLElement).closest("a");
+  if (!a) return;
+  const href = a.getAttribute("href") ?? "";
+  const target = /^https?:\/\//i.test(href) ? href : localHtmlPath(href, cwd);
+  if (target) {
+    e.preventDefault();
+    e.stopPropagation();
+    openInBrowser(target);
+  } else if (isExternalUrl(href)) {
+    e.preventDefault();
+    e.stopPropagation();
+    void openExternalUrl(href);
+  }
+}
 
 /** 回复正文:流式输出时逐字放出来,不是一块一块往外蹦。 */
 function AssistantText({
@@ -148,21 +175,15 @@ function AssistantText({
   const shown = useSmoothText(text, streaming);
   const cwd = useContext(ChatCwd);
   return (
-    // 指向本地 html 的链接(file://、绝对/相对路径)在右栏浏览器里打开;
-    // 别的链接交给 Markdown 渲染器原来的处理
-    <div
-      onClickCapture={(e) => {
-        const a = (e.target as HTMLElement).closest("a");
-        const path = a
-          ? localHtmlPath(a.getAttribute("href") ?? "", cwd)
-          : null;
-        if (!path) return;
-        e.preventDefault();
-        e.stopPropagation();
-        openInBrowser(path);
-      }}
-    >
-      <MessageResponse components={CHAT_COMPONENTS}>{shown}</MessageResponse>
+    // 网页链接和指向本地 html 的链接(file://、绝对/相对路径)都在右栏浏览器
+    // 里打开;mailto 之类交给系统
+    <div onClickCapture={(e) => openChatLink(e, cwd)}>
+      <MessageResponse
+        components={CHAT_COMPONENTS}
+        linkSafety={CHAT_LINK_SAFETY}
+      >
+        {shown}
+      </MessageResponse>
     </div>
   );
 }
@@ -636,6 +657,7 @@ function PlanCard({
   ) => void;
 }) {
   const [feedback, setFeedback] = useState("");
+  const cwd = useContext(ChatCwd);
   const plan = str(ask.input.plan);
   const keepPlanning = () =>
     onAnswer(
@@ -652,8 +674,16 @@ function PlanCard({
         <span className="size-2 shrink-0 rounded-full bg-violet-400" />
         计划做好了,确认后开始执行
       </div>
-      <div className="max-h-[50vh] overflow-auto rounded-lg bg-foreground/[0.04] px-4 py-2 text-[13px]">
-        <MessageResponse components={CHAT_COMPONENTS}>{plan}</MessageResponse>
+      <div
+        onClickCapture={(e) => openChatLink(e, cwd)}
+        className="max-h-[50vh] overflow-auto rounded-lg bg-foreground/[0.04] px-4 py-2 text-[13px]"
+      >
+        <MessageResponse
+          components={CHAT_COMPONENTS}
+          linkSafety={CHAT_LINK_SAFETY}
+        >
+          {plan}
+        </MessageResponse>
       </div>
       <input
         value={feedback}
