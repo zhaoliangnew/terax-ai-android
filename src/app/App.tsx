@@ -160,6 +160,7 @@ import type {
 } from "react-resizable-panels";
 import { toast as sonnerToast } from "sonner";
 import { CloseDialogs } from "./components/CloseDialogs";
+import { FileTabStrip } from "./components/FileTabStrip";
 import {
   LeafAgentChat,
   LeafAgentComposer,
@@ -1722,6 +1723,14 @@ export default function App() {
     terminalRefs,
   });
 
+  // 当前 Space 里打开的文件/预览/diff:顶部 tab 栏撤了,它们在树上没有
+  // 对应的行,单独一条小 tab 栏给它们切换和关闭
+  const fileTabs = useMemo(
+    () =>
+      tabs.filter((t) => t.kind !== "terminal" && t.spaceId === activeSpaceId),
+    [tabs, activeSpaceId],
+  );
+
   const workspaceToolbar = androidProjectRoot ? (
     <div
       data-tauri-drag-region
@@ -1938,6 +1947,12 @@ export default function App() {
                     {workspaceToolbarHost && !zenMode
                       ? createPortal(workspaceToolbar, workspaceToolbarHost)
                       : workspaceToolbar}
+                    <FileTabStrip
+                      tabs={fileTabs}
+                      activeId={activeId}
+                      onSelect={setActiveId}
+                      onClose={(id) => void handleClose(id)}
+                    />
                     <div className="relative min-h-0 flex-1">
                       <WorkspaceSurface
                         tabs={tabs}
