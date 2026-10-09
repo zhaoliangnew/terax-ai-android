@@ -235,6 +235,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        // 左栏"项目"旁的 + :选一个文件夹当工作目录
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |_app| {
             if let Err(error) = control::start(_app.handle().clone(), control_for_setup.clone()) {
                 log::warn!("could not start Terax control server: {error}");

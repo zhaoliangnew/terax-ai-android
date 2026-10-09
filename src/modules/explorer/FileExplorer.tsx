@@ -29,6 +29,7 @@ import { useGlobalShortcuts } from "@/modules/shortcuts";
 import { ChangedFilesDialog } from "@/modules/source-control/ChangedFilesDialog";
 import type { TerminalPathDropTarget } from "@/modules/terminal";
 import {
+  Add01Icon,
   ArrowDown01Icon,
   ArrowRight01Icon,
   ArrowUp01Icon,
@@ -82,6 +83,13 @@ import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { useFileTree } from "./lib/useFileTree";
 import { useGitStatus } from "./lib/useGitStatus";
+import {
+  addWorkDir,
+  loadWorkDirs,
+  pickFolder,
+  removeWorkDir,
+  WORK_DIRS_CHANGED_EVENT,
+} from "./lib/workDirs";
 import {
   EntryRow,
   PendingRow,
@@ -391,6 +399,26 @@ export const FileExplorer = memo(
       window.addEventListener(PINNED_DIRS_CHANGED_EVENT, sync);
       return () => window.removeEventListener(PINNED_DIRS_CHANGED_EVENT, sync);
     }, []);
+    // 工作目录:"项目"旁 + 选进来的文件夹,排在项目列表最上面
+    const [workDirs, setWorkDirs] = useState<string[]>(() => loadWorkDirs());
+    useEffect(() => {
+      const sync = () => setWorkDirs(loadWorkDirs());
+      window.addEventListener(WORK_DIRS_CHANGED_EVENT, sync);
+      return () => window.removeEventListener(WORK_DIRS_CHANGED_EVENT, sync);
+    }, []);
+    const addWorkDirFromPicker = async () => {
+      let path: string | null = null;
+      try {
+        path = await pickFolder();
+      } catch (e) {
+        toast.error(`打不开选择框:${String(e)}`);
+        return;
+      }
+      if (!path) return;
+      addWorkDir(path);
+      // 选完直接开终端,开始干活
+      onRevealInTerminal?.(path);
+    };
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [isSearchActive, setIsSearchActive] = useState(false);
     const searchRef = useRef<ExplorerSearchHandle>(null);
@@ -520,6 +548,53 @@ export const FileExplorer = memo(
       projectGitByPath,
     ]);
 
+    // 工作目录的行:和置顶区一样复用 buildRows,展开状态也共用置顶区那份
+    // (路径不会重),不受根目录和"只看已打开"过滤影响
+    const workRows = useMemo(() => {
+      if (!onSetAsRoot || workDirs.length === 0) return [] as Row[];
+      const worktreesFor = projectGitByPath
+        ? (dir: string) => projectGitByPath[dir]?.worktrees
+        : null;
+      const out: Row[] = [];
+      for (const p of workDirs) {
+        out.push({
+          kind: "entry",
+          key: `work:${p}`,
+          path: p,
+          name: p.split("/").pop() ?? p,
+          isDir: true,
+          isExpanded: pinnedExpanded.has(p),
+          depth: 0,
+          gitignored: false,
+          gitStatusCode: null,
+          pinned: pinnedPaths.has(pinnedKey(p)),
+        });
+        if (!pinnedExpanded.has(p)) continue;
+        const sub = buildRows(
+          p,
+          tree,
+          lookupGitStatus,
+          null,
+          worktreesFor,
+          pinnedPaths,
+          pinnedExpanded,
+        );
+        for (const r of sub.rows) {
+          out.push({ ...r, key: `work:${r.key}`, depth: r.depth + 1 });
+        }
+      }
+      return out;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [
+      onSetAsRoot,
+      workDirs,
+      pinnedPaths,
+      pinnedExpanded,
+      tree.nodes,
+      lookupGitStatus,
+      projectGitByPath,
+    ]);
+
     const openedKeep = useMemo(() => {
       if (!onlyOpened || !canFilterOpened || !rootPath) return null;
       const root = rootPath.replace(/\/+$/, "");
@@ -609,7 +684,7 @@ export const FileExplorer = memo(
       if (!classifyProjectDir) return;
       // 置顶区那几行也要归类:只在置顶区露过面的工程,不归类就一直画成
       // 普通文件夹,直到它在树里也出现一次才突然变成机器人
-      const dirPaths = [...rows, ...pinnedRows].flatMap((r) =>
+      const dirPaths = [...rows, ...pinnedRows, ...workRows].flatMap((r) =>
         r.kind === "entry" && r.isDir ? [r.path] : [],
       );
       let cancelled = false;
@@ -654,7 +729,14 @@ export const FileExplorer = memo(
       return () => {
         cancelled = true;
       };
-    }, [rows, pinnedRows, classifyProjectDir, tree.expanded, tree.toggle]);
+    }, [
+      rows,
+      pinnedRows,
+      workRows,
+      classifyProjectDir,
+      tree.expanded,
+      tree.toggle,
+    ]);
 
     // 工程目录任何时候都不该处于展开态:reveal 到工程内部路径之类的操作
     // 会把它撑开,.git/.worktree 全翻出来。发现就收起,顺带自愈历史状态。
@@ -1351,25 +1433,42 @@ export const FileExplorer = memo(
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 {/* 置顶那块有标题,这块没有的话两片列表糊在一起分不出来 */}
                 {onSetAsRoot && (
-                  <button
-                    type="button"
-                    aria-expanded={projectsGroupOpen}
-                    aria-controls={projectsGroupId}
-                    onClick={() => setProjectsGroupOpen((open) => !open)}
-                    onKeyDown={(e) => e.stopPropagation()}
-                    className="flex h-8 w-full shrink-0 cursor-pointer items-center gap-1.5 px-3 text-left text-[13px] font-normal text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
-                  >
-                    项目
-                    <HugeiconsIcon
-                      icon={ArrowRight01Icon}
-                      size={12}
-                      strokeWidth={1.75}
-                      className={cn(
-                        "transition-transform",
-                        projectsGroupOpen && "rotate-90",
-                      )}
-                    />
-                  </button>
+                  <div className="flex h-8 shrink-0 items-center pr-2">
+                    <button
+                      type="button"
+                      aria-expanded={projectsGroupOpen}
+                      aria-controls={projectsGroupId}
+                      onClick={() => setProjectsGroupOpen((open) => !open)}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 px-3 text-left text-[13px] font-normal text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+                    >
+                      项目
+                      <HugeiconsIcon
+                        icon={ArrowRight01Icon}
+                        size={12}
+                        strokeWidth={1.75}
+                        className={cn(
+                          "transition-transform",
+                          projectsGroupOpen && "rotate-90",
+                        )}
+                      />
+                    </button>
+                    {/* 选个文件夹当工作目录(个人任务之类不在产品目录里的),
+                        排到项目最上面,选完直接开终端 */}
+                    <button
+                      type="button"
+                      title="添加工作目录:选一个文件夹,排在项目最上面"
+                      aria-label="添加工作目录"
+                      onClick={() => void addWorkDirFromPicker()}
+                      className="flex size-6 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      <HugeiconsIcon
+                        icon={Add01Icon}
+                        size={14}
+                        strokeWidth={1.75}
+                      />
+                    </button>
+                  </div>
                 )}
                 <div
                   id={projectsGroupId}
@@ -1416,6 +1515,74 @@ export const FileExplorer = memo(
                     setMenuAnchor({ x: e.clientX, y: e.clientY });
                   }}
                 >
+                  {workRows.length > 0 && (
+                    // 工作目录在项目列表最上面,和下面的树用一条细线隔开
+                    <div className="mb-1 border-b border-border/50 pb-1">
+                      {workRows.map((row) => {
+                        const workRoot =
+                          row.kind === "entry" && row.depth === 0 ? row : null;
+                        if (!workRoot)
+                          return (
+                            <div key={row.key}>
+                              {renderRow(row, pinnedRowActions, true)}
+                            </div>
+                          );
+                        return (
+                          <ContextMenu key={row.key}>
+                            <ContextMenuTrigger asChild>
+                              <div>
+                                {renderRow(row, pinnedRowActions, true)}
+                              </div>
+                            </ContextMenuTrigger>
+                            <ContextMenuContent className={COMPACT_CONTENT}>
+                              {onRevealInTerminal && (
+                                <ContextMenuItem
+                                  className={COMPACT_ITEM}
+                                  onSelect={() =>
+                                    onRevealInTerminal(workRoot.path)
+                                  }
+                                >
+                                  在终端中打开
+                                </ContextMenuItem>
+                              )}
+                              {onOpenNewTerminal && (
+                                <ContextMenuItem
+                                  className={COMPACT_ITEM}
+                                  onSelect={() =>
+                                    onOpenNewTerminal(workRoot.path)
+                                  }
+                                >
+                                  新开终端
+                                </ContextMenuItem>
+                              )}
+                              {onCloseProjectTerminals &&
+                                openedProjectPaths?.has(workRoot.path) && (
+                                  <ContextMenuItem
+                                    className={COMPACT_ITEM}
+                                    onSelect={() =>
+                                      onCloseProjectTerminals(workRoot.path)
+                                    }
+                                  >
+                                    关闭终端
+                                  </ContextMenuItem>
+                                )}
+                              <ContextMenuItem
+                                className={COMPACT_ITEM}
+                                onSelect={() => {
+                                  removeWorkDir(workRoot.path);
+                                  toast.success("已移出工作目录", {
+                                    description: workRoot.name,
+                                  });
+                                }}
+                              >
+                                移出工作目录
+                              </ContextMenuItem>
+                            </ContextMenuContent>
+                          </ContextMenu>
+                        );
+                      })}
+                    </div>
+                  )}
                   {pendingAtRoot ? (
                     <div
                       className="flex h-7 w-full min-w-0 items-center gap-2 px-1.5 text-[13px]"

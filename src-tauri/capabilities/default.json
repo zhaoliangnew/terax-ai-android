@@ -33,6 +33,7 @@
     "os:default",
     "notification:default",
     "store:default",
+    "dialog:allow-open",
     "autostart:allow-enable",
     "autostart:allow-disable",
     "autostart:allow-is-enabled"
