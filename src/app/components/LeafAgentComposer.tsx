@@ -426,6 +426,7 @@ export function LeafAgentChat({
               api.respond(leafId, id, allow, always, input, message)
             }
             onQuote={(text) => addQuote(leafId, text)}
+            onReply={(text) => api.send(leafId, text, [])}
           />
         </Suspense>
       )}
@@ -637,6 +638,7 @@ export function LeafChatDock({
               api.respond(leafId, id, allow, always, input, message)
             }
             onQuote={(text) => addQuote(leafId, text)}
+            onReply={(text) => api.send(leafId, text, [])}
           />
         </Suspense>
       </div>

@@ -1,4 +1,9 @@
-import { type ChatItem, type ToolTask, toolSummary } from "./chatItems";
+import {
+  type ChatItem,
+  markTurnDone,
+  type ToolTask,
+  toolSummary,
+} from "./chatItems";
 import {
   commandsFromInit,
   normalizeCommands,
@@ -284,6 +289,7 @@ export class SdkChatModel {
       case "result":
         this.working = false;
         this.compacting = false;
+        markTurnDone(this.items, ts);
         this.trackResultContext(msg);
         for (const i of this.streamIndex.values()) {
           const it = this.items[i];

@@ -1,4 +1,4 @@
-import type { ChatItem } from "./chatItems";
+import { type ChatItem, markTurnDone } from "./chatItems";
 import type { ContextUsage } from "./sdkChat";
 
 /**
@@ -270,6 +270,7 @@ export class CodexChatModel {
         this.working = false;
         this.turnId = null;
         this.settleStreaming();
+        markTurnDone(this.items, ts);
         const turn = params.turn;
         if (turn?.status === "failed" && turn.error?.message) {
           this.addNote(`出错了:${turn.error.message}`, ts);

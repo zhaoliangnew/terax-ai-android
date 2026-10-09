@@ -5,7 +5,10 @@ import {
 import { MessageResponse } from "@/components/ai-elements/message";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { isExternalUrl, openExternalUrl } from "@/lib/external-link";
+import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { native } from "@/modules/ai/lib/native";
+import { shellQuote } from "@/modules/android-run/lib/openExternally";
 import { localHtmlPath } from "@/modules/browser/lib/url";
 import { openInBrowser } from "@/modules/browser/webTabsStore";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
@@ -30,6 +33,7 @@ import {
 import {
   type ChatItem,
   chatTurns,
+  formatTurnDuration,
   isImagePath,
   type ToolTask,
 } from "../lib/chatItems";
@@ -58,7 +62,21 @@ type Props = {
   ) => void;
   /** 选中一段文字点"添加到对话":作为引用塞进输入框。 */
   onQuote: (text: string) => void;
+  /** 直接发一句话(回复末尾问"要不要发/确认吗"时的快捷按钮用)。 */
+  onReply?: (text: string) => void;
 };
+
+/**
+ * 回复最后是在等你拍板(确认吗、要不要、可以的话我就…):下面挂"确认/不用了"
+ * 两个按钮,点一下就回,不用自己打字。只看最后一句,免得正文里随口一句
+ * "是否"也冒出按钮;"你倾向哪个?"这种选择题不算(确认/不用了答不了)。
+ */
+const ASK_CONFIRM_RE =
+  /(确认|是否|要不要|需不需要|可以吗|行吗|好吗|可以的话|同意|拍板|发吗|发出去|发给他|发送)[^。\n]*[。.!！?？]?\s*$/;
+function asksConfirm(text: string): boolean {
+  const tail = text.trim().slice(-80);
+  return ASK_CONFIRM_RE.test(tail);
+}
 
 /**
  * 条目之间的间距(照 Codex):对话之间留大空,连着的工具调用挤紧一点,读起来
@@ -102,6 +120,31 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 const ChatCwd = createContext<string | null>(null);
 
 /**
+ * 打开回复里提到的本地 html。AI 常常只写文件名或相对别的目录的路径
+ * (比如文件其实在 .doc/流量统计/ 下),按当前目录拼出来的不存在时,就在
+ * 当前目录底下按文件名找一个(跳过 node_modules/build/.git);找不到才按
+ * 原路径打开,让浏览器报"文件不存在"。
+ */
+async function openLocalHtml(path: string, cwd: string | null) {
+  if (IS_WINDOWS || !cwd) {
+    openInBrowser(path);
+    return;
+  }
+  const name = path.split("/").pop() ?? "";
+  try {
+    const out = await native.runCommand(
+      `if [ -f ${shellQuote(path)} ]; then echo ${shellQuote(path)}; else find ${shellQuote(cwd)} -maxdepth 8 \\( -name node_modules -o -name build -o -name .git -o -name .gradle \\) -prune -o -type f -name ${shellQuote(name)} -print 2>/dev/null | head -1; fi`,
+      null,
+      5,
+    );
+    const found = out.stdout.trim().split("\n")[0]?.trim();
+    openInBrowser(found || path);
+  } catch {
+    openInBrowser(path);
+  }
+}
+
+/**
  * 回复里的行内代码:是 html 文件路径就能点,在右栏内嵌浏览器里打开;
  * 别的照常(代码块也照常)。
  */
@@ -128,8 +171,8 @@ function ChatCode({
     <button
       type="button"
       title={`在右栏浏览器里打开 ${path}`}
-      onClick={() => openInBrowser(path)}
-      className="cursor-pointer rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[11px] text-[#6f9ce8] underline decoration-dotted underline-offset-2 hover:text-[#8fb3f0]"
+      onClick={() => void openLocalHtml(path, cwd)}
+      className="cursor-pointer rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[11px] text-[#6f9ce8] underline-offset-[3px] hover:underline hover:decoration-dashed"
     >
       {children}
     </button>
@@ -152,16 +195,39 @@ function openChatLink(e: React.MouseEvent, cwd: string | null) {
   const a = (e.target as HTMLElement).closest("a");
   if (!a) return;
   const href = a.getAttribute("href") ?? "";
-  const target = /^https?:\/\//i.test(href) ? href : localHtmlPath(href, cwd);
-  if (target) {
+  if (/^https?:\/\//i.test(href)) {
     e.preventDefault();
     e.stopPropagation();
-    openInBrowser(target);
+    openInBrowser(href);
+    return;
+  }
+  const local = localHtmlPath(href, cwd);
+  if (local) {
+    e.preventDefault();
+    e.stopPropagation();
+    void openLocalHtml(local, cwd);
   } else if (isExternalUrl(href)) {
     e.preventDefault();
     e.stopPropagation();
     void openExternalUrl(href);
   }
+}
+
+const QUICK_REPLIES = [
+  { label: "确认", text: "确认,就按你说的办。", primary: true },
+  { label: "不用了", text: "不用了,先不要。", primary: false },
+];
+
+/** 回复够久(≥10 秒)才在上方写"用时",短的一问一答不写,过程也不收。 */
+const SHOW_DURATION_MS = 10_000;
+function showsDuration(
+  item: ChatItem,
+): item is Extract<ChatItem, { kind: "user" }> & { durationMs: number } {
+  return (
+    item.kind === "user" &&
+    item.durationMs !== undefined &&
+    item.durationMs >= SHOW_DURATION_MS
+  );
 }
 
 /** 回复正文:流式输出时逐字放出来,不是一块一块往外蹦。 */
@@ -474,13 +540,19 @@ function ToolRow({
   );
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({
+  text,
+  title = "复制",
+}: {
+  text: string;
+  title?: string;
+}) {
   const [done, setDone] = useState(false);
   return (
     <button
       type="button"
-      aria-label="复制"
-      title="复制"
+      aria-label={title}
+      title={title}
       onClick={() => {
         void copyToClipboard(text);
         setDone(true);
@@ -827,9 +899,64 @@ export function AgentChatView({
   permissions,
   onPermission,
   onQuote,
+  onReply,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const turns = useMemo(() => chatTurns(items), [items]);
+  // 照 Codex:一轮做完后,中间过程(边做边说的话、工具调用)收进"用时"那
+  // 一行,只露最后那段回复;点"用时"展开看 AI 的思路。还在做的那轮全露着。
+  // 过程项 id → 它所属那一问的 id
+  const foldedInto = useMemo(() => {
+    const map = new Map<string, string>();
+    for (let i = 0; i < items.length; i++) {
+      const u = items[i];
+      if (!showsDuration(u)) continue;
+      let end = i + 1;
+      while (end < items.length && items[end].kind !== "user") end++;
+      let last = -1;
+      for (let j = end - 1; j > i; j--) {
+        if (items[j].kind === "assistant") {
+          last = j;
+          break;
+        }
+      }
+      for (let j = i + 1; j < last; j++) {
+        // 出错、已中断这类提示不收,要一眼看得到
+        if (items[j].kind !== "note") map.set(items[j].id, u.id);
+      }
+    }
+    return map;
+  }, [items]);
+  // 一轮里有好几段话(过程里也说了)时,最后那段下面的复制按钮复制这一轮
+  // 全部文字;只有一段就是它自己
+  const turnCopyText = useMemo(() => {
+    const map = new Map<string, string>();
+    let texts: string[] = [];
+    let lastId: string | null = null;
+    const flush = () => {
+      if (lastId && texts.length > 1) map.set(lastId, texts.join("\n\n"));
+      texts = [];
+      lastId = null;
+    };
+    for (const it of items) {
+      if (it.kind === "user") flush();
+      else if (it.kind === "assistant" && it.text.trim()) {
+        texts.push(it.text.trim());
+        lastId = it.id;
+      }
+    }
+    flush();
+    return map;
+  }, [items]);
+  const foldedTurns = useMemo(() => new Set(foldedInto.values()), [foldedInto]);
+  const [openTurns, setOpenTurns] = useState<Set<string>>(() => new Set());
+  const toggleTurn = (id: string) =>
+    setOpenTurns((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const runningTasks = useMemo(
     () =>
       items.filter(
@@ -930,6 +1057,13 @@ export function AgentChatView({
   }, []);
 
   const jumpToTool = (id: string) => {
+    // 要跳的工具收在某一轮的过程里:先展开,下一帧再滚过去
+    const owner = foldedInto.get(id);
+    if (owner && !openTurns.has(owner)) {
+      setOpenTurns((cur) => new Set(cur).add(owner));
+      requestAnimationFrame(() => jumpToTool(id));
+      return;
+    }
     const el = scrollRef.current?.querySelector<HTMLElement>(
       `[data-tool="${CSS.escape(id)}"]`,
     );
@@ -1030,6 +1164,8 @@ export function AgentChatView({
                 </div>
               )}
               {items.map((item, i) => {
+                const owner = foldedInto.get(item.id);
+                if (owner && !openTurns.has(owner)) return null;
                 const prev = items[i - 1];
                 const showTime =
                   item.ts > 0 && (!prev || item.ts - prev.ts > TIME_GAP_MS);
@@ -1041,6 +1177,9 @@ export function AgentChatView({
                     className={cn(
                       "flex scroll-mt-6 flex-col",
                       showTime ? "mt-10" : gapAbove(item, prev),
+                      // 展开的过程:左边一条细线、整体压暗,和下面的正式回复分开
+                      owner &&
+                        "border-l-2 border-foreground/10 pl-3 opacity-75",
                     )}
                   >
                     {showTime && (
@@ -1085,18 +1224,66 @@ export function AgentChatView({
                         </div>
                       </div>
                     )}
+                    {/* 照 Codex:回复上方写这一轮用了多久 */}
+                    {item.kind === "user" && showsDuration(item) && (
+                      <div className="mt-6 border-b border-border/60 pb-2">
+                        {foldedTurns.has(item.id) ? (
+                          <button
+                            type="button"
+                            title={
+                              openTurns.has(item.id)
+                                ? "收起过程"
+                                : "展开看这一轮的过程(边做边说的话、读了哪些文件、跑了哪些命令)"
+                            }
+                            onClick={() => toggleTurn(item.id)}
+                            className="flex cursor-pointer items-center gap-1 text-[12.5px] text-muted-foreground hover:text-foreground"
+                          >
+                            用时 {formatTurnDuration(item.durationMs)}
+                            <HugeiconsIcon
+                              icon={ArrowRight01Icon}
+                              size={12}
+                              strokeWidth={2}
+                              className={cn(
+                                "transition-transform",
+                                openTurns.has(item.id) && "rotate-90",
+                              )}
+                            />
+                          </button>
+                        ) : (
+                          <span className="text-[12.5px] text-muted-foreground">
+                            用时 {formatTurnDuration(item.durationMs)}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {item.kind === "assistant" && (
                       <div className="flex flex-col gap-1.5">
                         {/* Markdown 渲染默认的标题是大号字,放在对话里一个"##"就
                         比正文大一截;照 Codex 只比正文略大 */}
-                        <div className="text-[14px] leading-[1.75] text-foreground/95 [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[16.5px] [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14.5px] [&_h3]:font-semibold [&_h4]:text-[14px] [&_h4]:font-semibold [&_table]:text-[13px] [&_pre]:text-[12.5px]">
-                          <AssistantText
-                            text={item.text}
-                            streaming={item.streaming === true}
-                          />
+                        <div
+                          className={cn(
+                            "leading-[1.75]",
+                            owner
+                              ? "text-[13px] text-muted-foreground"
+                              : "text-[14px] text-foreground/95",
+                          )}
+                        >
+                          <div className="[&_a]:!font-normal [&_a]:!text-[#4d8ef7] [&_a]:!no-underline [&_a]:underline-offset-[3px] [&_a:hover]:!underline [&_a:hover]:decoration-dashed [&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:text-[16.5px] [&_h1]:font-semibold [&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:text-[15.5px] [&_h2]:font-semibold [&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:text-[14.5px] [&_h3]:font-semibold [&_h4]:text-[14px] [&_h4]:font-semibold [&_table]:text-[13px] [&_pre]:text-[12.5px]">
+                            <AssistantText
+                              text={item.text}
+                              streaming={item.streaming === true}
+                            />
+                          </div>
                         </div>
                         <div className="-ml-1 flex gap-0.5">
-                          <CopyButton text={item.text} />
+                          <CopyButton
+                            text={turnCopyText.get(item.id) ?? item.text}
+                            title={
+                              turnCopyText.has(item.id)
+                                ? "复制这一轮完整回复(含过程里说的话)"
+                                : undefined
+                            }
+                          />
                         </div>
                       </div>
                     )}
@@ -1142,6 +1329,32 @@ export function AgentChatView({
                   />
                 ),
               )}
+              {/* 回复在等你拍板:点一下就回,不用自己打字 */}
+              {onReply &&
+                !working &&
+                permissions.length === 0 &&
+                last?.kind === "assistant" &&
+                !last.streaming &&
+                asksConfirm(last.text) && (
+                  <div className="mt-3 flex gap-2">
+                    {QUICK_REPLIES.map((r) => (
+                      <button
+                        key={r.label}
+                        type="button"
+                        title={`发送:${r.text}`}
+                        onClick={() => onReply(r.text)}
+                        className={cn(
+                          "cursor-pointer rounded-full px-3.5 py-1 text-[12.5px] transition-colors",
+                          r.primary
+                            ? "bg-[#2c67c5] text-white hover:bg-[#3572d4]"
+                            : "border border-border text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
+                        )}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               {statusText && (
                 <div className="mt-6 text-center text-[12px] text-muted-foreground">
                   {statusText}

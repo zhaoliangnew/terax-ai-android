@@ -21,6 +21,8 @@ export type ChatItem =
       ts: number;
       /** 随消息附上的文件(绝对路径)。 */
       attachments?: string[];
+      /** 这一轮从发出到回完用了多久;还没回完是 undefined。 */
+      durationMs?: number;
     }
   | {
       kind: "assistant";
@@ -111,4 +113,29 @@ export function chatTurns(items: readonly ChatItem[]): ChatTurn[] {
     }
   }
   return turns;
+}
+
+/**
+ * 一轮结束:给最后一条还没记用时的用户消息记上"从发出到回完"的用时
+ * (照 Codex 在回复上方写"用时 1分钟 29秒")。返回是否有改动。
+ */
+export function markTurnDone(items: ChatItem[], endTs: number): boolean {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind !== "user") continue;
+    if (it.durationMs !== undefined) return false;
+    items[i] = { ...it, durationMs: Math.max(0, endTs - it.ts) };
+    return true;
+  }
+  return false;
+}
+
+/** 用时写成"1分钟 29秒"/"12秒"/"1小时 3分钟"。 */
+export function formatTurnDuration(ms: number): string {
+  const s = Math.max(1, Math.round(ms / 1000));
+  if (s < 60) return `${s}秒`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `${m}分钟 ${s % 60}秒` : `${m}分钟`;
+  const h = Math.floor(m / 60);
+  return m % 60 ? `${h}小时 ${m % 60}分钟` : `${h}小时`;
 }
