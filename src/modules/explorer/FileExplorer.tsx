@@ -1103,6 +1103,7 @@ export const FileExplorer = memo(
               isDropTarget={dropTargetDir === row.path}
               onOpenFile={onOpenFile}
               onSelectPath={setSelectedPath}
+              onSetAsRoot={onSetAsRoot}
               gitStatusCode={row.gitStatusCode}
               gitignored={gitDecorations && row.gitignored}
               projectKind={

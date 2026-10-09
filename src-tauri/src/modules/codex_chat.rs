@@ -102,13 +102,16 @@ pub async fn codex_chat_start(
         let codex = login_env::resolve_binary("codex").ok_or(
             "codex chat: Codex CLI not found. Install Codex CLI or add codex.exe to PATH, then restart Terax.",
         )?;
-        let mut child = Command::new(codex)
+        let mut command = Command::new(codex);
+        command
             .arg("app-server")
             .current_dir(&cwd)
             .envs(login_env::server_env_overlay())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        crate::modules::proc::hide_console(&mut command);
+        let mut child = command
             .spawn()
             .map_err(|e| format!("codex chat: spawn failed: {e}"))?;
         let stdin = child.stdin.take().ok_or("codex chat: no stdin")?;

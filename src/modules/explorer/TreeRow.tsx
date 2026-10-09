@@ -56,6 +56,7 @@ export type EntryRowProps = {
   isDropTarget?: boolean;
   onOpenFile: (path: string, pin?: boolean) => void;
   onSelectPath: (path: string) => void;
+  onSetAsRoot?: (path: string) => void;
   gitStatusCode?: GitStatusCode | null;
   gitignored?: boolean;
   /** 工程目录(安卓/Flutter):显示对应图标、不可展开、点击直接开/定位终端。 */
@@ -91,6 +92,7 @@ function EntryRowImpl(props: EntryRowProps) {
     isDropTarget = false,
     onOpenFile,
     onSelectPath,
+    onSetAsRoot,
     gitStatusCode,
     gitignored = false,
     projectKind = null,
@@ -149,12 +151,25 @@ function EntryRowImpl(props: EntryRowProps) {
     else onOpenFile(path);
   };
 
+  const handleDoubleClick = () => {
+    if (isDir) {
+      if (!asProject) onSetAsRoot?.(path);
+      return;
+    }
+    actions.beginRename(path);
+  };
+
   return (
     <button
       type="button"
       data-fs-path={path}
       onClick={handleClick}
-      onDoubleClick={() => !isDir && actions.beginRename(path)}
+      onDoubleClick={handleDoubleClick}
+      title={
+        isDir && !asProject && onSetAsRoot
+          ? "双击将此目录设为工作区根目录"
+          : undefined
+      }
       className={cn(
         "group flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
         isActiveProject
