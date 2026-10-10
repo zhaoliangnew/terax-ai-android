@@ -216,11 +216,15 @@ const RAW_DEFAULTS: QuickPrompt[] = [
   },
   {
     id: "commit",
-    label: "提交说明",
+    label: "提交本地",
+    confirm: true,
     text: [
-      "根据当前未提交的改动(`git diff`、`git diff --cached`、新增文件)写一条提交说明,参考 `git log -10` 里本仓库的写法和语言。",
+      "把本次任务的改动提交到本地 Git,直接执行,不用再向我确认,不要推送。",
       "",
-      "第一行一句话说清做了什么(给用户/业务带来的变化),空一行后写为什么这么改、改了哪几块。只写说明给我看,不要执行 git commit。",
+      "- 先查看 `git status`、`git diff`、`git diff --cached` 和新增文件,只提交本次任务相关的改动;",
+      "- 保留其他任务或会话的改动及暂存状态;",
+      "- 提交说明参考 `git log -10` 里本仓库的写法和语言,第一行说清变化,正文说明原因和主要改动;",
+      "- 提交后告诉我提交哈希和简要内容。",
     ].join("\n"),
   },
   {
@@ -281,14 +285,14 @@ const RAW_DEFAULTS: QuickPrompt[] = [
     id: "summary",
     label: "总结进度",
     text: [
-      "总结一下这次会话到现在的进展:",
+      "整理一份当前进度汇报:",
       "",
-      "- 目标是什么;",
-      "- 已经完成了哪些(改了哪些文件、做了什么);",
-      "- 还剩哪些没做、遇到了什么问题或还需要我确认的事;",
-      "- 下一步建议。",
+      "- 当前目标;",
+      "- 已完成的工作和结果;",
+      "- 未完成事项、当前问题和需要确认的事项;",
+      "- 下一步计划。",
       "",
-      "简洁一点,方便我换个会话或交给别人接着做。",
+      "适合直接用于工作汇报,简洁清楚,突出进度和结果,不贴大段代码和内部文件路径。",
     ].join("\n"),
   },
 ];
@@ -299,6 +303,8 @@ const OLD_DEFAULT_TEXT_START: Record<string, string> = {
   debug: "帮我排查这个问题,先定位原因",
   explain: "用通俗的话给我讲解当前这块代码/这次改动:",
   "dt-reply": "我说可以了再用 dt 技能发给他。",
+  summary: "简洁一点,方便我换个会话或交给别人接着做。",
+  commit: "只写说明给我看,不要执行 git commit。",
 };
 
 export const DEFAULT_QUICK_PROMPTS: QuickPrompt[] = RAW_DEFAULTS.map((p) => ({
@@ -325,7 +331,13 @@ function load(): QuickPrompt[] {
     for (const p of saved) {
       const old = OLD_DEFAULT_TEXT_START[p.id];
       const d = DEFAULT_QUICK_PROMPTS.find((x) => x.id === p.id);
-      if (old && d && p.text.includes(old)) p.text = d.text;
+      if (old && d && p.text.includes(old)) {
+        p.text = d.text;
+        if (p.id === "commit") {
+          if (p.label === "提交说明") p.label = d.label;
+          p.confirm = true;
+        }
+      }
     }
     // 早先存下的内置项没有分组:按默认补上
     for (const p of saved) {

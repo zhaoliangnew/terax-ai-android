@@ -1003,27 +1003,19 @@ export function AgentComposer({
           </div>
           <span className={cn("flex-1", compact && "hidden")} />
           {/* 快捷指令:点开选一条,整理好的话直接发出去(Review、修复、同步…,
-              能自己加);AI 正在回的时候不让发,免得插进当前这一轮 */}
+              能自己加) */}
           {/* 菜单以整行为准往上弹,在输入框中间居中(不跟着按钮偏到一边) */}
           <div className={cn(compact && "hidden")}>
             <button
               type="button"
-              disabled={working}
-              title={
-                working
-                  ? "AI 正在回复,等这一轮结束"
-                  : "快捷指令:Review、修复、同步,也能加自己的"
-              }
+              title="快捷指令:Review、修复、同步,也能加自己的"
               onClick={() => toggleMenu("quick")}
-              className={cn(
-                toolText,
-                "disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent",
-              )}
+              className={toolText}
             >
               快捷指令
             </button>
             <InlineMenu
-              open={menu === "quick" && !working}
+              open={menu === "quick"}
               onClose={closeMenu}
               align="start"
               className="left-1/2 max-h-[70vh] w-[34rem] max-w-full -translate-x-1/2 overflow-y-auto"

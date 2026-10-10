@@ -59,6 +59,7 @@
     ],
     "macOS": {
       "minimumSystemVersion": "13.0",
+      "signingIdentity": "Android Dev Local Signing",
       "entitlements": "./entitlements.plist"
     },
     "linux": {

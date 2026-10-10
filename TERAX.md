@@ -154,6 +154,7 @@ BYOK. Cloud providers via `@ai-sdk/*`: **OpenAI, Anthropic, Google, xAI, Cerebra
 
 ### Bundle config
 
+- Local macOS builds use the project certificate `Android Dev Local Signing` configured in `bundle.macOS.signingIdentity`. Install the signed app bundle without replacing its signature with ad-hoc signing; keep the certificate and bundle identifier stable across updates so macOS can retain permissions.
 - `bundle.targets: "all"` plus per-platform sections in `tauri.conf.json`:
   - **macOS**: `minimumSystemVersion: 10.15`.
   - **Linux**: deb depends `libwebkit2gtk-4.1-0`, `libgtk-3-0`; rpm `webkit2gtk4.1`, `gtk3`; AppImage bundles its media framework.

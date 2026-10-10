@@ -8,6 +8,15 @@ import { isExternalUrl, openExternalUrl } from "@/lib/external-link";
 import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { native } from "@/modules/ai/lib/native";
+import { getLspNavigator } from "@/modules/lsp/lib/navigator";
+import {
+  sourceMatches,
+  sourceReference,
+  type SourceReference,
+} from "@/modules/agents/lib/sourceReference";
+import { currentWorkspaceEnv } from "@/modules/workspace";
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { shellQuote } from "@/modules/android-run/lib/openExternally";
 import { localHtmlPath } from "@/modules/browser/lib/url";
 import { openInBrowser } from "@/modules/browser/webTabsStore";
@@ -120,6 +129,51 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 /** 回复里相对路径要按哪个目录补全。 */
 const ChatCwd = createContext<string | null>(null);
 
+async function openSource(ref: SourceReference, cwd: string | null) {
+  const nav = getLspNavigator();
+  if (!nav) return;
+  const absolute = /^(?:\/|[a-z]:\/)/i.test(ref.path);
+  if (!absolute && !cwd) {
+    toast.error("没有项目目录,无法定位源码");
+    return;
+  }
+  const path = absolute ? ref.path : `${cwd}/${ref.path}`;
+  try {
+    const stat = await invoke<{ kind: string }>("fs_stat", {
+      path,
+      workspace: currentWorkspaceEnv(),
+    }).catch(() => null);
+    if (stat && stat.kind !== "dir") {
+      nav.openFile(path, ref.line);
+      return;
+    }
+    if (!absolute && cwd) {
+      const name = ref.path.split("/").pop() ?? "";
+      const literalName = name.replace(/[?*[\]{}\\]/g, "\\$&");
+      const result = await native.glob({
+        pattern: `**/${literalName}`,
+        root: cwd,
+        maxResults: 100,
+      });
+      const matches = sourceMatches(
+        result.hits.map((hit) => hit.path),
+        ref.path,
+      );
+      if (!result.truncated && matches.length === 1) {
+        nav.openFile(matches[0], ref.line);
+        return;
+      }
+      if (matches.length > 1 || result.truncated) {
+        toast.error(`无法唯一定位 ${name},请使用完整相对路径`);
+        return;
+      }
+    }
+    toast.error(`找不到源码文件:${ref.path}`);
+  } catch (error) {
+    toast.error(`打开源码失败:${String(error)}`);
+  }
+}
+
 /**
  * 打开回复里提到的本地 html。AI 常常只写文件名或相对别的目录的路径
  * (比如文件其实在 .doc/流量统计/ 下),按当前目录拼出来的不存在时,就在
@@ -158,6 +212,19 @@ function ChatCode({
   children?: ReactNode;
 }) {
   const cwd = useContext(ChatCwd);
+  const ref = className ? null : sourceReference(markdownCodeText(children));
+  if (ref) {
+    return (
+      <button
+        type="button"
+        title={`打开 ${ref.path}:${ref.line}`}
+        onClick={() => void openSource(ref, cwd)}
+        className="cursor-pointer rounded bg-muted/70 px-1.5 py-0.5 font-mono text-[11px] text-[#6f9ce8] underline-offset-[3px] hover:underline"
+      >
+        {children}
+      </button>
+    );
+  }
   const path = className
     ? null
     : localHtmlPath(markdownCodeText(children), cwd);
@@ -200,6 +267,13 @@ function openChatLink(e: React.MouseEvent, cwd: string | null) {
     e.preventDefault();
     e.stopPropagation();
     openInBrowser(href);
+    return;
+  }
+  const ref = sourceReference(href);
+  if (ref) {
+    e.preventDefault();
+    e.stopPropagation();
+    void openSource(ref, cwd);
     return;
   }
   const local = localHtmlPath(href, cwd);
@@ -1199,8 +1273,19 @@ export function AgentChatView({
                       <div className="flex justify-end">
                         <div className="group/user flex max-w-[80%] flex-col items-end gap-1.5">
                           {item.text && (
-                            <div className="whitespace-pre-wrap break-words rounded-[18px] bg-[#173e77] px-4 py-2.5 text-[14px] leading-relaxed text-white">
-                              {item.text}
+                            <div
+                              className="min-w-0 max-w-full break-words rounded-[18px] bg-[#173e77] px-4 py-2.5 text-[14px] leading-relaxed text-white [&_a]:text-white [&_a]:underline [&_h1]:text-[16px] [&_h2]:text-[15px] [&_h3]:text-[14px] [&_p]:whitespace-pre-wrap [&_pre]:max-w-full [&_pre]:overflow-x-auto"
+                              onClickCapture={(e) =>
+                                openChatLink(e, cwd ?? null)
+                              }
+                            >
+                              <MessageResponse
+                                mode="static"
+                                components={CHAT_COMPONENTS}
+                                linkSafety={CHAT_LINK_SAFETY}
+                              >
+                                {item.text}
+                              </MessageResponse>
                             </div>
                           )}
                           {item.attachments && (
