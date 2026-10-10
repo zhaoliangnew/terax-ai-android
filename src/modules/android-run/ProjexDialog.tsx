@@ -28,6 +28,7 @@ import {
 import {
   ArrowLeft01Icon,
   ArrowRight01Icon,
+  Cancel01Icon,
   CheckListIcon,
   FolderLibraryIcon,
   LinkSquare01Icon,
@@ -842,6 +843,26 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
                 />
               )}
             </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              title="关闭云效项目"
+              aria-label="关闭云效项目"
+              onClick={() => {
+                cancelLaunch();
+                setPicking(null);
+                setPreview(null);
+                onOpenChange(false);
+              }}
+              className="h-7 gap-1 px-2"
+            >
+              <HugeiconsIcon
+                icon={Cancel01Icon}
+                size={14}
+                strokeWidth={1.75}
+              />
+              关闭
+            </Button>
           </div>
         </div>
 
@@ -1085,7 +1106,7 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
             >
               <ResizablePanel
                 id="projex-list"
-                defaultSize="52%"
+                defaultSize="32%"
                 minSize={preview ? "280px" : 0}
               >
                 <div className="relative flex h-full min-h-0 min-w-0 flex-col">
@@ -1177,7 +1198,14 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
                             没有{category === "Req" ? "需求" : "任务"}
                           </div>
                         ) : (
-                          <table className="w-full min-w-[48rem] table-fixed border-collapse text-[13px] text-foreground/85">
+                          <table
+                            className={cn(
+                              "w-full table-fixed border-collapse text-[13px] text-foreground/85",
+                              preview
+                                ? "[&_tr>:not(:first-child):not(:last-child)]:hidden"
+                                : "min-w-[48rem]",
+                            )}
+                          >
                             <thead className="sticky top-0 bg-card/95 text-[12px] text-muted-foreground backdrop-blur">
                               <tr className="border-b border-border/60">
                                 <th className="min-w-40 px-3 py-1.5 text-left font-medium">
@@ -1471,7 +1499,7 @@ export function ProjexDialog({ open, onOpenChange, anchor }: Props) {
                   />
                   <ResizablePanel
                     id="projex-preview"
-                    defaultSize="48%"
+                    defaultSize="68%"
                     minSize="360px"
                   >
                     <div className="relative flex h-full min-w-0 flex-col">
