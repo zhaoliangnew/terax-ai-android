@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod browser;
+pub mod browser_cookies;
 pub mod browser_automation;
 pub mod claude_chat;
 pub mod codex_chat;

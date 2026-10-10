@@ -220,6 +220,57 @@ describe("SdkChatModel", () => {
     });
   });
 
+  it("keeps a workflow running after its launch result until task_notification", () => {
+    const m = new SdkChatModel();
+    m.apply(
+      assistant("wf", [
+        {
+          type: "tool_use",
+          id: "w1",
+          name: "Workflow",
+          input: {
+            script: "export const meta = { name: 'x', description: 'y' }",
+          },
+        },
+      ]),
+      1000,
+    );
+    // 真实的 SDK:workflow 任务的 task_started 不带 is_backgrounded
+    m.apply(
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "wk",
+        tool_use_id: "w1",
+        task_type: "local_workflow",
+      },
+      1000,
+    );
+    m.apply({
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "w1",
+            content:
+              "Workflow launched in background.\nTranscript dir: /tmp/wf",
+          },
+        ],
+      },
+    });
+    const card = () => m.items.find((i) => i.id === "w1");
+    expect(card()).toMatchObject({ task: { status: "running" } });
+    m.apply({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "wk",
+      status: "completed",
+      summary: "done",
+    });
+    expect(card()).toMatchObject({ task: { status: "completed" } });
+  });
+
   it("finishes a foreground subagent when its result comes back", () => {
     const m = new SdkChatModel();
     m.apply(

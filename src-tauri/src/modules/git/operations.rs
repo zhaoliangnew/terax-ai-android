@@ -1461,8 +1461,102 @@ pub fn worktree_add(
         branch_name = format!("{new_branch}-{n}");
         n += 1;
     }
-    // 统一收在仓库内的 .worktree/ 下;分支名里的路径分隔符换掉
-    let sanitized: String = branch_name
+    let (base, dir_name) = worktree_dir_for(&repo_root, &branch_name);
+    ensure_global_worktree_ignore(&repo_root);
+    // 相对路径交给 git 以仓库为基准解析,WSL 下也不用换算路径
+    let rel = format!(".worktree/{}", dir_name);
+    let args: Vec<OsString> = vec![
+        "worktree".into(),
+        "add".into(),
+        "-b".into(),
+        branch_name.into(),
+        rel.into(),
+        base_ref.into(),
+    ];
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        args,
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git worktree add failed")?;
+    Ok(display_path(&base.join(&dir_name)))
+}
+
+/**
+ * 把一个已经存在的本地分支挂回 .worktree/ 下(不新建分支)。用在:
+ * worktree 被删了但分支还在、上面有之前的提交 —— 新建同名分支会撞名,
+ * 删分支又会丢提交,只能挂回去。git 里还留着目录已经没了的旧记录时
+ * 先 prune,不然 add 会说这个分支已经被那个(不存在的)worktree 占着。
+ */
+pub fn worktree_attach(
+    registry: &WorkspaceRegistry,
+    repo_root: &str,
+    branch: &str,
+    workspace: &WorkspaceEnv,
+) -> Result<String> {
+    let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
+    ensure_git_available(&repo_root.workspace)?;
+    if repo_root.git_path.replace('\\', "/").contains("/.worktree/") {
+        return Err(GitError::command(
+            "git worktree add",
+            "当前已在 worktree 里,请回主工程创建 worktree",
+        ));
+    }
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err(GitError::InvalidPath(branch.into()));
+    }
+    let exists = git_stdout_line_opt(
+        &repo_root.workspace,
+        &repo_root.git_path,
+        [
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{branch}"),
+        ],
+    )
+    .ok()
+    .flatten()
+    .is_some();
+    if !exists {
+        return Err(GitError::command(
+            "git worktree add",
+            format!("分支 {branch} 不存在"),
+        ));
+    }
+    // 只清目录已经不在的记录;加了锁的 worktree git 不会动
+    let prune = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        vec![OsString::from("worktree"), OsString::from("prune")],
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&prune, "git worktree prune failed")?;
+    let (base, dir_name) = worktree_dir_for(&repo_root, branch);
+    ensure_global_worktree_ignore(&repo_root);
+    let rel = format!(".worktree/{}", dir_name);
+    let args: Vec<OsString> = vec![
+        "worktree".into(),
+        "add".into(),
+        rel.into(),
+        // 只能给短分支名:git 先按 refs/heads/<名字> 找到分支才会检出它,
+        // 写成 refs/heads/xxx 会被当成提交号,检出成 detached HEAD
+        branch.into(),
+    ];
+    let output = run_git(
+        &repo_root.workspace,
+        Some(&repo_root.git_path),
+        args,
+        DEFAULT_TIMEOUT_SECS,
+    )?;
+    ensure_success(&output, "git worktree add failed")?;
+    Ok(display_path(&base.join(&dir_name)))
+}
+
+/// 统一收在仓库内的 .worktree/ 下;分支名里的路径分隔符换掉,目录重名加序号。
+fn worktree_dir_for(repo_root: &ResolvedGitDirectory, branch: &str) -> (PathBuf, String) {
+    let sanitized: String = branch
         .chars()
         .map(|c| {
             if c == '/' || c == '\\' || c == ':' || c.is_whitespace() {
@@ -1479,9 +1573,13 @@ pub fn worktree_add(
         dir_name = format!("{}-{}", sanitized, n);
         n += 1;
     }
-    // worktree 长在工作区里面,整棵目录会被 status 当成未跟踪文件,
-    // 把切分支的脏检查也搅乱 —— 往 git 全局忽略文件里补一条,所有
-    // 仓库一次搞定,也不弄脏任何项目自己的 .gitignore。
+    (base, dir_name)
+}
+
+/// worktree 长在工作区里面,整棵目录会被 status 当成未跟踪文件,
+/// 把切分支的脏检查也搅乱 —— 往 git 全局忽略文件里补一条,所有
+/// 仓库一次搞定,也不弄脏任何项目自己的 .gitignore。
+fn ensure_global_worktree_ignore(repo_root: &ResolvedGitDirectory) {
     let global_ignore = git_stdout_line_opt(
         &repo_root.workspace,
         &repo_root.git_path,
@@ -1518,24 +1616,6 @@ pub fn worktree_add(
             let _ = std::fs::write(&ignore_path, format!("{existing}{sep}.worktree/\n"));
         }
     }
-    // 相对路径交给 git 以仓库为基准解析,WSL 下也不用换算路径
-    let rel = format!(".worktree/{}", dir_name);
-    let args: Vec<OsString> = vec![
-        "worktree".into(),
-        "add".into(),
-        "-b".into(),
-        branch_name.into(),
-        rel.into(),
-        base_ref.into(),
-    ];
-    let output = run_git(
-        &repo_root.workspace,
-        Some(&repo_root.git_path),
-        args,
-        DEFAULT_TIMEOUT_SECS,
-    )?;
-    ensure_success(&output, "git worktree add failed")?;
-    Ok(display_path(&base.join(&dir_name)))
 }
 
 pub fn worktree_remove(

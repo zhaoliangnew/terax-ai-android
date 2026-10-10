@@ -486,6 +486,16 @@ export const native = {
       newBranch,
       workspace: currentWorkspaceEnv(),
     }),
+  /**
+   * 把已有的本地分支挂回 .worktree/ 下(不新建分支,先 prune 掉目录已经
+   * 没了的旧记录),返回目录绝对路径。
+   */
+  gitWorktreeAttach: (repoRoot: string, branch: string) =>
+    invoke<string>("git_worktree_attach", {
+      repoRoot,
+      branch,
+      workspace: currentWorkspaceEnv(),
+    }),
   gitWorktreeRemove: (repoRoot: string, worktreePath: string) =>
     invoke<void>("git_worktree_remove", {
       repoRoot,

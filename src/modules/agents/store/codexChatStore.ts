@@ -171,6 +171,37 @@ function startMode(): string {
   return "full";
 }
 
+/**
+ * 只给这个窗格用的权限模式(从云效任务开的会话要"改文件前先问"),不写进
+ * localStorage,免得变成以后所有新会话的默认。跟着窗格走:会话结束再开、
+ * 点"新对话"还是它;在聊天里手动改了模式就作废。
+ */
+const leafMode = new Map<number, string>();
+
+/*
+ * 带着 leafMode 跑过的会话按 thread id 记下它的模式:任务 tab 关了再开这个
+ * 目录、或者重启后 tab 恢复,都会接着这个会话聊,不记就回到平时的"完全访问"。
+ */
+const threadModeKey = (threadId: string) =>
+  `terax.codexChat.threadMode:${threadId}`;
+
+function threadMode(threadId: string | null): string | null {
+  if (!threadId) return null;
+  try {
+    const v = localStorage.getItem(threadModeKey(threadId));
+    return v && (CODEX_MODES as readonly string[]).includes(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberThreadMode(threadId: string, mode: string | null) {
+  try {
+    if (mode) localStorage.setItem(threadModeKey(threadId), mode);
+    else localStorage.removeItem(threadModeKey(threadId));
+  } catch {}
+}
+
 function patch(leafId: number, next: Partial<ChatSession>) {
   useCodexChatStore.setState((s) => {
     const cur = s.sessions[leafId];
@@ -370,6 +401,8 @@ async function boot(
     m.items.push(...live);
   }
   rememberThread(cwd, m.threadId);
+  const lm = leafMode.get(leafId);
+  if (lm && m.threadId) rememberThreadMode(m.threadId, lm);
   snapshot(leafId);
   patch(leafId, { status: "ready" });
   // 模型按钮要显示名字("GPT-6 Astra"),强度滑条要知道各档:一开始就拉
@@ -378,13 +411,28 @@ async function boot(
 
 /**
  * 这个窗格还没有 Codex 会话(或上一个已经结束)就起一个。默认接着这个目录
- * 上次的会话聊;`fresh` 开一个全新的。
+ * 上次的会话聊;`fresh` 开一个全新的;`modeOverride` 见 leafMode。
  */
-export function ensureCodexChat(leafId: number, cwd: string, fresh = false) {
+export function ensureCodexChat(
+  leafId: number,
+  cwd: string,
+  fresh = false,
+  modeOverride?: string,
+) {
   const cur = useCodexChatStore.getState().sessions[leafId];
   if (cur && cur.status !== "closed" && cur.status !== "error") return;
+  if (
+    modeOverride &&
+    (CODEX_MODES as readonly string[]).includes(modeOverride)
+  ) {
+    leafMode.set(leafId, modeOverride);
+  }
+  const resume = fresh ? null : lastThread(cwd);
+  // 接着聊的是带过权限覆盖的会话(从任务开的):沿用,这个窗格之后也跟着它
+  const inherited = threadMode(resume);
+  if (inherited && !leafMode.has(leafId)) leafMode.set(leafId, inherited);
   const m = new CodexChatModel();
-  m.permissionMode = startMode();
+  m.permissionMode = leafMode.get(leafId) ?? startMode();
   const conn = new Conn();
   models.set(leafId, m);
   conns.set(leafId, conn);
@@ -407,7 +455,6 @@ export function ensureCodexChat(leafId: number, cwd: string, fresh = false) {
   }));
   const channel = new Channel<string>();
   channel.onmessage = (line) => handleLine(leafId, conn, line);
-  const resume = fresh ? null : lastThread(cwd);
   const started = invoke<number>("codex_chat_start", { cwd, onEvent: channel })
     .then((chatId) => {
       if (conns.get(leafId) !== conn) {
@@ -467,15 +514,21 @@ export function sendCodex(
   snapshot(leafId);
   const policy = modePolicy(m.permissionMode);
   void (ready.get(leafId) ?? Promise.resolve())
-    .then(() => {
+    .then(async () => {
       if (!m.threadId) throw new Error("会话还没建好");
+      let skills = useCodexChatStore.getState().sessions[leafId]?.commands;
+      // 新会话的第一条就带 $技能(比如从云效任务开工)时,技能列表多半还没
+      // 拉过,技能就挂不上:先拉一次再发
+      if (skills === undefined && /(?:^|\s)\$[^\s$]/.test(text)) {
+        skills = await conn
+          .request("skills/list", {})
+          .then(commandsFromCodexSkills)
+          .catch(() => []);
+        patch(leafId, { commands: skills });
+      }
       return conn.request("turn/start", {
         threadId: m.threadId,
-        input: buildInput(
-          text,
-          attachments,
-          useCodexChatStore.getState().sessions[leafId]?.commands ?? [],
-        ),
+        input: buildInput(text, attachments, skills ?? []),
         approvalPolicy: policy.approvalPolicy,
         sandboxPolicy: policy.sandboxPolicy,
         ...(m.model ? { model: m.model } : {}),
@@ -568,7 +621,10 @@ export function setCodexMode(leafId: number, mode: string) {
   try {
     localStorage.setItem(MODE_KEY, mode);
   } catch {}
+  // 手动选过就以手动的为准,这个窗格以后的会话、别处接着这个会话聊也跟着它
+  leafMode.delete(leafId);
   const m = models.get(leafId);
+  if (m?.threadId) rememberThreadMode(m.threadId, null);
   if (!m) return;
   m.permissionMode = mode;
   snapshot(leafId);
@@ -665,7 +721,12 @@ export function suspendCodex(leafId: number) {
   ready.delete(leafId);
 }
 
-export function restartCodex(leafId: number, cwd: string) {
+/** 结束当前会话,开一个新的;启动失败后重试也走这里。 */
+export function restartCodex(
+  leafId: number,
+  cwd: string,
+  opts?: { permissionMode?: string },
+) {
   const chatId = useCodexChatStore.getState().sessions[leafId]?.chatId;
   if (chatId != null) void invoke("codex_chat_stop", { id: chatId });
   useCodexChatStore.setState((s) => {
@@ -676,5 +737,5 @@ export function restartCodex(leafId: number, cwd: string) {
   conns.delete(leafId);
   ready.delete(leafId);
   rememberThread(cwd, null);
-  ensureCodexChat(leafId, cwd, true);
+  ensureCodexChat(leafId, cwd, true, opts?.permissionMode);
 }

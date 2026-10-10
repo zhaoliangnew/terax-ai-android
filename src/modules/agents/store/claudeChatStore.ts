@@ -216,6 +216,8 @@ function createSdkChat(cmds: SdkChatCommands) {
         if (evt.msg?.type === "system") {
           patch(leafId, { status: "ready" });
           unconfirmed.delete(leafId);
+          const lm = leafMode.get(leafId);
+          if (lm && m.sessionId) rememberSessionMode(m.sessionId, lm);
         }
         // 一轮对话真正结束才记下会话:刚启动、还没说过话的会话不会存盘,
         // 记下来下次接不上(Qoder 会直接报会话 id 无效退出)
@@ -349,14 +351,63 @@ function createSdkChat(cmds: SdkChatCommands) {
   }
 
   /**
-   * 这个窗格还没有聊天会话(或上一个已经结束)就起一个。默认接着这个目录
-   * 上次的会话聊(历史消息会读出来铺上);`fresh` 开一个全新的。
+   * 只给这个窗格用的权限模式(从云效任务开的会话要"改文件前先问"),不写进
+   * localStorage,免得变成以后所有新会话的默认。跟着窗格走:这个窗格里会话
+   * 结束再开、点"新对话",还是它;在聊天里手动改了模式就作废。
    */
-  function ensureChat(leafId: number, cwd: string, fresh = false) {
+  const leafMode = new Map<number, string>();
+
+  /*
+   * 带着 leafMode 跑过的会话按会话 id 记下它的模式。任务 tab 关了再开这个
+   * 目录、或者重启后 tab 恢复,都会接着这个会话聊(它是目录的上一个会话),
+   * 不记的话就回到平时的"完全访问",带着云效原文的对话改文件不再先问。
+   */
+  const sessionModeKey = (sessionId: string) =>
+    `${cmds.keyPrefix}.sessionMode:${sessionId}`;
+
+  function sessionMode(sessionId: string | null): string | null {
+    if (!sessionId) return null;
+    try {
+      const v = localStorage.getItem(sessionModeKey(sessionId));
+      return v && MODES.includes(v) ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function rememberSessionMode(sessionId: string, mode: string | null) {
+    try {
+      if (mode) localStorage.setItem(sessionModeKey(sessionId), mode);
+      else localStorage.removeItem(sessionModeKey(sessionId));
+    } catch {}
+  }
+
+  /**
+   * 这个窗格还没有聊天会话(或上一个已经结束)就起一个。默认接着这个目录
+   * 上次的会话聊(历史消息会读出来铺上);`fresh` 开一个全新的;
+   * `modeOverride` 见 leafMode。
+   */
+  function ensureChat(
+    leafId: number,
+    cwd: string,
+    fresh = false,
+    modeOverride?: string,
+  ) {
     const cur = store.getState().sessions[leafId];
     if (cur && cur.status !== "closed" && cur.status !== "error") return;
+    // 上一个会话已经死了(多半是没启动起来):它排着队没发出去的消息不能
+    // 留给新会话补发,不然旧的第一条消息会发进接上的别的对话里
+    queued.delete(leafId);
+    unconfirmed.delete(leafId);
+    if (modeOverride && MODES.includes(modeOverride)) {
+      leafMode.set(leafId, modeOverride);
+    }
+    const resume = fresh ? null : lastSession(cwd);
+    // 接着聊的是带过权限覆盖的会话(从任务开的):沿用,这个窗格之后也跟着它
+    const inherited = sessionMode(resume);
+    if (inherited && !leafMode.has(leafId)) leafMode.set(leafId, inherited);
     const model = new SdkChatModel();
-    const permissionMode = startPermissionMode();
+    const permissionMode = leafMode.get(leafId) ?? startPermissionMode();
     // 会话要等第一条消息才上报当前模式;在那之前先把要用的模式显示出来,
     // 不然左下角一直是空的"权限模式"
     model.permissionMode = permissionMode;
@@ -366,7 +417,6 @@ function createSdkChat(cmds: SdkChatCommands) {
     model.ultracode = ultracode;
     models.set(leafId, model);
     leafCwd.set(leafId, cwd);
-    const resume = fresh ? null : lastSession(cwd);
     store.setState((s) => ({
       sessions: {
         ...s.sessions,
@@ -496,7 +546,10 @@ function createSdkChat(cmds: SdkChatCommands) {
     try {
       localStorage.setItem(MODE_KEY, mode);
     } catch {}
+    // 手动选过就以手动的为准,这个窗格以后的会话、别处接着这个会话聊也跟着它
+    leafMode.delete(leafId);
     const m = models.get(leafId);
+    if (m?.sessionId) rememberSessionMode(m.sessionId, null);
     if (m) {
       m.permissionMode = mode;
       snapshot(leafId);
@@ -592,8 +645,16 @@ function createSdkChat(cmds: SdkChatCommands) {
     unconfirmed.delete(leafId);
   }
 
-  /** 结束当前会话,换一个新的(相当于终端里的 /clear)。 */
-  function restartChat(leafId: number, cwd: string) {
+  /**
+   * 结束当前会话,换一个新的(相当于终端里的 /clear)。启动失败后重试也走
+   * 这里:排着队的旧消息要清掉,不然新会话起来会把它们补发出去,再 send
+   * 一次就重复了。
+   */
+  function restartChat(
+    leafId: number,
+    cwd: string,
+    opts?: { permissionMode?: string },
+  ) {
     const chatId = store.getState().sessions[leafId]?.chatId;
     if (chatId != null) void invoke(cmds.stop, { id: chatId });
     store.setState((s) => {
@@ -602,8 +663,9 @@ function createSdkChat(cmds: SdkChatCommands) {
     });
     models.delete(leafId);
     queued.delete(leafId);
+    unconfirmed.delete(leafId);
     rememberSession(cwd, null);
-    ensureChat(leafId, cwd, true);
+    ensureChat(leafId, cwd, true, opts?.permissionMode);
   }
 
   return {

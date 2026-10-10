@@ -358,6 +358,7 @@ pub fn run() {
             git::commands::git_list_branches,
             git::commands::git_checkout_branch,
             git::commands::git_worktree_add,
+            git::commands::git_worktree_attach,
             git::commands::git_worktree_remove,
             git::commands::git_delete_branch,
             git::commands::git_delete_tag,

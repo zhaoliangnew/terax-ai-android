@@ -14,12 +14,22 @@ export type QuickPrompt = {
 };
 
 /** 内置项的分组(菜单按这个顺序排,自己加的分组排在后面)。 */
-export const QUICK_PROMPT_GROUPS = ["代码", "分析", "会话", "提交发布", "钉钉"];
+export const QUICK_PROMPT_GROUPS = [
+  "代码",
+  "分析",
+  "设计",
+  "会话",
+  "提交发布",
+  "钉钉",
+];
 const DEFAULT_GROUP: Record<string, string> = {
   review: "代码",
   fix: "代码",
   verify: "代码",
   debug: "分析",
+  "req-review": "分析",
+  design: "设计",
+  "design-polish": "设计",
   plan: "分析",
   explain: "分析",
   project: "分析",
@@ -138,6 +148,45 @@ const RAW_DEFAULTS: QuickPrompt[] = [
     id: "continue",
     label: "继续",
     text: "继续刚才没做完的,接着上一步往下做。做完一个阶段简单说下进度;遇到需要我决定的再停下来问我。",
+  },
+  {
+    id: "req-review",
+    label: "需求评估",
+    text: [
+      "用 leniu-android-requirement-review 技能评估这个需求:【云效需求链接,或需求单/截图说明】",
+      "",
+      "- 只评估设备侧需求是否清楚、闭环、可判定、可验收,列出缺失、矛盾、需要和产品确认的问题,按严重程度排;",
+      "- 结果直接在对话里给我看就行,不要在仓库里创建或修改任何文件(不要落地 .doc/requirement/ 下的评审文档),也不要改代码;",
+      "- 链接打不开或内容不全,先告诉我缺什么。",
+    ].join("\n"),
+  },
+  {
+    id: "design",
+    label: "高保真设计",
+    text: [
+      "给【要设计的页面/功能,或贴需求链接】出一版高保真视觉设计稿。要像真机截图,不要交互流程图、线框图、方框示意图。",
+      "",
+      "- 用 leniu-android-product-design 技能:复制它的 assets/design-template 模板,用 styles.js 里 current: true 的「现状沿用」风格;",
+      "- 先读项目里现有页面的代码和资源(colors.xml、themes、dimens、图标、已有截图),颜色、字号、圆角、间距、组件样式和现有页面保持一致,按设备真实分辨率和横竖屏出图;",
+      "- 用真实业务内容(菜名、金额、重量、人名等),不要 Lorem 和灰色占位块;正常、空、加载、异常、成功等关键状态都画出来;",
+      "- 视觉有层级:主操作突出,对齐整齐,留白统一,不加流程箭头和大段说明框;",
+      "- 只设计这次要做的范围,不删页面已有功能;拿不准现有主题色、尺寸的先问我。",
+      "",
+      "做完自己截图检查一遍有没有错位、溢出、文字截断,再把 HTML 路径给我,我在右栏浏览器里看。",
+    ].join("\n"),
+  },
+  {
+    id: "design-polish",
+    label: "美化设计",
+    text: [
+      "刚才的设计太像交互示意图/线框图,不好看。范围和功能不变(不要删功能),按高保真标准重做这一版:",
+      "",
+      "- 套用 leniu-android-product-design 的设计模板和项目现有视觉(颜色、字号、圆角、间距、组件),做成像真机截图的样子;",
+      "- 去掉流程箭头、说明框、灰色占位块,换成真实业务内容,补齐关键状态(空、加载、异常、成功);",
+      "- 主次分明、对齐和留白统一,按 leniu-android-ui-review 的视觉标准自查一遍;",
+      "",
+      "改完截图自检,再把 HTML 路径给我。",
+    ].join("\n"),
   },
   {
     id: "explain",

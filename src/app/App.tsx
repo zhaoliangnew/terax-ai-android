@@ -21,7 +21,9 @@ import {
   nextAttentionTarget,
 } from "@/modules/agents";
 import { cliLeafIds } from "@/modules/agents/lib/cliLeaf";
+import { useChatTaskLauncher } from "@/modules/agents/lib/useChatTaskLauncher";
 import { useAgentViewStore } from "@/modules/agents/store/agentViewStore";
+import { stopLeafChats } from "@/modules/agents/store/chatProviders";
 import {
   AgentRunBridge,
   AiMiniWindow,
@@ -643,7 +645,10 @@ export default function App() {
       }
     }
     for (const id of liveLeavesRef.current) {
-      if (!live.has(id)) disposeSession(id);
+      if (live.has(id)) continue;
+      disposeSession(id);
+      // 聊天进程也跟着窗格收掉,不然关了 tab 它还在后台跑
+      stopLeafChats(id);
     }
     liveLeavesRef.current = live;
     for (const k of [...terminalRefs.current.keys()])
@@ -1721,6 +1726,16 @@ export default function App() {
     openPreviewTab,
     newAgentTab,
     terminalRefs,
+  });
+
+  // 云效任务"开始开发":新开聊天 tab、起会话、发第一条消息
+  useChatTaskLauncher({
+    booted,
+    newAgentTab,
+    tabsRef,
+    activateAgentTarget,
+    dirUsable,
+    bumpLinks,
   });
 
   // 当前 Space 里打开的文件/预览/diff:顶部 tab 栏撤了,它们在树上没有

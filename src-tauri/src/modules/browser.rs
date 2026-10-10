@@ -514,6 +514,10 @@ pub async fn web_open(
                 return;
             }
             let started = matches!(payload.event(), PageLoadEvent::Started);
+            // 登录态多是会话 cookie,WebKit 不落盘:每页加载完记一份,重开时放回
+            if !started {
+                super::browser_cookies::remember(&load_app, &wv);
+            }
             if let Some(tabs) = load_app.try_state::<WebTabsState>() {
                 tabs.page_event(wv.label(), payload.url().as_str(), started);
             }
@@ -569,6 +573,8 @@ pub async fn web_open(
             app.state::<WebTabsState>().closed(&label);
             format!("打开网页失败: {e}")
         })?;
+    // 先把记下的会话 cookie 放回去,不然每次都要重新登录
+    super::browser_cookies::restore(&app, &webview);
     // 建在占位地址上(见 ORIGIN_SHIELD),再去真正的页面
     webview
         .navigate(target)

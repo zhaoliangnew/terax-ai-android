@@ -84,12 +84,18 @@ objc2-foundation = { version = "0.3", features = [
 	"NSError",
 	"NSData",
 	"NSDictionary",
+	"NSArray",
+	"NSDate",
+	"NSHTTPCookie",
 ] }
 # 内嵌浏览器给 AI 用:原生 WKWebView 执行 JS 并拿回结果、截图(tauri 的 eval
 # 拿不到返回值)。版本跟 wry 用的保持一致
 objc2-web-kit = { version = "0.3", features = [
 	"WKWebView",
 	"WKSnapshotConfiguration",
+	"WKWebViewConfiguration",
+	"WKWebsiteDataStore",
+	"WKHTTPCookieStore",
 	"block2",
 	"objc2-app-kit",
 ] }

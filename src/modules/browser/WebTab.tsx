@@ -54,8 +54,10 @@ function overlaps(a: DOMRect, b: DOMRect): boolean {
   );
 }
 
-function coveredByOverlay(area: DOMRect): boolean {
+function coveredByOverlay(area: DOMRect, self: Element | null): boolean {
   for (const el of document.querySelectorAll(OVERLAY_SELECTOR)) {
+    // 网页自己就放在这个浮层里(比如云效浮层里预览工作项):不算被它挡住
+    if (self && el.contains(self)) continue;
     const r = visualRect(el);
     if (r.width > 0 && r.height > 0 && overlaps(area, r)) return true;
   }
@@ -104,7 +106,11 @@ export function WebTab({ tabId, initialUrl, visible, onTitle }: Props) {
     if (!openedRef.current) return;
     const b = visible ? measure() : null;
     const shown =
-      b !== null && !coveredByOverlay(new DOMRect(b.x, b.y, b.width, b.height));
+      b !== null &&
+      !coveredByOverlay(
+        new DOMRect(b.x, b.y, b.width, b.height),
+        areaRef.current,
+      );
     const last = lastRef.current;
     if (
       last &&

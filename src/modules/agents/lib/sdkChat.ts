@@ -58,6 +58,8 @@ export type SdkMessage = {
   task_id?: string;
   tool_use_id?: string;
   is_backgrounded?: boolean;
+  /** task_started:local_agent / local_bash / local_workflow …… */
+  task_type?: string;
   last_tool_name?: string;
   summary?: string;
   /** 不算"在干活"的内务任务,界面不显示。 */
@@ -457,7 +459,10 @@ export class SdkChatModel {
       case "task_started":
         return this.patchTask(toolUseId, ts, () => ({
           status: "running",
-          background: msg.is_backgrounded === true,
+          // workflow 一启动工具就返回"已在后台运行",但 SDK 不给它标
+          // is_backgrounded;当成前台的话工具结果一到就被判完成了
+          background:
+            msg.is_backgrounded === true || msg.task_type === "local_workflow",
           startedAt: ts,
         }));
       case "task_progress":
@@ -509,9 +514,12 @@ export class SdkChatModel {
       const it = i === undefined ? undefined : this.items[i];
       if (it?.kind !== "tool") continue;
       const isError = b.is_error === true;
-      // 前台子代理的工具结果回来就是它做完了;后台的要等 task_notification
+      // 前台子代理的工具结果回来就是它做完了;后台的要等 task_notification。
+      // Workflow 的工具结果只是"已经开跑",永远等 task_notification
       const task =
-        it.task?.status === "running" && !it.task.background
+        it.task?.status === "running" &&
+        !it.task.background &&
+        it.name !== "Workflow"
           ? {
               ...it.task,
               status: isError ? ("failed" as const) : ("completed" as const),

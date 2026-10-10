@@ -40,6 +40,7 @@ import {
 import { useSmoothText } from "../lib/useSmoothText";
 import type { PermissionAsk } from "../store/claudeChatStore";
 import { ImageThumb } from "./ImageLightbox";
+import { WorkflowCard } from "./WorkflowCard";
 
 type Props = {
   /** 聊天所在目录:回复里的相对路径(build/reports/index.html)按它补全。 */
@@ -479,6 +480,9 @@ function ToolRow({
 }) {
   const [open, setOpen] = useState(false);
   const cwd = useContext(ChatCwd);
+  // 多代理编排:照 /workflows 面板画阶段和各代理进度,不是一行"Workflow"
+  if (item.name === "Workflow")
+    return <WorkflowCard item={item} running={running} />;
   // 写出/改了 html 文件的工具卡片:给个"打开",直接在右栏浏览器里看效果
   const htmlFile =
     item.name === "Write" || item.name === "Edit" || item.name === "MultiEdit"
@@ -921,8 +925,12 @@ export function AgentChatView({
         }
       }
       for (let j = i + 1; j < last; j++) {
-        // 出错、已中断这类提示不收,要一眼看得到
-        if (items[j].kind !== "note") map.set(items[j].id, u.id);
+        // 出错、已中断这类提示不收,要一眼看得到;还在跑的后台任务(多代理
+        // 编排、后台子代理)也不收,收进去就看不到进度了
+        const it = items[j];
+        if (it.kind === "note") continue;
+        if (it.kind === "tool" && it.task?.status === "running") continue;
+        map.set(it.id, u.id);
       }
     }
     return map;

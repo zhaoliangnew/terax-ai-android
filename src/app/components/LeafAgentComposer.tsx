@@ -1,5 +1,11 @@
 import { cn } from "@/lib/utils";
 import {
+  saveAgent,
+  savedAgent,
+  savedView,
+  saveView,
+} from "@/modules/agents/lib/chatPrefs";
+import {
   cliLeafId,
   isSafeSessionId,
   resumeInCliInput,
@@ -56,45 +62,6 @@ type Props = {
   leafId: number;
   getCwd: (leafId: number) => string | null;
 };
-
-const viewKey = (cwd: string) => `terax.chat.view:${cwd}`;
-
-/** 这个目录上次是聊天还是终端;重开窗格时照着恢复。 */
-function savedView(cwd: string): "chat" | "terminal" | null {
-  try {
-    const v = localStorage.getItem(viewKey(cwd));
-    return v === "chat" || v === "terminal" ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveView(cwd: string | null, view: "chat" | "terminal") {
-  if (!cwd) return;
-  try {
-    localStorage.setItem(viewKey(cwd), view);
-  } catch {}
-}
-
-const agentKey = (cwd: string) => `terax.chat.agent:${cwd}`;
-
-/** 这个目录上次聊天用的是 Claude 还是 Codex。 */
-function savedAgent(cwd: string | null): ChatAgent | null {
-  if (!cwd) return null;
-  try {
-    const v = localStorage.getItem(agentKey(cwd));
-    return v === "claude" || v === "codex" || v === "qoder" ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveAgent(cwd: string | null, agent: ChatAgent) {
-  if (!cwd) return;
-  try {
-    localStorage.setItem(agentKey(cwd), agent);
-  } catch {}
-}
 
 /** 终端里正在跑的是 Claude 还是 Codex(别的 agent / 没在跑就是 null)。 */
 function asChatAgent(name: string | null | undefined): ChatAgent | null {

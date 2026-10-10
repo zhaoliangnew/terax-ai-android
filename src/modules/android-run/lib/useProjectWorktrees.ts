@@ -48,10 +48,16 @@ export function useProjectGitInfo(
   useEffect(() => {
     // worktree 自己也会被当成"已打开的工程",但别去查它:它的分支已经
     // 显示在主工程的 worktree 子行上;而且从 linked worktree 里
-    // `git worktree list` 会把主检出也列出来,树里就套娃了。
-    const roots = (rootsKey ? rootsKey.split("\n") : []).filter(
-      (r) => !/\/\.worktree\/[^/]+$/.test(r),
-    );
+    // `git worktree list` 会把主检出也列出来,树里就套娃了。换成查它的
+    // 主工程:只开着 worktree 的 tab(比如从云效任务开工)时,主工程没有
+    // 自己的 tab,不查它的话树上就没有这条 worktree 子行,点不回去。
+    const roots = [
+      ...new Set(
+        (rootsKey ? rootsKey.split("\n") : []).map((r) =>
+          r.replace(/\/\.worktree\/[^/]+$/, ""),
+        ),
+      ),
+    ].filter(Boolean);
     if (roots.length === 0) {
       setByProject({});
       return;

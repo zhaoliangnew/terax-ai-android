@@ -814,6 +814,69 @@ export async function searchWorkitems(
   return { items, total: total ?? items.length };
 }
 
+/** 单条工作项的完整信息。列表接口给的 description 一律是空串,正文只能单查。 */
+export type WorkitemDetail = Workitem & {
+  description: string;
+  /** RICHTEXT 时 description 是 HTML(<article>…),其他格式是纯文本。 */
+  formatType: string;
+  /** 没有父项时是 ''。单查给 null、列表给 'EMPTY_VALUE',这里统一掉。 */
+  parentId: string;
+  workitemTypeId: string;
+  workitemTypeName: string;
+  categoryId: string;
+  spaceId: string;
+  spaceName: string;
+};
+
+function parseWorkitemDetail(
+  r: Record<string, unknown>,
+): WorkitemDetail | null {
+  const base = parseWorkitem(r);
+  if (!base) return null;
+  const type = r.workitemType as Record<string, unknown> | null | undefined;
+  const space = r.space as Record<string, unknown> | null | undefined;
+  const parentId = r.parentId == null ? "" : String(r.parentId).trim();
+  return {
+    ...base,
+    description: typeof r.description === "string" ? r.description : "",
+    formatType: String(r.formatType ?? ""),
+    parentId: parentId === "EMPTY_VALUE" ? "" : parentId,
+    workitemTypeId: type?.id != null ? String(type.id) : "",
+    workitemTypeName: String(type?.name ?? ""),
+    categoryId: String(r.categoryId ?? ""),
+    spaceId: space?.id != null ? String(space.id) : String(r.spaceId ?? ""),
+    spaceName: String(space?.name ?? ""),
+  };
+}
+
+/**
+ * 单查一条工作项(带描述)。idOrSerial 填 26 位 id 或编号(YOEZ-402)都行,
+ * 实测接口两种都认,所以只有编号时不用先知道是哪个项目。
+ */
+export async function getWorkitem(
+  orgId: string,
+  token: string,
+  idOrSerial: string,
+): Promise<WorkitemDetail> {
+  const res = await call(
+    "GET",
+    `/oapi/v1/projex/organizations/${orgId}/workitems/${encodeURIComponent(idOrSerial.trim())}`,
+    token,
+  );
+  // 实测返回裸对象,但别的接口有包 {result} 的,两种都接
+  const o = res as Record<string, unknown> | null;
+  const body =
+    o && o.id == null && o.result && typeof o.result === "object"
+      ? (o.result as Record<string, unknown>)
+      : o;
+  const detail =
+    body && typeof body === "object" && !Array.isArray(body)
+      ? parseWorkitemDetail(body)
+      : null;
+  if (!detail) throw new Error(`云效没有返回工作项 ${idOrSerial} 的详情`);
+  return detail;
+}
+
 /**
  * 改工作项字段。请求体是**平铺**的 `{字段: 值}`,自定义字段直接用它的
  * fieldId 当 key 放在顶层 —— 不要套 customFieldValues,那个容器只在
@@ -889,7 +952,22 @@ export async function getSelf(token: string): Promise<YunxiaoSelf | null> {
  * `.../project/{projectId}/task#openWorkitemIdentifier={id}`,
  * 不带 orgId 查询参数——之前猜的 `/workitem/{id}?orgId=` 路径是错的。
  */
-export function workitemUrl(projectId: string, workitemId: string): string {
+export function workitemUrl(
+  projectId: string,
+  workitemId: string,
+  category?: string,
+): string {
+  // 知道类别就直接进详情页(/req/、/task/、/bug/);不知道才退回列表页弹详情
+  const seg =
+    category === "Req"
+      ? "req"
+      : category === "Task"
+        ? "task"
+        : category === "Bug"
+          ? "bug"
+          : null;
+  if (seg)
+    return `https://devops.aliyun.com/projex/project/${projectId}/${seg}/${workitemId}`;
   return `https://devops.aliyun.com/projex/project/${projectId}/task#openWorkitemIdentifier=${workitemId}`;
 }
 

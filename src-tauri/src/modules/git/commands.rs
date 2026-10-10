@@ -433,6 +433,20 @@ pub async fn git_worktree_add(
 }
 
 #[tauri::command]
+pub async fn git_worktree_attach(
+    repo_root: String,
+    branch: String,
+    workspace: Option<WorkspaceEnv>,
+    app: AppHandle,
+) -> Result<String, String> {
+    let workspace = WorkspaceEnv::from_option(workspace);
+    blocking(app, move |r| {
+        operations::worktree_attach(r, &repo_root, &branch, &workspace).map_err(Into::into)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn git_worktree_remove(
     repo_root: String,
     worktree_path: String,
