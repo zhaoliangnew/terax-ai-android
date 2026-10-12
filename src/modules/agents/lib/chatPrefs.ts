@@ -1,4 +1,8 @@
 import { usePreferencesStore } from "@/modules/settings/preferences";
+import {
+  coerceVisibleChatAgents,
+  firstVisibleChatAgent,
+} from "@/modules/settings/store";
 import type { ChatAgent } from "../store/chatProviders";
 
 /*
@@ -46,10 +50,22 @@ export function saveAgent(cwd: string | null, agent: ChatAgent) {
   } catch {}
 }
 
+/** 设置里没关掉这个 AI。 */
+export function isChatAgentEnabled(agent: ChatAgent): boolean {
+  return coerceVisibleChatAgents(
+    usePreferencesStore.getState().visibleChatAgents,
+  ).includes(agent);
+}
+
 /**
- * 在这个目录新开聊天用谁:这个目录上次用的 > 设置里的默认。
+ * 在这个目录新开聊天用谁:这个目录上次用的 > 设置里的默认,只从设置里显示的 AI 里挑。
  * 没有窗格可看(还没开 tab),所以不管"终端里正在跑的"那一层。
  */
 export function pickChatAgent(cwd: string): ChatAgent {
-  return savedAgent(cwd) ?? usePreferencesStore.getState().defaultChatAgent;
+  const { defaultChatAgent, visibleChatAgents } =
+    usePreferencesStore.getState();
+  return firstVisibleChatAgent(
+    [savedAgent(cwd), defaultChatAgent],
+    visibleChatAgents,
+  );
 }

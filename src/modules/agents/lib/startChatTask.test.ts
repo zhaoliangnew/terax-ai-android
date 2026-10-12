@@ -7,6 +7,8 @@ const sessions = vi.hoisted(
   () => new Map<number, { status: string; sessionId: string | null }>(),
 );
 const saved = vi.hoisted(() => new Map<string, string>());
+/** 设置里关掉的 AI。 */
+const disabled = vi.hoisted(() => new Set<string>());
 vi.stubGlobal("localStorage", {
   getItem: (k: string) => saved.get(k) ?? null,
   setItem: (k: string, v: string) => void saved.set(k, v),
@@ -48,6 +50,7 @@ vi.mock("./chatPrefs", () => ({
     calls.push(`saveAgent ${dir} ${agent}`),
   saveView: (dir: string, view: string) =>
     calls.push(`saveView ${dir} ${view}`),
+  isChatAgentEnabled: (agent: string) => !disabled.has(agent),
 }));
 
 const {
@@ -273,5 +276,28 @@ describe("reopenChatTask", () => {
     expect(retried).toHaveLength(1);
     expect(reopenChatTask("nope")).toBeNull();
     unbind();
+  });
+
+  it("AI 在设置里关掉了:启动失败也只切过去,不拿它重来", () => {
+    const tabs: Tab[] = [termTab(1, [2])];
+    const retried: string[] = [];
+    const unbind = bindChatTaskHost({
+      tabs: () => tabs,
+      focus: () => {},
+      retry: (key) => retried.push(key),
+    });
+    rememberChatTask(
+      "f2",
+      entry({ at: Date.now(), agent: "claude", prompt: "开工" }),
+    );
+    sessions.set(2, { status: "error", sessionId: null });
+    disabled.add("claude");
+    try {
+      expect(reopenChatTask("f2")).toBe("focused");
+      expect(retried).toEqual([]);
+    } finally {
+      disabled.clear();
+      unbind();
+    }
   });
 });

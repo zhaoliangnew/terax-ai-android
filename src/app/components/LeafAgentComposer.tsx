@@ -32,6 +32,11 @@ import {
 } from "@/modules/browser/webTabsStore";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
+  CHAT_AGENTS,
+  coerceVisibleChatAgents,
+  firstVisibleChatAgent,
+} from "@/modules/settings/store";
+import {
   ptyIdForLeaf,
   TerminalPane,
   useAgentActivityStore,
@@ -78,14 +83,30 @@ function runningAgent(leafId: number): ChatAgent | null {
 }
 
 /**
- * 聊天用谁:这个窗格手动选过的 > 终端里正在跑的 > 这个目录上次用的 > 设置里的默认。
+ * 聊天用谁:这个窗格手动选过的 > 终端里正在跑的 > 这个目录上次用的 > 设置里的默认,
+ * 设置里关掉的 AI 一律跳过。
  */
+function chooseAgent(
+  picked: ChatAgent | null | undefined,
+  running: ChatAgent | null,
+  cwd: string | null,
+  fallback: ChatAgent,
+  visible: readonly ChatAgent[],
+): ChatAgent {
+  return firstVisibleChatAgent(
+    [picked, running, savedAgent(cwd), fallback],
+    visible,
+  );
+}
+
 function resolveAgent(leafId: number, cwd: string | null): ChatAgent {
-  return (
-    useAgentViewStore.getState().agents[leafId] ??
-    runningAgent(leafId) ??
-    savedAgent(cwd) ??
-    usePreferencesStore.getState().defaultChatAgent
+  const prefs = usePreferencesStore.getState();
+  return chooseAgent(
+    useAgentViewStore.getState().agents[leafId],
+    runningAgent(leafId),
+    cwd,
+    prefs.defaultChatAgent,
+    prefs.visibleChatAgents,
   );
 }
 
@@ -97,7 +118,8 @@ function useLeafAgent(leafId: number, cwd: string | null): ChatAgent {
     return pty === null ? null : asChatAgent(s.agents[pty]);
   });
   const fallback = usePreferencesStore((s) => s.defaultChatAgent);
-  return picked ?? running ?? savedAgent(cwd) ?? fallback;
+  const visible = usePreferencesStore((s) => s.visibleChatAgents);
+  return chooseAgent(picked, running, cwd, fallback, visible);
 }
 
 function statusText(
@@ -176,11 +198,14 @@ function Segmented<T extends string>({
   );
 }
 
-const AGENT_OPTIONS: { value: CliAgent; label: string }[] = [
-  { value: "claude", label: AGENT_NAMES.claude },
-  { value: "codex", label: AGENT_NAMES.codex },
-  { value: "qoder", label: AGENT_NAMES.qoder },
-];
+function agentOptions(
+  visible: readonly CliAgent[],
+): { value: CliAgent; label: string }[] {
+  return coerceVisibleChatAgents(visible).map((a) => ({
+    value: a,
+    label: AGENT_NAMES[a],
+  }));
+}
 
 /** 在命令行终端里把 AI 跑起来(先装好通知钩子,状态灯要靠它)。 */
 function launchCli(id: number, agent: CliAgent, resume: string | null) {
@@ -257,6 +282,8 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
   const mode = useAgentViewStore((s) => s.modes[leafId] ?? "terminal");
   const setMode = useAgentViewStore((s) => s.setMode);
   const agent = useLeafAgent(leafId, getCwd(leafId));
+  const visible = usePreferencesStore((s) => s.visibleChatAgents);
+  const agents = agentOptions(visible);
 
   const openTerminal = () => {
     setMode(leafId, "terminal");
@@ -276,12 +303,14 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
 
   return (
     <div className="flex shrink-0 items-center gap-1.5">
-      <Segmented
-        title="用哪个 AI"
-        options={AGENT_OPTIONS}
-        value={agent}
-        onPick={pickAgent}
-      />
+      {agents.length > 1 && (
+        <Segmented
+          title="用哪个 AI"
+          options={agents}
+          value={agent}
+          onPick={pickAgent}
+        />
+      )}
       <Segmented
         options={[
           { value: "chat", label: "聊天" },
@@ -293,6 +322,38 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
       />
     </div>
   );
+}
+
+/**
+ * 设置里关掉了某个 AI:这个窗格里它的聊天停掉(会话记着,重新打开后还能接上);
+ * 窗格选的正好是它就换成还开着的,在聊天/命令行里的跟着切过去。
+ */
+function useDisabledAgentGuard(
+  leafId: number,
+  getCwd: (leafId: number) => string | null,
+) {
+  const visible = usePreferencesStore((s) => s.visibleChatAgents);
+  const picked = useAgentViewStore((s) => s.agents[leafId]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: getCwd 现场读,不跟着它重跑
+  useEffect(() => {
+    const shown = coerceVisibleChatAgents(visible);
+    for (const a of CHAT_AGENTS) {
+      if (!shown.includes(a) && chatSessionNow(a, leafId)) {
+        CHAT_APIS[a].suspend(leafId);
+      }
+    }
+    if (!picked || shown.includes(picked)) return;
+    const dir = getCwd(leafId);
+    const next = resolveAgent(leafId, dir);
+    const mode = useAgentViewStore.getState().modes[leafId] ?? "terminal";
+    if (mode === "chat" && dir) {
+      openLeafChat(leafId, getCwd, next);
+      return;
+    }
+    useAgentViewStore.getState().setAgent(leafId, next);
+    saveAgent(dir, next);
+    if (mode === "cli" && dir) openLeafCli(leafId, getCwd, next);
+  }, [leafId, visible, picked]);
 }
 
 /**
@@ -349,6 +410,7 @@ export function LeafAgentChat({
   const agent = useLeafAgent(leafId, getCwd(leafId));
   const api = CHAT_APIS[agent];
   const session = useChatSession(agent, leafId);
+  useDisabledAgentGuard(leafId, getCwd);
 
   const modeSet = useAgentViewStore((s) => leafId in s.modes);
 
@@ -483,8 +545,7 @@ export function LeafAgentComposer({
   const mode = useAgentViewStore((s) => s.modes[leafId] ?? "terminal");
   const quote = useAgentViewStore((s) => s.quotes[leafId] ?? null);
   const injection = useAgentViewStore((s) => s.injections[leafId] ?? null);
-  // 进聊天时一定选定过了(openChat 会记下来)
-  const agent = useAgentViewStore((s) => s.agents[leafId] ?? "claude");
+  const agent = useLeafAgent(leafId, getCwd(leafId));
   const api = CHAT_APIS[agent];
   const session = useChatSession(agent, leafId);
   const branch = useLeafBranch(leafId, getCwd, mode === "chat");
@@ -569,7 +630,7 @@ export function LeafChatDock({
   onCollapse,
 }: Props & { onCollapse: () => void }) {
   const addQuote = useAgentViewStore((s) => s.addQuote);
-  const agent = useAgentViewStore((s) => s.agents[leafId] ?? "claude");
+  const agent = useLeafAgent(leafId, getCwd(leafId));
   const api = CHAT_APIS[agent];
   const session = useChatSession(agent, leafId);
   return (

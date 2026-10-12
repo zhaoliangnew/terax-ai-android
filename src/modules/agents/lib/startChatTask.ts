@@ -6,7 +6,7 @@ import {
   type ChatAgent,
   chatSessionNow,
 } from "../store/chatProviders";
-import { saveAgent, saveView } from "./chatPrefs";
+import { isChatAgentEnabled, saveAgent, saveView } from "./chatPrefs";
 
 /*
  * 「在某个目录新开一个聊天 tab,把一段话发给 AI」:云效任务点"开始开发"
@@ -291,7 +291,13 @@ export function reopenChatTask(key: string): "focused" | "retried" | null {
   const entry = liveChatTask(key);
   if (!entry || !host) return null;
   host.focus(entry.tabId, entry.leafId);
-  if (entry.prompt && host.retry && startFailed(entry)) {
+  if (
+    entry.prompt &&
+    host.retry &&
+    entry.agent &&
+    isChatAgentEnabled(entry.agent) &&
+    startFailed(entry)
+  ) {
     host.retry(key, entry);
     return "retried";
   }

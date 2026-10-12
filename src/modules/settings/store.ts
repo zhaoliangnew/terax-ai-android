@@ -33,6 +33,12 @@ export type TerminalCursorStyle = "bar" | "block" | "underline";
 /** 终端窗格切聊天/命令行时,没选过、终端里也没在跑 AI 的目录默认用谁。 */
 export type DefaultChatAgent = "claude" | "codex" | "qoder";
 
+export const CHAT_AGENTS: readonly DefaultChatAgent[] = [
+  "claude",
+  "codex",
+  "qoder",
+];
+
 /**
  * 跳到定义/找调用用哪套:
  * - `auto`  这个文件有语言服务器在跑就用它,否则退回内置搜索
@@ -180,6 +186,8 @@ export type Preferences = {
   terminalScrollback: number;
   confirmCloseRunningTerminal: boolean;
   defaultChatAgent: DefaultChatAgent;
+  /** 窗格的 AI 切换里显示哪些(按 CHAT_AGENTS 的顺序,至少一个)。 */
+  visibleChatAgents: DefaultChatAgent[];
   lastWslDistro: string | null;
   zoomLevel: number;
   agentNotifications: boolean;
@@ -276,6 +284,7 @@ const KEY_TERMINAL_FONT_SIZE = "terminalFontSize";
 const KEY_TERMINAL_SCROLLBACK = "terminalScrollback";
 const KEY_CONFIRM_CLOSE_RUNNING_TERMINAL = "confirmCloseRunningTerminal";
 const KEY_DEFAULT_CHAT_AGENT = "defaultChatAgent";
+const KEY_VISIBLE_CHAT_AGENTS = "visibleChatAgents";
 const KEY_LAST_WSL_DISTRO = "lastWslDistro";
 const KEY_ZOOM_LEVEL = "zoomLevel";
 const KEY_AGENT_NOTIFICATIONS = "agentNotifications";
@@ -368,6 +377,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
   confirmCloseRunningTerminal: true,
   defaultChatAgent: "claude",
+  visibleChatAgents: [...CHAT_AGENTS],
   lastWslDistro: null,
   zoomLevel: 1.0,
   agentNotifications: true,
@@ -551,6 +561,9 @@ export async function loadPreferences(): Promise<Preferences> {
       DEFAULT_PREFERENCES.confirmCloseRunningTerminal,
     defaultChatAgent: coerceDefaultChatAgent(
       get<string>(KEY_DEFAULT_CHAT_AGENT),
+    ),
+    visibleChatAgents: coerceVisibleChatAgents(
+      get<unknown>(KEY_VISIBLE_CHAT_AGENTS),
     ),
     lastWslDistro:
       get<string | null>(KEY_LAST_WSL_DISTRO) ??
@@ -832,6 +845,22 @@ export function coerceDefaultChatAgent(value: unknown): DefaultChatAgent {
     : DEFAULT_PREFERENCES.defaultChatAgent;
 }
 
+/** 存的值可能是旧版本或手改过的:只认识的、按固定顺序、去重,一个不剩就全显示。 */
+export function coerceVisibleChatAgents(value: unknown): DefaultChatAgent[] {
+  if (!Array.isArray(value)) return [...CHAT_AGENTS];
+  const picked = CHAT_AGENTS.filter((a) => value.includes(a));
+  return picked.length ? picked : [...CHAT_AGENTS];
+}
+
+/** 按优先级取第一个没被隐藏的;一个都对不上就用显示的第一个。 */
+export function firstVisibleChatAgent(
+  candidates: readonly (DefaultChatAgent | null | undefined)[],
+  visible: readonly DefaultChatAgent[],
+): DefaultChatAgent {
+  const shown = coerceVisibleChatAgents(visible);
+  return candidates.find((c) => c && shown.includes(c)) ?? shown[0];
+}
+
 export function coerceTerminalCursorStyle(value: unknown): TerminalCursorStyle {
   return value === "bar" || value === "block" || value === "underline"
     ? value
@@ -900,6 +929,10 @@ export async function setDefaultChatAgent(
   value: DefaultChatAgent,
 ): Promise<void> {
   await writePref(KEY_DEFAULT_CHAT_AGENT, value);
+}
+
+export async function setVisibleChatAgents(value: unknown): Promise<void> {
+  await writePref(KEY_VISIBLE_CHAT_AGENTS, coerceVisibleChatAgents(value));
 }
 
 export async function setLastWslDistro(value: string | null): Promise<void> {
@@ -1035,6 +1068,7 @@ export async function onPreferencesChange(
     [KEY_TERMINAL_SCROLLBACK]: "terminalScrollback",
     [KEY_CONFIRM_CLOSE_RUNNING_TERMINAL]: "confirmCloseRunningTerminal",
     [KEY_DEFAULT_CHAT_AGENT]: "defaultChatAgent",
+    [KEY_VISIBLE_CHAT_AGENTS]: "visibleChatAgents",
     [KEY_LAST_WSL_DISTRO]: "lastWslDistro",
     [KEY_ZOOM_LEVEL]: "zoomLevel",
     [KEY_AGENT_NOTIFICATIONS]: "agentNotifications",

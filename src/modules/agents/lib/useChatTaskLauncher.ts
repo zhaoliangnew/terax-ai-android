@@ -9,7 +9,7 @@ import {
   subscribeChatSession,
 } from "../store/chatProviders";
 import type { ChatSession } from "../store/claudeChatStore";
-import { pickChatAgent } from "./chatPrefs";
+import { isChatAgentEnabled, pickChatAgent } from "./chatPrefs";
 import {
   bindChatTaskHost,
   focusChatTask,
@@ -79,6 +79,13 @@ function watchStart(d: StartChatTaskDetail, leafId: number, dir: string) {
 function retry(d: StartChatTaskDetail, leafId: number, dir: string) {
   if (liveChatTask(d.key)?.leafId !== leafId) {
     toast.info("这条任务的 tab 已经关了,到云效项目里再点一次开始开发");
+    return;
+  }
+  // 开工的话是按这个 AI 写的,换个 AI 重发不对,只能关了 tab 重新开工
+  if (!isChatAgentEnabled(d.agent)) {
+    toast.info(`${AGENT_NAMES[d.agent]} 已在设置里关闭`, {
+      description: "关掉这个 tab,到云效项目里再点一次开始开发",
+    });
     return;
   }
   retryChatTask(leafId, dir, d.agent, d.prompt);

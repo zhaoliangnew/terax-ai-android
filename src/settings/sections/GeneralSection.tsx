@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -23,6 +24,7 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   coerceDefaultChatAgent,
   type DefaultChatAgent,
+  firstVisibleChatAgent,
   type ThemePref,
 } from "@/modules/settings/store";
 import {
@@ -43,6 +45,7 @@ import {
   setTerminalScrollback,
   setTerminalShell,
   setTerminalWebglEnabled,
+  setVisibleChatAgents,
   setZoomLevel,
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
@@ -133,6 +136,19 @@ export function GeneralSection() {
   const zoomLevel = usePreferencesStore((s) => s.zoomLevel);
   const agentNotifications = usePreferencesStore((s) => s.agentNotifications);
   const defaultChatAgent = usePreferencesStore((s) => s.defaultChatAgent);
+  const visibleChatAgents = usePreferencesStore((s) => s.visibleChatAgents);
+  const shownDefaultChatAgent = firstVisibleChatAgent(
+    [defaultChatAgent],
+    visibleChatAgents,
+  );
+  const toggleChatAgent = (agent: DefaultChatAgent, on: boolean) => {
+    const next = on
+      ? [...visibleChatAgents, agent]
+      : visibleChatAgents.filter((a) => a !== agent);
+    if (next.length === 0) return;
+    void setVisibleChatAgents(next);
+    if (!on && agent === defaultChatAgent) void setDefaultChatAgent(next[0]);
+  };
   const [notificationTest, setNotificationTest] =
     useState<NotificationTestState>("idle");
   const notificationTestPending =
@@ -514,23 +530,62 @@ export function GeneralSection() {
       <div className="flex flex-col gap-2">
         <Label>Agents</Label>
         <SettingRow
+          title="窗格里显示的 AI"
+          description="没勾的 AI 不会再用:窗格切换里不列,上次用它的目录改用还开着的,开着的聊天停掉并换过去(会话记着,重新勾上还能接)。只剩一个时切换整个收起。"
+        >
+          <div className="flex items-center gap-3">
+            {CHAT_AGENT_OPTIONS.map((o) => {
+              const checked = visibleChatAgents.includes(o.value);
+              const last = checked && visibleChatAgents.length === 1;
+              const id = `visible-chat-agent-${o.value}`;
+              return (
+                <div
+                  key={o.value}
+                  title={last ? "至少留一个" : undefined}
+                  className="flex items-center gap-1.5"
+                >
+                  <Checkbox
+                    id={id}
+                    checked={checked}
+                    disabled={last}
+                    onCheckedChange={(v) =>
+                      toggleChatAgent(o.value, v === true)
+                    }
+                  />
+                  <label
+                    htmlFor={id}
+                    className={cn(
+                      "text-[12px]",
+                      last ? "cursor-not-allowed" : "cursor-pointer",
+                    )}
+                  >
+                    {o.label}
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </SettingRow>
+        <SettingRow
           title="默认聊天 AI"
           description="终端窗格切到聊天或命令行时默认用谁。窗格里手动选过的、终端里正在跑的、这个目录上次用过的优先。"
         >
           <Select
-            value={defaultChatAgent}
+            value={shownDefaultChatAgent}
             onValueChange={(v) =>
               void setDefaultChatAgent(coerceDefaultChatAgent(v))
             }
           >
             <SelectTrigger
-              value={defaultChatAgent}
+              value={shownDefaultChatAgent}
               className="h-8 w-28 text-[12px]"
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {CHAT_AGENT_OPTIONS.map((o) => (
+              {CHAT_AGENT_OPTIONS.filter((o) =>
+                visibleChatAgents.includes(o.value),
+              ).map((o) => (
                 <SelectItem
                   key={o.value}
                   value={o.value}
