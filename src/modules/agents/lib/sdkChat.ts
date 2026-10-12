@@ -1,9 +1,11 @@
 import {
   type ChatItem,
+  formatTurnDuration,
   markTurnDone,
   type ToolTask,
   toolSummary,
 } from "./chatItems";
+import type { CompactionProgress } from "@/modules/agents/lib/compaction";
 import {
   commandsFromInit,
   normalizeCommands,
@@ -147,6 +149,7 @@ export class SdkChatModel {
   working = false;
   /** 正在压缩上下文(大会话要好几分钟)。 */
   compacting = false;
+  compaction: CompactionProgress | null = null;
   context: ContextUsage | null = null;
   /** 输入 / 弹出的技能和命令;null = 还不知道。 */
   commands: SlashCommandOption[] | null = null;
@@ -173,6 +176,14 @@ export class SdkChatModel {
   }
 
   addUser(text: string, attachments: string[] = [], ts = Date.now()) {
+    if (
+      text.trim() === "/compact" &&
+      attachments.length === 0 &&
+      !this.compaction
+    ) {
+      this.compacting = true;
+      this.compaction = { startedAt: ts, phase: "preparing" };
+    }
     this.items.push({
       kind: "user",
       id: this.nextId("u"),
@@ -252,18 +263,30 @@ export class SdkChatModel {
         }
         if (msg.subtype === "status") {
           const next = msg.status === "compacting";
-          if (next === this.compacting) return false;
-          this.compacting = next;
+          if (next) {
+            this.compaction = {
+              startedAt: this.compaction?.startedAt ?? ts,
+              phase: "compacting",
+            };
+          } else if (this.compaction) {
+            this.compaction.phase = "finishing";
+          }
+          this.compacting = next || this.compaction !== null;
           return true;
         }
         if (msg.subtype === "compact_boundary") {
           this.compacting = false;
+          const elapsed = this.compaction
+            ? Math.max(0, ts - this.compaction.startedAt)
+            : null;
+          this.compaction = null;
           const pre = msg.compact_metadata?.pre_tokens;
           const post = msg.compact_metadata?.post_tokens;
           this.addNote(
-            pre && post
+            (pre && post
               ? `上下文已压缩:${shortTokens(pre)} → ${shortTokens(post)} tokens`
-              : "上下文已压缩",
+              : "上下文已压缩") +
+              (elapsed !== null ? `,用时 ${formatTurnDuration(elapsed)}` : ""),
             ts,
           );
           if (post) {
@@ -291,6 +314,10 @@ export class SdkChatModel {
       case "result":
         this.working = false;
         this.compacting = false;
+        if (this.compaction) {
+          this.addNote(msg.is_error ? "压缩未完成" : "压缩请求已结束", ts);
+          this.compaction = null;
+        }
         markTurnDone(this.items, ts);
         this.trackResultContext(msg);
         for (const i of this.streamIndex.values()) {

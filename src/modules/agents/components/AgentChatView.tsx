@@ -8,6 +8,8 @@ import { isExternalUrl, openExternalUrl } from "@/lib/external-link";
 import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { native } from "@/modules/ai/lib/native";
+import type { CompactionProgress } from "@/modules/agents/lib/compaction";
+import { asksConfirm } from "@/modules/agents/lib/confirmationPrompt";
 import { getLspNavigator } from "@/modules/lsp/lib/navigator";
 import {
   sourceMatches,
@@ -59,6 +61,7 @@ type Props = {
   working: boolean;
   /** 正在压缩上下文(一轮进行中的特殊情况)。 */
   compacting?: boolean;
+  compaction?: CompactionProgress | null;
   /** 正在启动 / 已结束 / 启动失败时的一行提示;正常对话时为 null。 */
   statusText: string | null;
   /** Claude 等着确认的操作(可能不止一个)。 */
@@ -75,18 +78,6 @@ type Props = {
   /** 直接发一句话(回复末尾问"要不要发/确认吗"时的快捷按钮用)。 */
   onReply?: (text: string) => void;
 };
-
-/**
- * 回复最后是在等你拍板(确认吗、要不要、可以的话我就…):下面挂"确认/不用了"
- * 两个按钮,点一下就回,不用自己打字。只看最后一句,免得正文里随口一句
- * "是否"也冒出按钮;"你倾向哪个?"这种选择题不算(确认/不用了答不了)。
- */
-const ASK_CONFIRM_RE =
-  /(确认|是否|要不要|需不需要|可以吗|行吗|好吗|可以的话|同意|拍板|发吗|发出去|发给他|发送)[^。\n]*[。.!！?？]?\s*$/;
-function asksConfirm(text: string): boolean {
-  const tail = text.trim().slice(-80);
-  return ASK_CONFIRM_RE.test(tail);
-}
 
 /**
  * 条目之间的间距(照 Codex):对话之间留大空,连着的工具调用挤紧一点,读起来
@@ -436,6 +427,45 @@ function useElapsed(since: number): number {
     return () => clearInterval(t);
   }, []);
   return now - since;
+}
+
+function CompactionStatus({
+  progress,
+  queuing,
+}: {
+  progress?: CompactionProgress | null;
+  queuing: boolean;
+}) {
+  const [fallbackStart] = useState(() => Date.now());
+  const elapsed = useElapsed(progress?.startedAt ?? fallbackStart);
+  const label =
+    progress?.phase === "preparing"
+      ? "等待开始压缩"
+      : progress?.phase === "finishing"
+        ? "等待压缩结束"
+        : "正在压缩上下文";
+  return (
+    <div
+      role="status"
+      className="mt-4 rounded-lg bg-foreground/[0.04] px-3 py-2 text-[13px]"
+    >
+      <div className="flex items-center gap-3">
+        <Shimmer>{label}</Shimmer>
+        <span
+          aria-live="off"
+          className="text-[12px] text-muted-foreground tabular-nums"
+        >
+          已等待 {duration(elapsed)}
+        </span>
+      </div>
+      <div className="mt-1 text-[12px] text-muted-foreground">
+        {elapsed >= 60000 ? "会话较长时可能需要数分钟。" : ""}
+        {queuing
+          ? "期间发送的消息会排队,压缩结束后自动发送。"
+          : "正在等待压缩完成。"}
+      </div>
+    </div>
+  );
 }
 
 function useRunningText(task: ToolTask): string {
@@ -974,6 +1004,7 @@ export function AgentChatView({
   working,
   statusText,
   compacting = false,
+  compaction = null,
   permissions,
   onPermission,
   onQuote,
@@ -1454,12 +1485,17 @@ export function AgentChatView({
                 </div>
               )}
               {/* 回复已经在往外流了就不再挂"正在思考":它在文字下面跟着一跳一跳 */}
-              {working && permissions.length === 0 && !replying && (
-                <Shimmer className="mt-4 text-[13px]">
-                  {compacting
-                    ? "正在压缩上下文,会话大的话要几分钟"
-                    : "正在思考"}
-                </Shimmer>
+              {compacting ? (
+                <CompactionStatus
+                  progress={compaction}
+                  queuing={agentName === "Codex"}
+                />
+              ) : (
+                working &&
+                permissions.length === 0 &&
+                !replying && (
+                  <Shimmer className="mt-4 text-[13px]">正在思考</Shimmer>
+                )
               )}
             </div>
           </div>

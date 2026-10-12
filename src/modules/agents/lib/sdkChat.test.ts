@@ -13,21 +13,69 @@ const assistant = (id: string, content: unknown[]): SdkMessage => ({
 });
 
 describe("SdkChatModel", () => {
+  it("tracks automatic compaction through status and completion events", () => {
+    const m = new SdkChatModel();
+    m.addUser("继续", [], 1000);
+    m.apply({ type: "system", subtype: "status", status: "compacting" }, 2000);
+    m.apply({ type: "system", subtype: "status", status: "compacting" }, 3000);
+    expect(m.compaction).toEqual({ startedAt: 2000, phase: "compacting" });
+    m.apply({ type: "system", subtype: "status", status: null }, 4000);
+    expect(m.compacting).toBe(true);
+    expect(m.compaction?.phase).toBe("finishing");
+    m.apply({ type: "system", subtype: "compact_boundary" }, 5000);
+    expect(m.compacting).toBe(false);
+    expect(m.compaction).toBeNull();
+    expect(m.working).toBe(true);
+    expect(m.items[m.items.length - 1]).toMatchObject({
+      text: "上下文已压缩,用时 3秒",
+    });
+  });
+
+  it("clears pending compaction on an error without reporting success", () => {
+    const m = new SdkChatModel();
+    m.addUser("/compact", [], 1000);
+    m.apply(
+      {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        result: "network failed",
+      },
+      2000,
+    );
+    expect(m.compacting).toBe(false);
+    expect(m.compaction).toBeNull();
+    expect(
+      m.items.some(
+        (item) => item.kind === "note" && item.text === "压缩未完成",
+      ),
+    ).toBe(true);
+    expect(
+      m.items.some(
+        (item) => item.kind === "note" && item.text.includes("已压缩"),
+      ),
+    ).toBe(false);
+  });
+
   it("tracks compaction and notes the new context size", () => {
     const m = new SdkChatModel();
-    m.addUser("/compact");
-    m.apply({ type: "system", subtype: "status", status: "compacting" });
+    m.addUser("/compact", [], 1000);
+    expect(m.compaction).toEqual({ startedAt: 1000, phase: "preparing" });
+    m.apply({ type: "system", subtype: "status", status: "compacting" }, 2000);
     expect(m.compacting).toBe(true);
-    m.apply({
-      type: "system",
-      subtype: "compact_boundary",
-      compact_metadata: { pre_tokens: 550_000, post_tokens: 12_000 },
-    });
+    m.apply(
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        compact_metadata: { pre_tokens: 550_000, post_tokens: 12_000 },
+      },
+      6000,
+    );
     expect(m.compacting).toBe(false);
     expect(m.context?.tokens).toBe(12_000);
     expect(m.items[m.items.length - 1]).toMatchObject({
       kind: "note",
-      text: "上下文已压缩:550k → 12k tokens",
+      text: "上下文已压缩:550k → 12k tokens,用时 5秒",
     });
     m.apply({ type: "result", subtype: "success" });
     expect(m.working).toBe(false);

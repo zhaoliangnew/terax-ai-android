@@ -383,6 +383,7 @@ export function LeafAgentChat({
             agentName={AGENT_NAMES[agent]}
             working={session?.working ?? false}
             compacting={session?.compacting ?? false}
+            compaction={session?.compaction ?? null}
             statusText={statusText(
               AGENT_NAMES[agent],
               session?.status,
@@ -595,6 +596,7 @@ export function LeafChatDock({
             agentName={AGENT_NAMES[agent]}
             working={session?.working ?? false}
             compacting={session?.compacting ?? false}
+            compaction={session?.compaction ?? null}
             statusText={statusText(
               AGENT_NAMES[agent],
               session?.status,

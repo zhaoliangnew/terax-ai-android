@@ -1,4 +1,5 @@
-import { type ChatItem, markTurnDone } from "./chatItems";
+import { type ChatItem, formatTurnDuration, markTurnDone } from "./chatItems";
+import type { CompactionProgress } from "@/modules/agents/lib/compaction";
 import type { ContextUsage } from "./sdkChat";
 
 /**
@@ -205,6 +206,49 @@ export class CodexChatModel {
   serviceTier: string | null = null;
   permissionMode: string | null = null;
   working = false;
+  compaction: CompactionProgress | null = null;
+
+  private manualCompaction = false;
+  private compactionWaiters: {
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }[] = [];
+
+  beginCompaction(manual = false, ts = Date.now()) {
+    if (this.compaction) return;
+    this.compaction = {
+      startedAt: ts,
+      phase: manual ? "preparing" : "compacting",
+    };
+    this.manualCompaction = manual;
+    this.working = true;
+  }
+
+  waitForCompaction(): Promise<void> {
+    if (!this.compaction) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      this.compactionWaiters.push({ resolve, reject });
+    });
+  }
+
+  finishCompaction(error?: string, ts = Date.now()) {
+    if (!this.compaction) return;
+    const elapsed = Math.max(0, ts - this.compaction.startedAt);
+    this.compaction = null;
+    this.manualCompaction = false;
+    this.working = this.turnId !== null;
+    this.addNote(
+      error
+        ? `压缩未完成:${error}`
+        : `上下文压缩完成,用时 ${formatTurnDuration(elapsed)}`,
+      ts,
+    );
+    const waiters = this.compactionWaiters.splice(0);
+    for (const waiter of waiters) {
+      if (error) waiter.reject(new Error(error));
+      else waiter.resolve();
+    }
+  }
 
   private index = new Map<string, number>();
   private seq = 0;
@@ -267,11 +311,21 @@ export class CodexChatModel {
         this.turnId = params.turn?.id ?? null;
         return true;
       case "turn/completed": {
+        const turn = params.turn;
+        if (this.turnId && turn?.id && turn.id !== this.turnId) return false;
+        const manualCompaction = this.manualCompaction;
         this.working = false;
         this.turnId = null;
         this.settleStreaming();
-        markTurnDone(this.items, ts);
-        const turn = params.turn;
+        if (!manualCompaction) markTurnDone(this.items, ts);
+        this.finishCompaction(
+          turn?.status === "failed"
+            ? (turn.error?.message ?? "压缩失败")
+            : turn?.status === "interrupted"
+              ? "已中断,排队的消息未发送"
+              : undefined,
+          ts,
+        );
         if (turn?.status === "failed" && turn.error?.message) {
           this.addNote(`出错了:${turn.error.message}`, ts);
         } else if (turn?.status === "interrupted") {
@@ -282,6 +336,17 @@ export class CodexChatModel {
       case "item/started":
       case "item/completed": {
         const it = params.item;
+        if (it?.type === "contextCompaction") {
+          if (method === "item/started") {
+            this.beginCompaction(false, ts);
+            if (this.compaction) this.compaction.phase = "compacting";
+          } else if (this.manualCompaction) {
+            if (this.compaction) this.compaction.phase = "finishing";
+          } else {
+            this.finishCompaction(undefined, ts);
+          }
+          return true;
+        }
         // 实时流里的用户消息 addUser 已经放过了
         if (!it?.id || it.type === "userMessage") return false;
         const item = codexItemToChat(it, ts, method === "item/started");

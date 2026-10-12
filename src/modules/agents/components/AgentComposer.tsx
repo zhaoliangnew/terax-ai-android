@@ -2,6 +2,10 @@ import { useImeGuard } from "@/lib/ime";
 import { useArmedConfirm } from "@/lib/useArmedConfirm";
 import { cn } from "@/lib/utils";
 import {
+  arrowAtInputBoundary,
+  cleanComposerInput,
+} from "@/modules/agents/lib/composerInput";
+import {
   AlertCircleIcon,
   ArrowDown01Icon,
   ArrowUp02Icon,
@@ -845,8 +849,17 @@ export function AgentComposer({
           rows={1}
           value={text}
           onChange={(e) => {
-            setText(e.target.value);
-            setCaret(e.target.selectionStart);
+            const clean = cleanComposerInput(
+              e.target.value,
+              e.target.selectionStart,
+              e.target.selectionEnd,
+            );
+            if (clean.text !== e.target.value) {
+              e.target.value = clean.text;
+              e.target.setSelectionRange(clean.start, clean.end);
+            }
+            setText(clean.text);
+            setCaret(clean.start);
             setCmdIndex(0);
           }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
@@ -887,12 +900,23 @@ export function AgentComposer({
               setDismissed(text);
               return;
             }
+            if (
+              !e.metaKey &&
+              !e.ctrlKey &&
+              !e.altKey &&
+              arrowAtInputBoundary(
+                e.key,
+                e.currentTarget.value.length,
+                e.currentTarget.selectionStart,
+                e.currentTarget.selectionEnd,
+              )
+            ) {
+              e.preventDefault();
+              return;
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();
-            } else if (e.key === "Escape" && working && text === "") {
-              e.preventDefault();
-              stop();
             }
           }}
           placeholder="随心输入"
@@ -1139,8 +1163,14 @@ export function AgentComposer({
             <ContextMeter context={context} />
             <button
               type="button"
-              title={compacting ? "正在压缩上下文" : "压缩上下文"}
-              disabled={compacting}
+              title={
+                compacting
+                  ? "正在压缩上下文"
+                  : agent === "codex" && working
+                    ? "本轮结束后可压缩上下文"
+                    : "压缩上下文"
+              }
+              disabled={compacting || (agent === "codex" && working)}
               onClick={onCompact}
               className={cn(
                 toolText,
@@ -1248,7 +1278,7 @@ export function AgentComposer({
           <button
             type="button"
             aria-label={showStop ? "停止" : "发送"}
-            title={showStop ? "停止(Esc)" : "发送(回车)"}
+            title={showStop ? "停止" : "发送(回车)"}
             disabled={!showStop && !canSend}
             onClick={showStop ? stop : send}
             className={cn(

@@ -216,6 +216,8 @@ function snapshot(leafId: number) {
   patch(leafId, {
     items: [...m.items],
     working: m.working,
+    compacting: m.compaction !== null,
+    compaction: m.compaction ? { ...m.compaction } : null,
     model: m.model,
     effort: m.effort,
     serviceTier: m.serviceTier,
@@ -315,6 +317,8 @@ function handleLine(leafId: number, owner: Conn, line: string) {
   if (!m) return;
   if (msg.terax === "closed") {
     owner.failAll("Codex 进程已退出");
+    m.turnId = null;
+    m.finishCompaction("Codex 进程已退出,排队的消息未发送");
     m.working = false;
     snapshot(leafId);
     patch(leafId, { status: "closed", permissions: [] });
@@ -511,6 +515,7 @@ export function sendCodex(
   const conn = conns.get(leafId);
   if (!m || !conn) return;
   m.addUser(text, attachments);
+  if (m.compaction) m.addNote("消息已排队,压缩结束后自动发送");
   snapshot(leafId);
   const policy = modePolicy(m.permissionMode);
   void (ready.get(leafId) ?? Promise.resolve())
@@ -526,6 +531,10 @@ export function sendCodex(
           .catch(() => []);
         patch(leafId, { commands: skills });
       }
+      await m.waitForCompaction();
+      if (conns.get(leafId) !== conn) return;
+      if (useCodexChatStore.getState().sessions[leafId]?.status === "closed")
+        throw new Error("Codex 进程已退出");
       return conn.request("turn/start", {
         threadId: m.threadId,
         input: buildInput(text, attachments, skills ?? []),
@@ -537,7 +546,8 @@ export function sendCodex(
       });
     })
     .catch((e) => {
-      m.working = false;
+      if (conns.get(leafId) !== conn) return;
+      m.working = m.turnId !== null || m.compaction !== null;
       m.addNote(`发送失败:${e instanceof Error ? e.message : String(e)}`);
       snapshot(leafId);
     });
@@ -696,13 +706,15 @@ export function requestCodexUsage(leafId: number) {
 export function compactCodex(leafId: number) {
   const m = models.get(leafId);
   const conn = conns.get(leafId);
-  if (!m?.threadId || !conn) return;
-  m.addNote("正在压缩上下文…");
+  if (!m?.threadId || !conn || m.working || m.compaction) return;
+  m.beginCompaction(true);
   snapshot(leafId);
   void conn
     .request("thread/compact/start", { threadId: m.threadId })
     .catch((e) => {
-      m.addNote(`压缩失败:${e instanceof Error ? e.message : String(e)}`);
+      if (conns.get(leafId) !== conn) return;
+      m.working = m.turnId !== null;
+      m.finishCompaction(e instanceof Error ? e.message : String(e));
       snapshot(leafId);
     });
 }
@@ -710,6 +722,7 @@ export function compactCodex(leafId: number) {
 /** 结束当前会话,开一个新的。 */
 /** 把会话交给命令行:停掉 app-server,线程记录留着,切回聊天时接着读。 */
 export function suspendCodex(leafId: number) {
+  models.get(leafId)?.finishCompaction("会话已关闭,排队的消息未发送");
   const chatId = useCodexChatStore.getState().sessions[leafId]?.chatId;
   if (chatId != null) void invoke("codex_chat_stop", { id: chatId });
   useCodexChatStore.setState((s) => {
@@ -727,6 +740,7 @@ export function restartCodex(
   cwd: string,
   opts?: { permissionMode?: string },
 ) {
+  models.get(leafId)?.finishCompaction("会话已重建,排队的消息未发送");
   const chatId = useCodexChatStore.getState().sessions[leafId]?.chatId;
   if (chatId != null) void invoke("codex_chat_stop", { id: chatId });
   useCodexChatStore.setState((s) => {

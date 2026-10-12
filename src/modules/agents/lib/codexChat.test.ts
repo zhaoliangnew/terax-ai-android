@@ -16,6 +16,122 @@ describe("unwrapShell", () => {
 });
 
 describe("CodexChatModel", () => {
+  it("tracks manual compaction until its turn ends and releases queued input", async () => {
+    const m = new CodexChatModel();
+    m.beginCompaction(true, 1000);
+    expect(m.compaction).toEqual({ startedAt: 1000, phase: "preparing" });
+    expect(m.working).toBe(true);
+    let released = false;
+    const waiting = m.waitForCompaction().then(() => {
+      released = true;
+    });
+    m.notify("turn/started", { turn: { id: "compact" } }, 1100);
+    m.notify(
+      "item/started",
+      { item: { type: "contextCompaction", id: "c" } },
+      1200,
+    );
+    expect(m.compaction?.phase).toBe("compacting");
+    m.addUser("压缩期间发送的消息", [], 1300);
+    m.notify(
+      "item/completed",
+      { item: { type: "contextCompaction", id: "c" } },
+      5000,
+    );
+    expect(m.compaction?.phase).toBe("finishing");
+    await Promise.resolve();
+    expect(released).toBe(false);
+    m.notify(
+      "turn/completed",
+      { turn: { id: "compact", status: "completed" } },
+      6000,
+    );
+    await waiting;
+    expect(m.compaction).toBeNull();
+    expect(m.working).toBe(false);
+    expect(m.items.find((it) => it.kind === "user")).not.toHaveProperty(
+      "durationMs",
+    );
+    expect(m.items[m.items.length - 1]).toMatchObject({
+      kind: "note",
+      text: "上下文压缩完成,用时 5秒",
+    });
+  });
+
+  it("tracks automatic compaction without ending the running user turn", async () => {
+    const m = new CodexChatModel();
+    m.addUser("继续");
+    m.notify("turn/started", { turn: { id: "normal" } });
+    m.notify(
+      "item/started",
+      { item: { type: "contextCompaction", id: "c" } },
+      1000,
+    );
+    const waiting = m.waitForCompaction();
+    m.notify(
+      "item/completed",
+      { item: { type: "contextCompaction", id: "c" } },
+      2000,
+    );
+    await waiting;
+    expect(m.compaction).toBeNull();
+    expect(m.working).toBe(true);
+    expect(m.turnId).toBe("normal");
+  });
+
+  it("rejects queued sends when compaction fails or is interrupted", async () => {
+    for (const status of ["failed", "interrupted"]) {
+      const m = new CodexChatModel();
+      m.beginCompaction(true, 1000);
+      m.notify("turn/started", { turn: { id: "compact" } });
+      const waiting = m.waitForCompaction();
+      const rejected = expect(waiting).rejects.toThrow();
+      m.notify(
+        "turn/completed",
+        {
+          turn: {
+            id: "compact",
+            status,
+            error: { message: "network failure" },
+          },
+        },
+        3000,
+      );
+      await rejected;
+      expect(m.compaction).toBeNull();
+      expect(m.working).toBe(false);
+      expect(
+        m.items.some(
+          (it) => it.kind === "note" && it.text.startsWith("压缩未完成:"),
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("keeps the start time across repeated lifecycle events and ignores other turns", () => {
+    const m = new CodexChatModel();
+    m.beginCompaction(true, 1000);
+    m.beginCompaction(true, 2000);
+    m.notify("turn/started", { turn: { id: "compact" } });
+    expect(
+      m.notify("turn/completed", { turn: { id: "old", status: "completed" } }),
+    ).toBe(false);
+    expect(m.compaction?.startedAt).toBe(1000);
+    expect(m.working).toBe(true);
+  });
+
+  it("releases all waiters on request or process failure", async () => {
+    const m = new CodexChatModel();
+    m.beginCompaction(true);
+    const waiters = [m.waitForCompaction(), m.waitForCompaction()];
+    const rejected = waiters.map((waiting) =>
+      expect(waiting).rejects.toThrow("进程已退出"),
+    );
+    m.finishCompaction("进程已退出");
+    await Promise.all(rejected);
+    expect(m.compaction).toBeNull();
+  });
+
   it("streams a reply and settles it on completion", () => {
     const m = new CodexChatModel();
     m.addUser("hi");

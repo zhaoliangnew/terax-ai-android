@@ -57,6 +57,9 @@ export type ChatSession = {
   commands?: SlashCommandOption[];
   /** 正在压缩上下文:界面把"正在思考"换成"正在压缩上下文"。 */
   compacting?: boolean;
+  compaction?:
+    | import("@/modules/agents/lib/compaction").CompactionProgress
+    | null;
 };
 
 type Store = { sessions: Record<number, ChatSession> };
@@ -165,6 +168,7 @@ function createSdkChat(cmds: SdkChatCommands) {
       context: m.context,
       commands: m.commands ?? undefined,
       compacting: m.compacting,
+      compaction: m.compaction ? { ...m.compaction } : null,
     });
   }
 
@@ -293,10 +297,14 @@ function createSdkChat(cmds: SdkChatCommands) {
         }
         m.addNote(`出错了:${evt.message ?? "未知错误"}`);
         m.working = false;
+        m.compacting = false;
+        m.compaction = null;
         snapshot(leafId);
         return;
       case "closed": {
         m.working = false;
+        m.compacting = false;
+        m.compaction = null;
         snapshot(leafId);
         patch(leafId, { status: "closed", permissions: [] });
         const cwd = leafCwd.get(leafId);
