@@ -11,6 +11,14 @@ export function modelIdName(id: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
+/** 输入框窄的时候按钮上只留版本:GPT-6.1-Sol → 6.1-Sol,Opus 5.5 1M → 5.5 1M。 */
+export function shortModelName(name: string): string {
+  return (
+    name.replace(/^(gpt|claude|opus|sonnet|haiku|fable)[-\s]+(?=\d)/i, "") ||
+    name
+  );
+}
+
 /**
  * 会话报上来的模型 id 对应菜单里哪一项。不能按前缀认:claude-opus-5-5
  * 以 claude-opus-5 开头,会认成 Opus 5。只认完全相同、带 [1m] 这类后缀,

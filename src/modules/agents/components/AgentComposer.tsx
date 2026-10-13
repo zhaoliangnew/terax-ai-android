@@ -11,6 +11,7 @@ import {
   ArrowUp02Icon,
   BookOpen01Icon,
   Bug01Icon,
+  ChartBarLineIcon,
   CheckmarkCircle02Icon,
   CloudUploadIcon,
   CodeIcon,
@@ -35,6 +36,7 @@ import {
   Task01Icon,
   Tick02Icon,
   Wrench01Icon,
+  ZapIcon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
@@ -48,7 +50,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { isImagePath } from "../lib/chatItems";
-import { findModel, modelIdName } from "../lib/modelMatch";
+import { findModel, modelIdName, shortModelName } from "../lib/modelMatch";
 import {
   groupQuickPrompts,
   type QuickPrompt,
@@ -275,7 +277,10 @@ function ContextMeter({ context }: { context?: ContextUsage | null }) {
 
 /** 输入框底栏上的文字小按钮(用量、压缩、新会话)。 */
 const toolText =
-  "flex h-7 cursor-pointer items-center whitespace-nowrap rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground";
+  "flex h-7 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground";
+
+/** 输入框窄了只留图标的按钮文字(悬停的 title 里还有)。 */
+const wideLabel = "hidden @xl/composer:inline";
 
 /** 模型菜单还没拉回来时,按 id 给个能读的名字。 */
 function modelLabel(
@@ -472,6 +477,7 @@ export function AgentComposer({
   const agentName = AGENT_NAMES[agent];
   const modeOptions = agent === "codex" ? CODEX_MODES : CLAUDE_MODES;
   const currentMode = modeOptions.find((o) => o.mode === permissionMode);
+  const modelName = modelLabel(model, models, agentName);
   const [text, setText] = useState("");
   const { imeProps, isImeKey } = useImeGuard();
   const [menu, setMenu] = useState<"mode" | "model" | "usage" | "quick" | null>(
@@ -741,7 +747,7 @@ export function AgentComposer({
       )}
       <div
         className={cn(
-          "mx-auto flex max-w-3xl",
+          "@container/composer mx-auto flex max-w-3xl",
           compact
             ? "flex-row flex-wrap items-center gap-1 px-2 py-1.5"
             : "flex-col gap-2 rounded-[24px] bg-foreground/[0.12] px-4 pt-3.5 pb-2.5",
@@ -945,7 +951,7 @@ export function AgentComposer({
             aria-label="添加附件"
             onClick={() => void pickFiles()}
             className={cn(
-              "flex size-7 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground",
+              "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground",
               compact && "order-1",
             )}
           >
@@ -955,10 +961,10 @@ export function AgentComposer({
           <div className={cn("relative", compact && "hidden")}>
             <button
               type="button"
-              title="权限模式"
+              title={`权限模式:${currentMode?.label ?? "未知"}`}
               onClick={() => toggleMenu("mode")}
               className={cn(
-                "flex h-7 cursor-pointer items-center gap-1 rounded-lg px-2 text-[12.5px] transition-colors hover:bg-foreground/10",
+                "flex h-7 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg px-2 text-[12.5px] transition-colors hover:bg-foreground/10",
                 currentMode?.danger
                   ? "text-orange-400"
                   : "text-muted-foreground hover:text-foreground",
@@ -969,7 +975,9 @@ export function AgentComposer({
                 size={13}
                 strokeWidth={1.75}
               />
-              {currentMode?.label ?? "权限模式"}
+              <span className="hidden @2xl/composer:inline">
+                {currentMode?.label ?? "权限模式"}
+              </span>
             </button>
             <InlineMenu
               open={menu === "mode"}
@@ -1036,7 +1044,8 @@ export function AgentComposer({
               onClick={() => toggleMenu("quick")}
               className={toolText}
             >
-              快捷指令
+              <HugeiconsIcon icon={ZapIcon} size={13} strokeWidth={1.75} />
+              <span className={wideLabel}>快捷指令</span>
             </button>
             <InlineMenu
               open={menu === "quick"}
@@ -1152,14 +1161,24 @@ export function AgentComposer({
               }}
               className={toolText}
             >
-              用量
+              <HugeiconsIcon
+                icon={ChartBarLineIcon}
+                size={13}
+                strokeWidth={1.75}
+              />
+              <span className={wideLabel}>用量</span>
             </button>
             <InlineMenu open={menu === "usage"} onClose={closeMenu} align="end">
               <UsagePanel agentName={agentName} usage={usage} />
             </InlineMenu>
           </div>
           {/* 上下文占用紧挨着"压缩":满了顺手就压 */}
-          <span className={cn("flex items-center", compact && "hidden")}>
+          <span
+            className={cn(
+              "flex shrink-0 items-center whitespace-nowrap",
+              compact && "hidden",
+            )}
+          >
             <ContextMeter context={context} />
             <button
               type="button"
@@ -1187,34 +1206,50 @@ export function AgentComposer({
             onClick={onNewChat}
             className={cn(toolText, compact && "hidden")}
           >
-            新会话
+            <HugeiconsIcon
+              icon={PencilEdit02Icon}
+              size={13}
+              strokeWidth={1.75}
+            />
+            <span className={wideLabel}>新会话</span>
           </button>
-          <div className={cn(compact && "hidden")}>
+          <div className={cn("min-w-0", compact && "hidden")}>
             <button
               type="button"
-              title="切换模型"
+              title={`切换模型:${modelName}`}
               onClick={() => {
                 if (menu !== "model") onOpenModels();
                 toggleMenu("model");
               }}
-              className="flex h-7 cursor-pointer items-center gap-1 rounded-lg px-2 text-[12.5px] text-foreground/85 transition-colors hover:bg-foreground/10"
+              className="flex h-7 max-w-full cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg px-2 text-[12.5px] text-foreground/85 transition-colors hover:bg-foreground/10"
             >
-              {modelLabel(model, models, agentName)}
+              <span className="hidden min-w-0 truncate @2xl/composer:inline">
+                {modelName}
+              </span>
+              <span className="min-w-0 truncate @2xl/composer:hidden">
+                {shortModelName(modelName)}
+              </span>
               {(agent === "codex" || agent === "claude") && effort && (
                 <span
-                  className={
+                  className={cn(
+                    "shrink-0",
                     effort === "ultra"
                       ? "text-[#b48cf7]"
-                      : "text-muted-foreground"
-                  }
+                      : "text-muted-foreground",
+                  )}
                 >
                   {agent === "claude" ? effort : effortLabel(effort)}
                 </span>
               )}
               {agent === "claude" && ultracode && (
-                <span className="text-[#b48cf7]">ultracode</span>
+                <span className="shrink-0 text-[#b48cf7]">ultracode</span>
               )}
-              <HugeiconsIcon icon={ArrowDown01Icon} size={11} strokeWidth={2} />
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                size={11}
+                strokeWidth={2}
+                className="shrink-0"
+              />
             </button>
             <InlineMenu
               open={menu === "model"}
@@ -1282,7 +1317,7 @@ export function AgentComposer({
             disabled={!showStop && !canSend}
             onClick={showStop ? stop : send}
             className={cn(
-              "flex size-8 cursor-pointer items-center justify-center rounded-full bg-[#2c67c5] text-white transition-opacity hover:bg-[#3572d4] disabled:cursor-default",
+              "flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#2c67c5] text-white transition-opacity hover:bg-[#3572d4] disabled:cursor-default",
               !showStop && !canSend && "opacity-45",
               compact && "order-3 size-7",
             )}

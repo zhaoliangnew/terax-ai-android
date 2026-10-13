@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findModel, modelIdName } from "./modelMatch";
+import { findModel, modelIdName, shortModelName } from "./modelMatch";
 
 const opt = (value: string, displayName: string) => ({
   value,
@@ -37,5 +37,20 @@ describe("modelIdName", () => {
     expect(modelIdName("claude-opus-5")).toBe("Opus 5");
     expect(modelIdName("claude-opus-5-5[1m]")).toBe("Opus 5.5 1M");
     expect(modelIdName("gpt-5.5")).toBe("gpt-5.5");
+  });
+});
+
+describe("shortModelName", () => {
+  it("drops the family prefix before the version", () => {
+    expect(shortModelName("GPT-6.1-Sol")).toBe("6.1-Sol");
+    expect(shortModelName("gpt-6.1-codex")).toBe("6.1-codex");
+    expect(shortModelName("Opus 5.5 1M")).toBe("5.5 1M");
+    expect(shortModelName("Sonnet 5.5")).toBe("5.5");
+  });
+
+  it("keeps names without a version after the family", () => {
+    expect(shortModelName("Opus")).toBe("Opus");
+    expect(shortModelName("Codex")).toBe("Codex");
+    expect(shortModelName("o4-mini")).toBe("o4-mini");
   });
 });

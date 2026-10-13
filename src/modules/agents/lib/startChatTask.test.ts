@@ -48,8 +48,6 @@ vi.mock("../store/agentViewStore", () => ({
 vi.mock("./chatPrefs", () => ({
   saveAgent: (dir: string, agent: string) =>
     calls.push(`saveAgent ${dir} ${agent}`),
-  saveView: (dir: string, view: string) =>
-    calls.push(`saveView ${dir} ${view}`),
   isChatAgentEnabled: (agent: string) => !disabled.has(agent),
 }));
 
@@ -107,7 +105,6 @@ describe("launchChatInLeaf", () => {
       "saveAgent /repo/.worktree/worktree_YOEZ-1 claude",
       'claude.ensure 7 /repo/.worktree/worktree_YOEZ-1 {"fresh":true,"permissionMode":"default"}',
       "setMode 7 chat",
-      "saveView /repo/.worktree/worktree_YOEZ-1 chat",
       "claude.send 7 开工",
     ]);
   });

@@ -1,10 +1,5 @@
 import { cn } from "@/lib/utils";
-import {
-  saveAgent,
-  savedAgent,
-  savedView,
-  saveView,
-} from "@/modules/agents/lib/chatPrefs";
+import { saveAgent, savedAgent } from "@/modules/agents/lib/chatPrefs";
 import {
   cliLeafId,
   isSafeSessionId,
@@ -153,7 +148,6 @@ function openLeafChat(
   saveAgent(dir, who);
   CHAT_APIS[who].ensure(leafId, dir);
   store.setMode(leafId, "chat");
-  saveView(dir, "chat");
 }
 
 /** 两个一组的小切换(Claude | Codex、聊天 | 终端):点一下就切。 */
@@ -285,10 +279,7 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
   const visible = usePreferencesStore((s) => s.visibleChatAgents);
   const agents = agentOptions(visible);
 
-  const openTerminal = () => {
-    setMode(leafId, "terminal");
-    saveView(getCwd(leafId), "terminal");
-  };
+  const openTerminal = () => setMode(leafId, "terminal");
   const show = (view: AgentViewMode, who: CliAgent) => {
     if (view === "chat") openLeafChat(leafId, getCwd, who);
     else if (view === "cli") openLeafCli(leafId, getCwd, who);
@@ -414,9 +405,9 @@ export function LeafAgentChat({
 
   const modeSet = useAgentViewStore((s) => leafId in s.modes);
 
-  // 窗格刚打开、还没切过:上次在这个目录用的是聊天,就直接回到聊天(接着
-  // 上次的会话,历史会铺上)。终端的目录要等 shell 起来报过来,这个组件那时
-  // 不一定会重新渲染,所以隔一会儿看一眼,拿到目录判断一次就收手。
+  // 窗格刚打开、还没切过:默认进聊天(接着这个目录上次的会话,历史会铺上)。
+  // 终端的目录要等 shell 起来报过来,这个组件那时不一定会重新渲染,所以隔一会儿
+  // 看一眼,拿到目录就切过去收手;一直拿不到就留在终端。
   // biome-ignore lint/correctness/useExhaustiveDependencies: 只在窗格刚出现、还没选过视图时跑
   useEffect(() => {
     if (modeSet) return;
@@ -430,7 +421,7 @@ export function LeafAgentChat({
       const dir = getCwd(leafId);
       if (!dir && tries < 40) return;
       clearInterval(timer);
-      if (dir && savedView(dir) === "chat") openLeafChat(leafId, getCwd);
+      if (dir) openLeafChat(leafId, getCwd);
     }, 250);
     return () => clearInterval(timer);
   }, [modeSet]);

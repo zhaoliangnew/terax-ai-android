@@ -6,29 +6,10 @@ import {
 import type { ChatAgent } from "../store/chatProviders";
 
 /*
- * 按目录记的聊天偏好(上次是聊天还是终端、用的哪个 AI)。窗格切换和
+ * 按目录记的聊天偏好(用的哪个 AI)。窗格切换和
  * 从云效任务开工都要读写,所以放在这里共用;localStorage 的 key 不能改,
  * 改了用户以前记下的就都丢了。
  */
-
-const viewKey = (cwd: string) => `terax.chat.view:${cwd}`;
-
-/** 这个目录上次是聊天还是终端;重开窗格时照着恢复。 */
-export function savedView(cwd: string): "chat" | "terminal" | null {
-  try {
-    const v = localStorage.getItem(viewKey(cwd));
-    return v === "chat" || v === "terminal" ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveView(cwd: string | null, view: "chat" | "terminal") {
-  if (!cwd) return;
-  try {
-    localStorage.setItem(viewKey(cwd), view);
-  } catch {}
-}
 
 const agentKey = (cwd: string) => `terax.chat.agent:${cwd}`;
 

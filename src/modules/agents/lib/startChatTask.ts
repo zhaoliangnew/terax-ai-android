@@ -6,7 +6,7 @@ import {
   type ChatAgent,
   chatSessionNow,
 } from "../store/chatProviders";
-import { isChatAgentEnabled, saveAgent, saveView } from "./chatPrefs";
+import { isChatAgentEnabled, saveAgent } from "./chatPrefs";
 
 /*
  * 「在某个目录新开一个聊天 tab,把一段话发给 AI」:云效任务点"开始开发"
@@ -73,7 +73,6 @@ export function launchChatInLeaf(
     permissionMode: TASK_PERMISSION_MODE[agent],
   });
   view.setMode(leafId, "chat");
-  saveView(dir, "chat");
   CHAT_APIS[agent].send(leafId, prompt, []);
 }
 
