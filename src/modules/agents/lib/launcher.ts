@@ -14,6 +14,13 @@ export const AGENT_LAUNCHERS = [
     supportsHooks: true,
   },
   {
+    id: "antigravity",
+    label: "Antigravity",
+    defaultCommand: "agy",
+    // 通知钩子没核过 agy 认不认;状态灯走 OSC 133 里的命令名(agy → antigravity)。
+    supportsHooks: false,
+  },
+  {
     id: "qoder",
     label: "Qoder",
     // 分发脚本,不是 CLI 本体;CLI 真身在 ~/.qoder-cn/bin/qoderclicn。

@@ -39,6 +39,23 @@ export const CHAT_AGENTS: readonly DefaultChatAgent[] = [
   "qoder",
 ];
 
+/** 窗格切换里能选的 AI:能聊天的,加上只有命令行的(Antigravity 还没接聊天)。 */
+export type PaneAgent = DefaultChatAgent | "antigravity";
+
+/** 窗格切换和设置里的显示顺序。 */
+export const PANE_AGENTS: readonly PaneAgent[] = [
+  "claude",
+  "codex",
+  "antigravity",
+  "qoder",
+];
+
+export function isChatCapable(
+  agent: PaneAgent | null | undefined,
+): agent is DefaultChatAgent {
+  return !!agent && (CHAT_AGENTS as readonly string[]).includes(agent);
+}
+
 /**
  * 跳到定义/找调用用哪套:
  * - `auto`  这个文件有语言服务器在跑就用它,否则退回内置搜索
@@ -186,8 +203,8 @@ export type Preferences = {
   terminalScrollback: number;
   confirmCloseRunningTerminal: boolean;
   defaultChatAgent: DefaultChatAgent;
-  /** 窗格的 AI 切换里显示哪些(按 CHAT_AGENTS 的顺序,至少一个)。 */
-  visibleChatAgents: DefaultChatAgent[];
+  /** 窗格的 AI 切换里显示哪些(按 PANE_AGENTS 的顺序,至少一个能聊天的)。 */
+  visibleChatAgents: PaneAgent[];
   lastWslDistro: string | null;
   zoomLevel: number;
   agentNotifications: boolean;
@@ -377,7 +394,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminalScrollback: TERMINAL_SCROLLBACK_DEFAULT,
   confirmCloseRunningTerminal: true,
   defaultChatAgent: "claude",
-  visibleChatAgents: [...CHAT_AGENTS],
+  visibleChatAgents: [...PANE_AGENTS],
   lastWslDistro: null,
   zoomLevel: 1.0,
   agentNotifications: true,
@@ -845,20 +862,36 @@ export function coerceDefaultChatAgent(value: unknown): DefaultChatAgent {
     : DEFAULT_PREFERENCES.defaultChatAgent;
 }
 
-/** 存的值可能是旧版本或手改过的:只认识的、按固定顺序、去重,一个不剩就全显示。 */
-export function coerceVisibleChatAgents(value: unknown): DefaultChatAgent[] {
-  if (!Array.isArray(value)) return [...CHAT_AGENTS];
-  const picked = CHAT_AGENTS.filter((a) => value.includes(a));
-  return picked.length ? picked : [...CHAT_AGENTS];
+/**
+ * 存的值可能是旧版本或手改过的:只认识的、按固定顺序、去重。一个能聊天的都
+ * 不剩就全显示:新窗格默认进聊天,总得有个能聊的。
+ */
+export function coerceVisibleChatAgents(value: unknown): PaneAgent[] {
+  if (!Array.isArray(value)) return [...PANE_AGENTS];
+  const picked = PANE_AGENTS.filter((a) => value.includes(a));
+  return picked.some(isChatCapable) ? picked : [...PANE_AGENTS];
 }
 
 /** 按优先级取第一个没被隐藏的;一个都对不上就用显示的第一个。 */
-export function firstVisibleChatAgent(
-  candidates: readonly (DefaultChatAgent | null | undefined)[],
-  visible: readonly DefaultChatAgent[],
-): DefaultChatAgent {
+export function firstVisiblePaneAgent(
+  candidates: readonly (PaneAgent | null | undefined)[],
+  visible: readonly PaneAgent[],
+): PaneAgent {
   const shown = coerceVisibleChatAgents(visible);
   return candidates.find((c) => c && shown.includes(c)) ?? shown[0];
+}
+
+/** 同上,只在能聊天的里挑(只有命令行的跳过)。 */
+export function firstVisibleChatAgent(
+  candidates: readonly (PaneAgent | null | undefined)[],
+  visible: readonly PaneAgent[],
+): DefaultChatAgent {
+  const shown = coerceVisibleChatAgents(visible).filter(isChatCapable);
+  return (
+    candidates.find(
+      (c): c is DefaultChatAgent => isChatCapable(c) && shown.includes(c),
+    ) ?? shown[0]
+  );
 }
 
 export function coerceTerminalCursorStyle(value: unknown): TerminalCursorStyle {

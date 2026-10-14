@@ -36,6 +36,7 @@ export const AGENT_QUICK_COMMANDS = {
   // `qodercn` 是 Qoder CN 的分发脚本(~/.qoder-cn/entry/qodercn):带 `-` 开头的
   // 参数走 CLI,带路径才去开 IDE —— 所以这条一定落在 CLI 上。
   qoder: "qodercn --dangerously-skip-permissions",
+  antigravity: "agy --dangerously-skip-permissions",
 } as const;
 
 export type QuickAgentId = keyof typeof AGENT_QUICK_COMMANDS;

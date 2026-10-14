@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  cliLeafId,
+  cliLeafIds,
   isSafeSessionId,
   resumeInCliInput,
   resumeLaunchCommand,
@@ -25,11 +27,23 @@ describe("session handoff to the command line", () => {
     expect(resumeLaunchCommand("codex", "codex -x", id)).toBe(
       `codex -x resume ${id}`,
     );
+    expect(resumeLaunchCommand("antigravity", "agy -x", id)).toBe(
+      `agy -x --conversation ${id}`,
+    );
   });
 
   it("switches a running Claude or Qoder in place, not Codex", () => {
     expect(resumeInCliInput("claude", id)).toBe(`/resume ${id}\r`);
     expect(resumeInCliInput("qoder", id)).toBe(`/resume ${id}\r`);
     expect(resumeInCliInput("codex", id)).toBeNull();
+    expect(resumeInCliInput("antigravity", id)).toBeNull();
+  });
+});
+
+describe("command-line terminal ids", () => {
+  it("never collide across panes and agents", () => {
+    const ids = [1, 2, 3].flatMap(cliLeafIds);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(cliLeafIds(2)).toContain(cliLeafId(2, "antigravity"));
   });
 });

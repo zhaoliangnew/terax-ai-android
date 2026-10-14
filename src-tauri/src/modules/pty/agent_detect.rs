@@ -6,11 +6,16 @@ const ST_FINAL: u8 = b'\\';
 const OSC_MAX: usize = 2048;
 
 const DEFAULT_AGENTS: &[&str] =
-    &["claude", "codex", "gemini", "pi", "opencode", "grok", "qoder"];
+    &["claude", "codex", "gemini", "pi", "opencode", "grok", "qoder", "antigravity"];
 
 // 命令名跟 agent 名对不上的,在这里折过去。`qodercn` 是 Qoder CN 那个分发脚本,
 // 按前缀规则 strip 掉 "qoder" 剩下 "cn",既不是空也不是 `-`,匹配不上。
-const COMMAND_ALIASES: &[(&str, &str)] = &[("qodercn", "qoder"), ("qoderclicn", "qoder")];
+// Antigravity 的命令行叫 `agy`。
+const COMMAND_ALIASES: &[(&str, &str)] = &[
+    ("qodercn", "qoder"),
+    ("qoderclicn", "qoder"),
+    ("agy", "antigravity"),
+];
 
 // OSC 777 marker our agent hooks emit. Legacy 3-field `notify;Terax;<event>`
 // (Claude) or 4-field `notify;Terax;<agent>;<event>` (Codex/Gemini/Pi).
@@ -331,6 +336,18 @@ mod tests {
             assert_eq!(
                 run(&mut d, &osc(&format!("133;C;{cmd}"))),
                 vec![started("qoder")],
+                "{cmd}"
+            );
+        }
+    }
+
+    #[test]
+    fn arms_on_antigravity_cli_command_names() {
+        for cmd in ["agy --dangerously-skip-permissions", "agy", "antigravity"] {
+            let mut d = AgentDetector::new();
+            assert_eq!(
+                run(&mut d, &osc(&format!("133;C;{cmd}"))),
+                vec![started("antigravity")],
                 "{cmd}"
             );
         }

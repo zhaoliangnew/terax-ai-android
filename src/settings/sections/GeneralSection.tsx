@@ -25,9 +25,8 @@ import {
   coerceDefaultChatAgent,
   type DefaultChatAgent,
   firstVisibleChatAgent,
-  type ThemePref,
-} from "@/modules/settings/store";
-import {
+  isChatCapable,
+  type PaneAgent,
   setAgentNotifications,
   setAutostart,
   setConfirmCloseRunningTerminal,
@@ -49,6 +48,7 @@ import {
   setZoomLevel,
   TERMINAL_FONT_SIZES,
   TERMINAL_SCROLLBACK_PRESETS,
+  type ThemePref,
 } from "@/modules/settings/store";
 import { useTheme } from "@/modules/theme";
 import {
@@ -63,11 +63,17 @@ import { useEffect, useState } from "react";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingRow } from "../components/SettingRow";
 
-const CHAT_AGENT_OPTIONS: { value: DefaultChatAgent; label: string }[] = [
+const PANE_AGENT_OPTIONS: { value: PaneAgent; label: string }[] = [
   { value: "claude", label: "Claude" },
   { value: "codex", label: "Codex" },
+  { value: "antigravity", label: "Antigravity" },
   { value: "qoder", label: "Qoder" },
 ];
+
+const CHAT_AGENT_OPTIONS = PANE_AGENT_OPTIONS.filter(
+  (o): o is { value: DefaultChatAgent; label: string } =>
+    isChatCapable(o.value),
+);
 
 const APPEARANCE: {
   id: ThemePref;
@@ -141,13 +147,15 @@ export function GeneralSection() {
     [defaultChatAgent],
     visibleChatAgents,
   );
-  const toggleChatAgent = (agent: DefaultChatAgent, on: boolean) => {
+  const toggleChatAgent = (agent: PaneAgent, on: boolean) => {
     const next = on
       ? [...visibleChatAgents, agent]
       : visibleChatAgents.filter((a) => a !== agent);
-    if (next.length === 0) return;
+    const nextChat = next.filter(isChatCapable);
+    if (nextChat.length === 0) return;
     void setVisibleChatAgents(next);
-    if (!on && agent === defaultChatAgent) void setDefaultChatAgent(next[0]);
+    if (!on && agent === defaultChatAgent)
+      void setDefaultChatAgent(nextChat[0]);
   };
   const [notificationTest, setNotificationTest] =
     useState<NotificationTestState>("idle");
@@ -531,17 +539,21 @@ export function GeneralSection() {
         <Label>Agents</Label>
         <SettingRow
           title="窗格里显示的 AI"
-          description="没勾的 AI 不会再用:窗格切换里不列,上次用它的目录改用还开着的,开着的聊天停掉并换过去(会话记着,重新勾上还能接)。只剩一个时切换整个收起。"
+          description="没勾的 AI 不会再用:窗格切换里不列,上次用它的目录改用还开着的,开着的聊天停掉并换过去(会话记着,重新勾上还能接)。只剩一个时切换整个收起。Antigravity 暂时只有命令行。"
         >
           <div className="flex items-center gap-3">
-            {CHAT_AGENT_OPTIONS.map((o) => {
+            {PANE_AGENT_OPTIONS.map((o) => {
               const checked = visibleChatAgents.includes(o.value);
-              const last = checked && visibleChatAgents.length === 1;
+              // 新窗格默认进聊天,最后一个能聊天的不让关
+              const last =
+                checked &&
+                isChatCapable(o.value) &&
+                visibleChatAgents.filter(isChatCapable).length === 1;
               const id = `visible-chat-agent-${o.value}`;
               return (
                 <div
                   key={o.value}
-                  title={last ? "至少留一个" : undefined}
+                  title={last ? "至少留一个能聊天的" : undefined}
                   className="flex items-center gap-1.5"
                 >
                   <Checkbox

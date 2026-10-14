@@ -2,6 +2,8 @@ import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   coerceVisibleChatAgents,
   firstVisibleChatAgent,
+  PANE_AGENTS,
+  type PaneAgent,
 } from "@/modules/settings/store";
 import type { ChatAgent } from "../store/chatProviders";
 
@@ -13,18 +15,18 @@ import type { ChatAgent } from "../store/chatProviders";
 
 const agentKey = (cwd: string) => `terax.chat.agent:${cwd}`;
 
-/** 这个目录上次聊天用的是 Claude 还是 Codex。 */
-export function savedAgent(cwd: string | null): ChatAgent | null {
+/** 这个目录上次在窗格里用的哪个 AI(可能是只有命令行的)。 */
+export function savedAgent(cwd: string | null): PaneAgent | null {
   if (!cwd) return null;
   try {
     const v = localStorage.getItem(agentKey(cwd));
-    return v === "claude" || v === "codex" || v === "qoder" ? v : null;
+    return PANE_AGENTS.find((a) => a === v) ?? null;
   } catch {
     return null;
   }
 }
 
-export function saveAgent(cwd: string | null, agent: ChatAgent) {
+export function saveAgent(cwd: string | null, agent: PaneAgent) {
   if (!cwd) return;
   try {
     localStorage.setItem(agentKey(cwd), agent);

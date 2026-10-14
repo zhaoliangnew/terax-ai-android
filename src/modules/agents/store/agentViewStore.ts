@@ -1,11 +1,11 @@
+import type { PaneAgent } from "@/modules/settings/store";
 import { create } from "zustand";
-import type { ChatAgent } from "./chatProviders";
 
 /** 聊天(聊天界面)、命令行(窗格里单独的终端跑 AI 命令行版)、终端(原来的 shell)。 */
 export type AgentViewMode = "chat" | "cli" | "terminal";
 
-/** 命令行能跑的 AI(和聊天是同一组)。 */
-export type CliAgent = ChatAgent;
+/** 命令行能跑的 AI:窗格切换里的全部(Antigravity 只有命令行)。 */
+export type CliAgent = PaneAgent;
 
 /** 一条批注:给"N 条注释"展开的卡片显示。 */
 export type InjectionItem = { thumb: string; note: string };
@@ -29,8 +29,8 @@ type AgentViewStore = {
   quotes: Record<number, { text: string; n: number }>;
   addQuote: (leafId: number, text: string) => void;
   /** 窗格里手动选过的聊天对象;没选过的按终端里在跑的 agent 自动判断。 */
-  agents: Record<number, ChatAgent>;
-  setAgent: (leafId: number, agent: ChatAgent) => void;
+  agents: Record<number, PaneAgent>;
+  setAgent: (leafId: number, agent: PaneAgent) => void;
   /** 窗格里已经开过命令行的 AI(各自一个终端,切走不关)。 */
   clis: Record<number, CliAgent[]>;
   openCli: (leafId: number, agent: CliAgent) => void;

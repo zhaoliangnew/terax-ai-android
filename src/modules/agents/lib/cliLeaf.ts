@@ -1,6 +1,6 @@
 import type { CliAgent } from "../store/agentViewStore";
 
-const CLI_AGENTS: CliAgent[] = ["claude", "codex", "qoder"];
+const CLI_AGENTS: CliAgent[] = ["claude", "codex", "qoder", "antigravity"];
 /** 普通窗格 id 是从小往上数的计数,命令行终端的 id 放到远处,撞不上。 */
 const CLI_BASE = 1_000_000_000;
 
@@ -25,15 +25,20 @@ export function resumeLaunchCommand(
   base: string,
   sessionId: string,
 ): string {
-  return agent === "codex"
-    ? `${base} resume ${sessionId}`
-    : `${base} --resume ${sessionId}`;
+  if (agent === "codex") return `${base} resume ${sessionId}`;
+  if (agent === "antigravity") return `${base} --conversation ${sessionId}`;
+  return `${base} --resume ${sessionId}`;
 }
 
-/** 命令行里 AI 已经在跑:在它里面切到这个会话;Codex 的 /resume 不接 id,切不了。 */
+/**
+ * 命令行里 AI 已经在跑:在它里面切到这个会话;Codex 的 /resume 不接 id,
+ * Antigravity 没核过有没有这条,都切不了。
+ */
 export function resumeInCliInput(
   agent: CliAgent,
   sessionId: string,
 ): string | null {
-  return agent === "codex" ? null : `/resume ${sessionId}\r`;
+  return agent === "codex" || agent === "antigravity"
+    ? null
+    : `/resume ${sessionId}\r`;
 }
