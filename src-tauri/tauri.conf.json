@@ -166,6 +166,8 @@
     ],
     "resources": {
       "resources/scrcpy-server-v4.1": "resources/scrcpy-server-v4.1",
+      "resources/pty-bridge/arm64-v8a/pty_bridge": "resources/pty-bridge/arm64-v8a/pty_bridge",
+      "resources/pty-bridge/x86_64/pty_bridge": "resources/pty-bridge/x86_64/pty_bridge",
         "resources/libunwind.dll": "resources/libunwind.dll",
       "../bridge/claude/dist/bridge.mjs": "claude-bridge/bridge.mjs"
     }

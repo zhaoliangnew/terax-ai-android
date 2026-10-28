@@ -8,9 +8,9 @@ use crate::modules::git::process::{
     read_text_file, run_git,
 };
 use crate::modules::git::types::{
-    DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitResult,
-    GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot, GitPushResult,
-    GitCommitMeta, GitRepoInfo, GitStatusSnapshot, GitTagEntry, TextSource, DEFAULT_TIMEOUT_SECS,
+    DiscardEntry, GitBranchEntry, GitBranchListResult, GitCommitFileChange, GitCommitMeta,
+    GitCommitResult, GitDiffContentResult, GitDiffResult, GitLogEntry, GitOutput, GitPanelSnapshot,
+    GitPushResult, GitRepoInfo, GitStatusSnapshot, GitTagEntry, TextSource, DEFAULT_TIMEOUT_SECS,
     NETWORK_TIMEOUT_SECS,
 };
 use crate::modules::git::utils::{
@@ -315,12 +315,7 @@ pub fn unstage(
     if !looks_like_no_head(&output) {
         return ensure_success(&output, "git reset failed");
     }
-    let mut rm_args: Vec<OsString> = vec![
-        "rm".into(),
-        "--cached".into(),
-        "-r".into(),
-        "--".into(),
-    ];
+    let mut rm_args: Vec<OsString> = vec!["rm".into(), "--cached".into(), "-r".into(), "--".into()];
     for p in &resolved {
         rm_args.push(p.clone().into());
     }
@@ -1398,7 +1393,11 @@ fn push_worktree(
         b.clone()
     } else if let Some(ref sha) = head_sha {
         // if detached HEAD with no branch — show shortened SHA as name
-        let short = if sha.len() >= 7 { &sha[..7] } else { sha.as_str() };
+        let short = if sha.len() >= 7 {
+            &sha[..7]
+        } else {
+            sha.as_str()
+        };
         format!("(detached @ {})", short)
     } else {
         return;
@@ -1427,7 +1426,11 @@ pub fn worktree_add(
     ensure_git_available(&repo_root.workspace)?;
     // 在 worktree 里再建 worktree 会套娃出 <主工程>/.worktree/A/.worktree/B,
     // 树和面包屑全乱套。要建去主工程建。
-    if repo_root.git_path.replace('\\', "/").contains("/.worktree/") {
+    if repo_root
+        .git_path
+        .replace('\\', "/")
+        .contains("/.worktree/")
+    {
         return Err(GitError::command(
             "git worktree add",
             "当前已在 worktree 里,请回主工程创建 worktree",
@@ -1497,7 +1500,11 @@ pub fn worktree_attach(
 ) -> Result<String> {
     let repo_root = authorized_repo_root(registry, repo_root, workspace)?;
     ensure_git_available(&repo_root.workspace)?;
-    if repo_root.git_path.replace('\\', "/").contains("/.worktree/") {
+    if repo_root
+        .git_path
+        .replace('\\', "/")
+        .contains("/.worktree/")
+    {
         return Err(GitError::command(
             "git worktree add",
             "当前已在 worktree 里,请回主工程创建 worktree",

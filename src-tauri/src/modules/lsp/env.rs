@@ -41,6 +41,9 @@ pub fn resolve_binary(command: &str) -> Option<PathBuf> {
         .cloned()
         .or_else(|| std::env::var("PATH").ok());
     which::which_in(command, path, cwd).ok().or_else(|| {
+        if command == "claude" {
+            return dirs::home_dir().and_then(|home| resolve_native_claude(&home));
+        }
         #[cfg(windows)]
         {
             resolve_windows_codex(command)
@@ -52,13 +55,21 @@ pub fn resolve_binary(command: &str) -> Option<PathBuf> {
     })
 }
 
+fn resolve_native_claude(home: &Path) -> Option<PathBuf> {
+    let bin = home.join(".local").join("bin");
+    which::which_in("claude", Some(bin.as_os_str()), home).ok()
+}
+
 /// A GUI-launched Windows app may inherit a PATH that predates a Codex update
 /// or omits the per-version directory added by the Codex installer. The CLI
 /// installs versioned executables below this stable user-local directory, so
 /// look there as a fallback without changing the environment of other tools.
 #[cfg(windows)]
 fn resolve_windows_codex(command: &str) -> Option<PathBuf> {
-    let bin_dir = dirs::data_local_dir()?.join("OpenAI").join("Codex").join("bin");
+    let bin_dir = dirs::data_local_dir()?
+        .join("OpenAI")
+        .join("Codex")
+        .join("bin");
     resolve_windows_codex_from(command, &bin_dir)
 }
 
@@ -159,6 +170,21 @@ mod tests {
         assert!(resolve_binary("").is_none());
         assert!(resolve_binary("   ").is_none());
         assert!(resolve_binary("terax-definitely-not-a-real-binary").is_none());
+    }
+
+    #[test]
+    fn resolves_native_claude_without_login_path_entry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = tempfile::tempdir().unwrap();
+        assert!(resolve_native_claude(home.path()).is_none());
+        let bin = home.path().join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let executable = bin.join("claude");
+        std::fs::write(&executable, b"#!/bin/sh\n").unwrap();
+        assert!(resolve_native_claude(home.path()).is_none());
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(resolve_native_claude(home.path()), Some(executable));
     }
 }
 

@@ -7,7 +7,6 @@ import {
   ArrowDown02Icon,
   ArrowUp02Icon,
   Delete02Icon,
-  Message01Icon,
   PencilEdit02Icon,
   PlusSignIcon,
   UserGroupIcon,
@@ -98,7 +97,7 @@ export function DingGroupsMenu() {
       >
         <DropdownMenuTrigger asChild>
           <button type="button" className={RAIL_TRIGGER} aria-label="钉钉直达">
-            <HugeiconsIcon icon={Message01Icon} size={18} strokeWidth={1.6} />
+            <span aria-hidden="true">钉钉</span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent

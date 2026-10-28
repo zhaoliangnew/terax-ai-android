@@ -1,8 +1,8 @@
 pub mod modules;
 
 use modules::{
-    agent, browser, claude_chat, codex_chat, control, qoder_chat, fs, git, history, lsp, net, pty, scrcpy, secrets,
-    shell, vibrancy, workspace,
+    agent, browser, claude_chat, codex_chat, control, emulator, fs, git, history, lsp, net, pty,
+    qoder_chat, scrcpy, secrets, shell, vibrancy, workspace,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -211,8 +211,8 @@ pub fn run() {
     let control_state = control::ControlState::default();
     let control_for_setup = control_state.clone();
 
-    let builder = tauri::Builder::default().plugin(
-        tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+    let builder =
+        tauri::Builder::default().plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 if window.is_minimized().unwrap_or(false) {
                     let _ = window.unminimize();
@@ -220,8 +220,7 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-        }),
-    );
+        }));
     #[cfg(target_os = "linux")]
     let builder = builder.plugin(tauri_plugin_clipboard_manager::init());
     builder
@@ -271,6 +270,8 @@ pub fn run() {
         })
         .manage(pty::PtyState::default())
         .manage(scrcpy::ScrcpyState::default())
+        .manage(emulator::scale::ScaleSimState::default())
+        .manage(emulator::EmulatorState::default())
         .manage(control_state)
         .manage(shell::ShellState::default())
         .manage(secrets::SecretsState::default())
@@ -309,6 +310,18 @@ pub fn run() {
             scrcpy::scrcpy_key,
             scrcpy::scrcpy_key_event,
             scrcpy::scrcpy_stop,
+            emulator::emulator_overview,
+            emulator::emulator_start,
+            emulator::emulator_stop,
+            emulator::emulator_log_tail,
+            emulator::emulator_set_scale,
+            emulator::emulator_delete,
+            emulator::emulator_prepare,
+            emulator::emulator_probe,
+            emulator::emulator_create,
+            emulator::scale::scale_sim_start,
+            emulator::scale::scale_sim_update,
+            emulator::scale::scale_sim_stop,
             fs::tree::list_subdirs,
             fs::tree::fs_list_drives,
             fs::tree::fs_read_dir,
@@ -443,6 +456,12 @@ pub fn run() {
                     if let Some(state) = app.try_state::<control::ControlState>() {
                         state.shutdown();
                     }
+                    if let Some(state) = app.try_state::<emulator::scale::ScaleSimState>() {
+                        state.kill_all();
+                    }
+                    if let Some(state) = app.try_state::<emulator::EmulatorState>() {
+                        state.kill_all();
+                    }
                 }
                 // macOS delivers "Open With" files here, not as argv (cold and
                 // warm start, several at once). Seed the drain-once state and
@@ -498,8 +517,9 @@ mod launch_target_tests {
 
     #[test]
     fn file_arg_opens_file_and_uses_parent_as_workspace() {
-        let out =
-            resolve_launch_target(vec![LaunchEntry::File(PathBuf::from("/home/u/proj/main.rs"))]);
+        let out = resolve_launch_target(vec![LaunchEntry::File(PathBuf::from(
+            "/home/u/proj/main.rs",
+        ))]);
         assert_eq!(out.dir.as_deref(), Some("/home/u/proj"));
         assert_eq!(out.files, vec!["/home/u/proj/main.rs".to_string()]);
     }

@@ -1,5 +1,3 @@
-import { CheckListIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { RAIL_TRIGGER } from "./lib/menuStyles";
 import { ProjexDialog } from "./ProjexDialog";
@@ -19,7 +17,7 @@ export function YunxiaoProjectsButton() {
           className={RAIL_TRIGGER}
           aria-label="云效项目"
         >
-          <HugeiconsIcon icon={CheckListIcon} size={18} strokeWidth={1.6} />
+          <span aria-hidden="true">项目</span>
         </button>
       }
     />

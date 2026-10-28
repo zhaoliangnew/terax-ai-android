@@ -151,15 +151,15 @@ async function start(cmd) {
   options.allowDangerouslySkipPermissions = true;
   if (cmd.permissionMode) options.permissionMode = cmd.permissionMode;
 
-  session = query({ prompt: inbox, options });
-  if (cmd.resume) {
-    // Resuming doesn't replay old turns on the stream; read them from disk
-    // so the chat shows where the conversation left off.
-    getSessionMessages(cmd.resume, { dir: cmd.cwd })
-      .then((messages) => out({ type: "history", messages }))
-      .catch((e) => log("history unavailable", String(e)));
-  }
   try {
+    session = query({ prompt: inbox, options });
+    if (cmd.resume) {
+      // Resuming doesn't replay old turns on the stream; read them from disk
+      // so the chat shows where the conversation left off.
+      getSessionMessages(cmd.resume, { dir: cmd.cwd })
+        .then((messages) => out({ type: "history", messages }))
+        .catch((e) => log("history unavailable", String(e)));
+    }
     for await (const msg of session) out({ type: "sdk", msg });
   } catch (e) {
     out({ type: "error", message: String(e?.message ?? e) });

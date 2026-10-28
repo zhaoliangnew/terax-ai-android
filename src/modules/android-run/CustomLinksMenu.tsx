@@ -8,7 +8,6 @@ import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import {
   ArrowDown02Icon,
   ArrowUp02Icon,
-  Bookmark02Icon,
   ComputerIcon,
   Copy01Icon,
   Delete02Icon,
@@ -63,7 +62,7 @@ export function CustomLinksMenu() {
             className={RAIL_TRIGGER}
             aria-label="收藏夹"
           >
-            <HugeiconsIcon icon={Bookmark02Icon} size={18} strokeWidth={1.6} />
+            <span aria-hidden="true">收藏</span>
           </button>
         </PopoverTrigger>
         <PopoverContent

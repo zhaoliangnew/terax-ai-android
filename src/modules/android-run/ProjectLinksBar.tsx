@@ -73,12 +73,15 @@ export function ProjectLinksBar({ projectRoot, version, onChanged }: Props) {
           setTaskDraft(task ?? "");
         }}
         // 没填过的压暗一档:一眼看出这个按钮点了是"去填",不是"去打开"。
-        className={cn(MENU_TRIGGER, !task && "text-muted-foreground/45")}
+        aria-label="当前云效需求"
+        className={cn(
+          MENU_TRIGGER,
+          "h-6 gap-1 px-1.5 py-0 text-[11px]",
+          !task && "text-muted-foreground/45",
+        )}
       >
         <HugeiconsIcon icon={Task01Icon} size={13} strokeWidth={1.75} />
-        {/* 换成上下两行之后还是塞不下才丢文案(两条加起来快 200px),
-            这时候按钮已经独占一行,面包屑不受影响。 */}
-        <span className="@max-[400px]:hidden">当前云效需求</span>
+        <span className="@max-[400px]:hidden">需求</span>
       </button>
 
       {codeupPath && (
@@ -86,10 +89,11 @@ export function ProjectLinksBar({ projectRoot, version, onChanged }: Props) {
           type="button"
           title={`打开云效仓库 · ${codeupPath}`}
           onClick={() => openExternally(codeupUrl(codeupPath))}
-          className={MENU_TRIGGER}
+          aria-label="云效仓库"
+          className={cn(MENU_TRIGGER, "h-6 gap-1 px-1.5 py-0 text-[11px]")}
         >
           <HugeiconsIcon icon={GitBranchIcon} size={13} strokeWidth={1.75} />
-          <span className="@max-[400px]:hidden">云效仓库</span>
+          <span className="@max-[400px]:hidden">仓库</span>
         </button>
       )}
 

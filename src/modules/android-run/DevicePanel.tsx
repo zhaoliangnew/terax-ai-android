@@ -10,7 +10,9 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { AndroidRunToolbar } from "./AndroidRunToolbar";
 import { DeviceManagerPanel } from "./DeviceManagerPanel";
 import { DeviceMirror } from "./DeviceMirror";
+import { isEmulatorSerial } from "./lib/emulator";
 import LogcatPanel from "./LogcatDock";
+import { ScaleSimulator } from "./ScaleSimulator";
 import { highlightSerial } from "./lib/highlightSerial";
 import { useMirrorAnnotate } from "./lib/mirrorAnnotate";
 import {
@@ -101,6 +103,9 @@ export default function DevicePanel() {
               </div>
             )}
             <div className="ml-auto flex items-center gap-1">
+              {online && selectedSerial && isEmulatorSerial(selectedSerial) && (
+                <ScaleSimulator serial={selectedSerial} />
+              )}
               {online &&
                 (mirroring ? (
                   <button

@@ -90,6 +90,8 @@ type SourceProps = Omit<
 >;
 
 type Props = {
+  visible?: boolean;
+  selectionVersion?: number;
   tabBarHost?: HTMLElement | null;
   tab: RightTab;
   onTabChange: (tab: RightTab) => void;
@@ -109,6 +111,8 @@ type Props = {
  * 第一次点开才挂载,没用过就不拉编辑器和 git 那一套。
  */
 export function RightPanel({
+  visible = true,
+  selectionVersion = 0,
   tabBarHost,
   tab,
   onTabChange,
@@ -151,6 +155,9 @@ export function RightPanel({
     const r = webRootRef.current;
     setActiveWebByRoot((m) => (m[r] === id ? m : { ...m, [r]: id }));
   }, []);
+  useEffect(() => {
+    if (selectionVersion) setActiveWeb(null);
+  }, [selectionVersion, setActiveWeb]);
   // 选中的网页被关掉:回到固定 tab
   useEffect(() => {
     if (activeWeb && !webTabs.some((t) => t.id === activeWeb)) {
@@ -243,6 +250,16 @@ export function RightPanel({
           type="button"
           role="tab"
           aria-selected={t === current && !activeWeb}
+          onPointerEnter={(event) => {
+            if (event.pointerType === "mouse" && (t !== current || activeWeb)) {
+              selectFixed(t);
+            }
+          }}
+          onPointerMove={(event) => {
+            if (event.pointerType === "mouse" && (t !== current || activeWeb)) {
+              selectFixed(t);
+            }
+          }}
           onClick={() => selectFixed(t)}
           className={cn(
             // 选中只换底色和字色,不加粗:加粗会把字撑宽,切一下整排跳一下
@@ -329,7 +346,7 @@ export function RightPanel({
             {root ? (
               <ProjectFilesPane
                 {...sourceProps}
-                visible={current === "source"}
+                visible={visible && current === "source"}
                 rootPath={root}
                 state={filesState ?? EMPTY_PROJECT_FILES}
                 onStateChange={(next) => onFilesStateChange(root, next)}
@@ -349,7 +366,7 @@ export function RightPanel({
             {root ? (
               <BranchChip
                 variant="panel"
-                visible={current === "repo" && !activeWeb}
+                visible={visible && current === "repo" && !activeWeb}
                 projectRoot={root}
                 onOpenDiff={onOpenDiff}
               />
@@ -374,7 +391,7 @@ export function RightPanel({
                 <WebTab
                   tabId={wt.id}
                   initialUrl={wt.url}
-                  visible={r === webRoot && activeWeb === wt.id}
+                  visible={visible && r === webRoot && activeWeb === wt.id}
                   onTitle={(t) => setWebTitle(r, wt.id, t)}
                 />
               </Suspense>

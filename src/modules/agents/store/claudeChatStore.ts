@@ -135,11 +135,7 @@ function createSdkChat(cmds: SdkChatCommands) {
     } catch {}
   }
 
-  /** 这些窗格的会话是因为"接不上上次的会话"退出的,关掉后自动开新的。 */
   const resumeFailed = new Set<number>();
-  /** 会话还没起来(没收到 system 消息)时发出去的指令:会话没起来就挂了的话,
-   * 换新会话时补发,用户刚发的那句不会丢。 */
-  const unconfirmed = new Map<number, Record<string, unknown>[]>();
 
   /** 会话还在启动(还没拿到 chatId)时发出的指令,拿到后按顺序补发。 */
   const queued = new Map<number, Record<string, unknown>[]>();
@@ -219,7 +215,6 @@ function createSdkChat(cmds: SdkChatCommands) {
         }
         if (evt.msg?.type === "system") {
           patch(leafId, { status: "ready" });
-          unconfirmed.delete(leafId);
           const lm = leafMode.get(leafId);
           if (lm && m.sessionId) rememberSessionMode(m.sessionId, lm);
         }
@@ -290,10 +285,8 @@ function createSdkChat(cmds: SdkChatCommands) {
         patch(leafId, { usage: evt.usage ? claudeUsage(evt.usage) : null });
         return;
       case "error":
-        // 接上次的会话失败(会话被删了、没存盘):别报错,关掉后换个新会话
         if (/resuming session|No conversation found/i.test(evt.message ?? "")) {
           resumeFailed.add(leafId);
-          return;
         }
         m.addNote(`出错了:${evt.message ?? "未知错误"}`);
         m.working = false;
@@ -302,18 +295,25 @@ function createSdkChat(cmds: SdkChatCommands) {
         snapshot(leafId);
         return;
       case "closed": {
+        const current = store.getState().sessions[leafId];
+        if (
+          current?.status === "closed" ||
+          (current?.status === "error" && current.chatId === null)
+        )
+          return;
         m.working = false;
         m.compacting = false;
         m.compaction = null;
         snapshot(leafId);
-        patch(leafId, { status: "closed", permissions: [] });
+        queued.delete(leafId);
+        patch(leafId, { status: "closed", chatId: null, permissions: [] });
         const cwd = leafCwd.get(leafId);
         if (resumeFailed.delete(leafId) && cwd) {
-          const retry = unconfirmed.get(leafId) ?? [];
-          unconfirmed.delete(leafId);
           rememberSession(cwd, null);
-          ensureChat(leafId, cwd, true);
-          if (retry.length) queued.set(leafId, retry);
+          patch(leafId, {
+            status: "error",
+            error: "原会话无法恢复,请手动点击恢复会话以建立新连接",
+          });
         }
         return;
       }
@@ -323,9 +323,6 @@ function createSdkChat(cmds: SdkChatCommands) {
   function send(leafId: number, op: Record<string, unknown>) {
     const cur = store.getState().sessions[leafId];
     if (!cur) return;
-    if (cur.status === "starting" && op.op === "send") {
-      unconfirmed.set(leafId, [...(unconfirmed.get(leafId) ?? []), op]);
-    }
     const chatId = cur.chatId;
     if (chatId == null) {
       if (cur.status === "starting") {
@@ -406,7 +403,7 @@ function createSdkChat(cmds: SdkChatCommands) {
     // 上一个会话已经死了(多半是没启动起来):它排着队没发出去的消息不能
     // 留给新会话补发,不然旧的第一条消息会发进接上的别的对话里
     queued.delete(leafId);
-    unconfirmed.delete(leafId);
+    resumeFailed.delete(leafId);
     if (modeOverride && MODES.includes(modeOverride)) {
       leafMode.set(leafId, modeOverride);
     }
@@ -456,8 +453,11 @@ function createSdkChat(cmds: SdkChatCommands) {
       onEvent: channel,
     })
       .then((chatId) => {
-        if (models.get(leafId) !== model) {
-          // 启动途中又换了会话:这个进程没人要了
+        const status = store.getState().sessions[leafId]?.status;
+        if (
+          models.get(leafId) !== model ||
+          (status !== "starting" && status !== "ready")
+        ) {
           void invoke(cmds.stop, { id: chatId });
           return;
         }
@@ -466,7 +466,12 @@ function createSdkChat(cmds: SdkChatCommands) {
         queued.delete(leafId);
         for (const op of ops) send(leafId, op);
       })
-      .catch((e) => patch(leafId, { status: "error", error: String(e) }));
+      .catch((e) => {
+        if (models.get(leafId) === model) {
+          queued.delete(leafId);
+          patch(leafId, { status: "error", error: String(e) });
+        }
+      });
   }
 
   /** 等会话报实际设置回来再回复的 /effort:窗格 → 用户那句和标题。 */
@@ -650,7 +655,7 @@ function createSdkChat(cmds: SdkChatCommands) {
     });
     models.delete(leafId);
     queued.delete(leafId);
-    unconfirmed.delete(leafId);
+    resumeFailed.delete(leafId);
   }
 
   /**
@@ -671,7 +676,7 @@ function createSdkChat(cmds: SdkChatCommands) {
     });
     models.delete(leafId);
     queued.delete(leafId);
-    unconfirmed.delete(leafId);
+    resumeFailed.delete(leafId);
     rememberSession(cwd, null);
     ensureChat(leafId, cwd, true, opts?.permissionMode);
   }

@@ -1,4 +1,5 @@
 import { ProjectWatermark } from "@/app/components/ProjectWatermark";
+import { useRightFlyout } from "@/app/useRightFlyout";
 import { Button } from "@/components/ui/button";
 import {
   MAIN_LAYOUT_ID,
@@ -460,18 +461,24 @@ export default function App() {
     return "device";
   });
   const currentRightTab = effectiveRightTab(rightTab, projectHasDevice);
+  const [rightTabSelection, setRightTabSelection] = useState(0);
   const devicePanelRef = useRef<PanelImperativeHandle | null>(null);
   const deviceElementRef = useRef<HTMLDivElement | null>(null);
   const workspaceElementRef = useRef<HTMLDivElement | null>(null);
   const [workspaceToolbarHost, setWorkspaceToolbarHost] =
     useState<HTMLDivElement | null>(null);
   const mainGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const rightFlyout = useRightFlyout(mainGroupRef);
   const splitLayoutRef = useRef<Record<string, number> | null>(null);
   const [rightPanelExpanded, setRightPanelExpanded] = useState(false);
   const [rightTabBarHost, setRightTabBarHost] = useState<HTMLDivElement | null>(
     null,
   );
   const toggleRightPanelExpanded = useCallback(() => {
+    if (rightFlyout.floating) {
+      rightFlyout.toggle();
+      return;
+    }
     const group = mainGroupRef.current;
     if (!group) return;
     const layout = group.getLayout();
@@ -494,8 +501,12 @@ export default function App() {
         device: layout.device + layout.workspace,
       });
     }
-  }, []);
+  }, [rightFlyout.floating, rightFlyout.toggle]);
   const toggleRightPanel = useCallback(() => {
+    if (rightFlyout.floating) {
+      rightFlyout.toggle();
+      return;
+    }
     const group = mainGroupRef.current;
     const layout = group?.getLayout();
     if (group && layout?.workspace === 0) {
@@ -506,25 +517,36 @@ export default function App() {
     if (!p) return;
     if (p.isCollapsed()) p.expand();
     else p.collapse();
-  }, []);
-  const selectRightTab = useCallback((tab: RightTab) => {
-    setRightTab(tab);
-    try {
-      localStorage.setItem(RIGHT_TAB_KEY, tab);
-    } catch {}
-    // 右栏被拖到收起时,点入口要先把它展开
-    const p = devicePanelRef.current;
-    if (p?.isCollapsed()) p.expand();
-  }, []);
+  }, [rightFlyout.floating, rightFlyout.toggle]);
+  const selectRightTab = useCallback(
+    (tab: RightTab) => {
+      setRightTab(tab);
+      setRightTabSelection((value) => value + 1);
+      try {
+        localStorage.setItem(RIGHT_TAB_KEY, tab);
+      } catch {}
+      if (rightFlyout.floating) {
+        rightFlyout.reveal();
+        return;
+      }
+      const p = devicePanelRef.current;
+      if (p?.isCollapsed()) p.expand();
+    },
+    [rightFlyout.floating, rightFlyout.reveal],
+  );
   // AI 在内嵌浏览器里操作时右栏要露出来(RightPanel 发这个事件)
   useEffect(() => {
     const reveal = () => {
+      if (rightFlyout.floating) {
+        rightFlyout.reveal();
+        return;
+      }
       const p = devicePanelRef.current;
       if (p?.isCollapsed()) p.expand();
     };
     window.addEventListener(REVEAL_RIGHT_PANEL, reveal);
     return () => window.removeEventListener(REVEAL_RIGHT_PANEL, reveal);
-  }, []);
+  }, [rightFlyout.floating, rightFlyout.reveal]);
 
   // 右键工程 → 填"当前云效需求"。跟目录级的云效项目分开:这个跟着仓库走,不继承。
   const [taskDir, setTaskDir] = useState<string | null>(null);
@@ -1790,6 +1812,7 @@ export default function App() {
               workspaceElementRef={workspaceElementRef}
               rightPanelElementRef={deviceElementRef}
               rightPanelExpanded={rightPanelExpanded}
+              floatingRightPanel={rightFlyout.floating}
               onToggleRightPanelExpanded={toggleRightPanelExpanded}
               spaceSwitcher={null}
               searchTarget={searchTarget}
@@ -1809,7 +1832,7 @@ export default function App() {
               onLayoutChanged={(layout, meta) => {
                 // 整体比例交给库存(拖完就记住),侧栏宽度另外还要按 px 存一份:
                 // 收起再展开、下次启动都靠它还原
-                if (layout.workspace > 0) {
+                if (layout.workspace > 0 && !rightFlyout.floating) {
                   mainLayout.onLayoutChanged(layout, meta);
                 }
                 const width = sidebarRef.current?.getSize().inPixels ?? 0;
@@ -2126,15 +2149,42 @@ export default function App() {
                   </div>
                 </div>
               </ResizablePanel>
-              <ResizableHandle className="w-px shrink-0 cursor-col-resize border-foreground/[0.16] border-l bg-transparent transition-colors duration-[var(--dur-fast)] after:w-3 hover:border-foreground/35" />
+              <ResizableHandle
+                disabled={rightFlyout.floating}
+                className={cn(
+                  "w-px shrink-0 cursor-col-resize border-foreground/[0.16] border-l bg-transparent transition-colors duration-[var(--dur-fast)] after:w-3 hover:border-foreground/35",
+                  rightFlyout.floating && "hidden",
+                )}
+              />
               <ResizablePanel
                 id="device"
                 panelRef={devicePanelRef}
                 elementRef={deviceElementRef}
                 defaultSize="30%"
-                minSize="20%"
+                minSize={rightFlyout.floating ? 0 : "20%"}
                 collapsible
                 collapsedSize={0}
+                data-right-flyout={rightFlyout.floating ? "" : undefined}
+                aria-label={rightFlyout.floating ? "右侧工具浮层" : undefined}
+                style={
+                  rightFlyout.floating
+                    ? {
+                        position: "fixed",
+                        top: "calc(40px / var(--app-zoom, 1))",
+                        bottom: "calc(24px / var(--app-zoom, 1))",
+                        right: "36px",
+                        width:
+                          currentRightTab === "repo"
+                            ? "min(900px, calc(100vw - 72px))"
+                            : "min(760px, calc(100vw - 72px))",
+                        zIndex: 40,
+                        visibility: rightFlyout.open ? "visible" : "hidden",
+                        pointerEvents: rightFlyout.open ? "auto" : "none",
+                        boxShadow: "-12px 0 32px rgb(0 0 0 / 0.25)",
+                        borderLeft: "1px solid var(--border)",
+                      }
+                    : undefined
+                }
               >
                 <div className="h-full min-h-0">
                   <div className="terax-pane relative flex h-full min-h-0 flex-col">
@@ -2155,7 +2205,13 @@ export default function App() {
                     )}
                     <div className="min-h-0 flex-1">
                       <RightPanel
-                        tabBarHost={zenMode ? null : rightTabBarHost}
+                        tabBarHost={
+                          zenMode || rightFlyout.floating
+                            ? null
+                            : rightTabBarHost
+                        }
+                        visible={!rightFlyout.floating || rightFlyout.open}
+                        selectionVersion={rightTabSelection}
                         tab={currentRightTab}
                         onTabChange={selectRightTab}
                         hasDevice={projectHasDevice}
@@ -2238,6 +2294,49 @@ export default function App() {
               </ResizablePanel>
             </ResizablePanelGroup>
           </main>
+
+          {rightFlyout.floating && !zenMode && (
+            <div
+              data-right-rail
+              className="fixed top-1/2 right-0 z-40 flex w-9 -translate-y-1/2 flex-col gap-1 rounded-l-lg border border-r-0 border-border bg-frame p-1 shadow-lg"
+            >
+              {(projectHasDevice
+                ? (["device", "source", "repo"] as const)
+                : (["source", "repo"] as const)
+              ).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  aria-label={`展开${tab === "device" ? "投屏" : tab === "source" ? "源码" : "仓库"}`}
+                  aria-expanded={rightFlyout.open && currentRightTab === tab}
+                  onPointerEnter={(event) => {
+                    if (event.pointerType === "mouse") selectRightTab(tab);
+                  }}
+                  onPointerMove={(event) => {
+                    if (
+                      event.pointerType === "mouse" &&
+                      (!rightFlyout.open || currentRightTab !== tab)
+                    )
+                      selectRightTab(tab);
+                  }}
+                  onFocus={() => selectRightTab(tab)}
+                  onClick={() => selectRightTab(tab)}
+                  className={cn(
+                    "flex min-h-14 cursor-pointer items-center justify-center rounded px-1 py-2 text-xs leading-5 [writing-mode:vertical-rl] hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring",
+                    rightFlyout.open && currentRightTab === tab
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  {tab === "device"
+                    ? "投屏"
+                    : tab === "source"
+                      ? "源码"
+                      : "仓库"}
+                </button>
+              ))}
+            </div>
+          )}
 
           {!zenMode && (
             <StatusBar

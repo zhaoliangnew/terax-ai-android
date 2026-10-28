@@ -112,7 +112,9 @@ pub async fn claude_chat_start(
 
     tauri::async_runtime::spawn_blocking(move || {
         let node = login_env::resolve_binary("node").ok_or("claude chat: node not found")?;
-        let claude = login_env::resolve_binary("claude");
+        let claude = login_env::resolve_binary("claude").ok_or(
+            "未找到 Claude Code,请安装后重新启动应用。已检查登录 shell PATH 和 ~/.local/bin",
+        )?;
         let mut child = Command::new(node)
             .arg(&script)
             .current_dir(&cwd)
@@ -132,7 +134,7 @@ pub async fn claude_chat_start(
             "resume": resume,
             "model": model,
             "permissionMode": permission_mode,
-            "claudePath": claude.map(|p| p.to_string_lossy().into_owned()),
+            "claudePath": claude.to_string_lossy(),
         });
         writeln!(stdin, "{start}").map_err(|e| e.to_string())?;
 

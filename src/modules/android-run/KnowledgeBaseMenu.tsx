@@ -4,7 +4,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  BookOpen01Icon,
   ExternalLinkIcon,
   File01Icon,
   Folder01Icon,
@@ -36,7 +35,7 @@ export function KnowledgeBaseMenu() {
           className={RAIL_TRIGGER}
           aria-label="嵌入式组知识库"
         >
-          <HugeiconsIcon icon={BookOpen01Icon} size={18} strokeWidth={1.6} />
+          <span aria-hidden="true">知识</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

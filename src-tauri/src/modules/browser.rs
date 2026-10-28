@@ -657,9 +657,7 @@ pub fn web_chat_bubble(
     state: tauri::State<'_, WebAnnotState>,
     on: bool,
 ) -> Result<(), String> {
-    state
-        .bubble
-        .store(on, std::sync::atomic::Ordering::Relaxed);
+    state.bubble.store(on, std::sync::atomic::Ordering::Relaxed);
     let js = if on { BUBBLE_JS } else { BUBBLE_STOP_JS };
     for (label, wv) in app.webviews() {
         if label.starts_with("web-") {

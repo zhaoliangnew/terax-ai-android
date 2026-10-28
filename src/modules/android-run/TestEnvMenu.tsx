@@ -3,8 +3,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { ServerStack01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useEffect, useState } from "react";
 import { MENU_HEAD, MENU_NOTE, RAIL_TRIGGER } from "./lib/menuStyles";
 import { openExternally } from "./lib/openExternally";
@@ -48,7 +46,7 @@ export function TestEnvMenu() {
     <Popover modal open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button type="button" className={RAIL_TRIGGER} aria-label="测试环境">
-          <HugeiconsIcon icon={ServerStack01Icon} size={18} strokeWidth={1.6} />
+          <span aria-hidden="true">环境</span>
         </button>
       </PopoverTrigger>
       <PopoverContent

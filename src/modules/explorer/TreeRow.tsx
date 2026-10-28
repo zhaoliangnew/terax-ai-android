@@ -13,7 +13,12 @@ import {
   projexUrl,
 } from "@/modules/android-run";
 import { WorktreeCountBadge } from "@/modules/android-run/BranchChip";
-import { AndroidIcon, CloudIcon, Pin02Icon } from "@hugeicons/core-free-icons";
+import {
+  AndroidIcon,
+  CloudIcon,
+  GitBranchIcon,
+  Pin02Icon,
+} from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
 import { FolderGlyph } from "./FolderGlyph";
@@ -21,9 +26,15 @@ import { InlineInput } from "./InlineInput";
 import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { fileIconUrl } from "./lib/iconResolver";
+import { TREE_INDENT } from "./lib/treeWidth";
 
-/** 每一层缩进多少:12px 时子行名字几乎和父行对齐,层级看不出来。 */
-const INDENT = 18;
+const INDENT = TREE_INDENT;
+
+/**
+ * 当前打开的工程/worktree:整行铺蓝底。工程名本身是蓝字,选中态只换
+ * 字色会和它混在一起,得靠底色才一眼认得出。
+ */
+const ACTIVE_ROW = "bg-sky-500/18 font-semibold text-sky-50";
 
 const AGENT_STATE_EMOJI: Record<AgentPhaseState, string> = {
   working: "🟡",
@@ -76,6 +87,8 @@ export type EntryRowProps = {
   dirty?: boolean;
   /** 置顶的目录:排在同级最前面,行尾挂个图钉,不然不知道为什么它在上面。 */
   pinned?: boolean;
+  /** worktree 已经画成子行了:行尾的 "tree N" 角标就是重复信息,不再挂。 */
+  worktreesListed?: boolean;
 };
 
 function EntryRowImpl(props: EntryRowProps) {
@@ -104,6 +117,7 @@ function EntryRowImpl(props: EntryRowProps) {
     branch = null,
     dirty = false,
     pinned = false,
+    worktreesListed = false,
   } = props;
 
   const asProject = projectKind !== null && !!onOpenProject;
@@ -111,6 +125,9 @@ function EntryRowImpl(props: EntryRowProps) {
   const openedFolder =
     isDir && !asProject && isOpenedProject && !!onOpenProject;
   const iconUrl = isDir ? null : fileIconUrl(name);
+  // 导航树(能设根目录的那棵)里的普通文件夹是工程的分组:白字加粗当标题,
+  // 不然最外层反而比里面的蓝色工程名还淡,层级是倒的
+  const groupFolder = isDir && !asProject && !openedFolder && !!onSetAsRoot;
   const paddingLeft = 6 + depth * INDENT;
   const agentState = useProjectAgentState(
     asProject || openedFolder ? path : null,
@@ -173,7 +190,7 @@ function EntryRowImpl(props: EntryRowProps) {
       className={cn(
         "group flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
         isActiveProject
-          ? "font-semibold text-emerald-400"
+          ? ACTIVE_ROW
           : isSelected
             ? "bg-accent text-foreground"
             : gitignored
@@ -200,12 +217,10 @@ function EntryRowImpl(props: EntryRowProps) {
             icon={AndroidIcon}
             size={16}
             strokeWidth={1.75}
-            // 满屏绿图标等于没标记:只有开着终端的工程才亮
+            // 和工程名同一个蓝,找工程时顺着这一列扫
             className={cn(
               "size-4 shrink-0",
-              isActiveProject || isOpenedProject
-                ? "text-emerald-500"
-                : "text-muted-foreground/45",
+              isActiveProject ? "text-sky-50" : "text-sky-400",
             )}
           />
         ) : projectKind ? (
@@ -214,9 +229,9 @@ function EntryRowImpl(props: EntryRowProps) {
             title={PROJECT_KIND_LABEL[projectKind]}
             className={cn(
               "shrink-0 rounded px-1 text-[9px] font-semibold leading-4",
-              isActiveProject || isOpenedProject
-                ? "bg-emerald-500/15 text-emerald-500"
-                : "bg-muted-foreground/10 text-muted-foreground/70",
+              isActiveProject
+                ? "bg-sky-50/15 text-sky-50"
+                : "bg-sky-400/15 text-sky-300",
             )}
           >
             {PROJECT_KIND_BADGE[projectKind]}
@@ -235,16 +250,21 @@ function EntryRowImpl(props: EntryRowProps) {
       ) : isDir ? (
         <FolderGlyph
           open={isExpanded}
-          // 开着终端的普通文件夹:图标点绿,和开着的工程一个意思
-          className={openedFolder ? "text-emerald-500" : undefined}
+          // 开着终端的普通文件夹:图标点蓝,和工程一个意思
+          className={
+            openedFolder
+              ? "text-sky-400"
+              : groupFolder
+                ? "text-foreground/75"
+                : undefined
+          }
         />
       ) : iconUrl ? (
         <img src={iconUrl} alt="" className="size-4 shrink-0" />
       ) : (
         <span className="size-4 shrink-0" />
       )}
-      {/* 工程目录分三档:当前选中(绿字)、开着但没选中(白)、
-          没开过(灰)。绿色只留给选中态,否则满屏绿字等于没标记。 */}
+      {/* 工程名统一蓝字,和灰色的 worktree 子行拉开;当前选中的靠整行底条区分 */}
       <span
         className={cn(
           "min-w-0 truncate",
@@ -253,17 +273,16 @@ function EntryRowImpl(props: EntryRowProps) {
           // 窄侧栏里整行比树还宽,树被撑得左右乱跳。分支是 flex-1(基准 0),
           // 位置不够时先让它缩没,再轮到名字截断。
           asProject && branch ? "max-w-[60%]" : "flex-1",
-          // 工程名比 worktree 子行大半号,主次一眼分开
-          asProject && "text-[13.5px]",
           asProject && !isActiveProject
-            ? isOpenedProject
-              ? // 不加粗:开着的工程一多满屏粗体,反而分不出主次
-                "text-foreground"
-              : "text-muted-foreground/65"
-            : !isSelected &&
+            ? "font-medium text-sky-300"
+            : !isActiveProject &&
+                !isSelected &&
                 !gitignored &&
                 gitStatusCode &&
                 explorerGitTextClass(gitStatusCode),
+          groupFolder &&
+            !isActiveProject &&
+            cn("font-semibold", !gitStatusCode && "text-foreground"),
         )}
       >
         {name}
@@ -283,7 +302,7 @@ function EntryRowImpl(props: EntryRowProps) {
         </span>
       )}
       {/* 工程挂着 worktree 就标出来,数量带圆底 */}
-      {asProject && (
+      {asProject && !worktreesListed && (
         <WorktreeCountBadge projectRoot={path} className="shrink-0" />
       )}
       {/* 绑过云效项目的产品目录挂个云:标记绑定关系,点一下直达项目网页。
@@ -359,7 +378,7 @@ function WorktreeRowImpl({
       className={cn(
         // worktree 是子行:字号小一号,和工程行拉开主次
         "group flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left text-[12.5px] transition-colors hover:bg-accent/70",
-        isActive ? "font-semibold text-emerald-400" : "text-foreground/70",
+        isActive ? ACTIVE_ROW : "text-muted-foreground",
       )}
       style={{ paddingLeft: 6 + depth * INDENT }}
     >
@@ -374,16 +393,23 @@ function WorktreeRowImpl({
           {AGENT_STATE_EMOJI[agentState]}
         </span>
       ) : (
-        // 占一个图标位,和工程行的图标对齐;不挂"tree"标签,缩进已经说明它是子行
-        <span className="size-4 shrink-0" />
+        // 每一层都有自己的图标:文件夹、安卓、分支;空着图标位子行像悬空的
+        <HugeiconsIcon
+          icon={GitBranchIcon}
+          size={14}
+          strokeWidth={1.75}
+          className={cn(
+            "size-4 shrink-0 p-px",
+            isActive ? "text-sky-50" : "text-muted-foreground/55",
+          )}
+        />
       )}
       <span
         className={cn(
           "min-w-0 truncate",
-          // worktree 是工程的子行,不能比工程本身还抢眼:不加粗,开着的也只是
-          // 比没开的亮一档
+          // worktree 是工程的子行,压成灰字让蓝色的工程名浮出来;开着的亮一档
           !isActive &&
-            (isOpened ? "text-foreground/70" : "text-muted-foreground/65"),
+            (isOpened ? "text-muted-foreground" : "text-muted-foreground/60"),
         )}
       >
         {name}

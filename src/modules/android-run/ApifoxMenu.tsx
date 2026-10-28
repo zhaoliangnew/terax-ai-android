@@ -4,7 +4,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  ApiIcon,
   ArrowDown02Icon,
   ArrowUp02Icon,
   Delete02Icon,
@@ -52,12 +51,8 @@ export function ApifoxMenu() {
         }}
       >
         <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={RAIL_TRIGGER}
-            aria-label="Apifox"
-          >
-            <HugeiconsIcon icon={ApiIcon} size={18} strokeWidth={1.6} />
+          <button type="button" className={RAIL_TRIGGER} aria-label="Apifox">
+            <span aria-hidden="true">接口</span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent

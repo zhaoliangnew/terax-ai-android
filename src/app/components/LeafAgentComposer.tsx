@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { saveAgent, savedAgent } from "@/modules/agents/lib/chatPrefs";
 import {
@@ -7,6 +8,7 @@ import {
   resumeLaunchCommand,
 } from "@/modules/agents/lib/cliLeaf";
 import { findAgentLauncher } from "@/modules/agents/lib/launcher";
+import { repoLabel } from "@/modules/agents/lib/repoLabel";
 import {
   type AgentViewMode,
   type CliAgent,
@@ -155,7 +157,7 @@ function statusText(
 ) {
   if (status === "starting") return `正在启动 ${agentName}…`;
   if (status === "error") return `启动失败:${error ?? "未知错误"}`;
-  if (status === "closed") return "会话已结束,发一条消息会开一个新会话";
+  if (status === "closed") return "会话已结束,点击恢复会话后继续聊天";
   return null;
 }
 
@@ -177,7 +179,6 @@ function openLeafChat(
   const store = useAgentViewStore.getState();
   store.setAgent(leafId, who);
   saveAgent(dir, who);
-  CHAT_APIS[who].ensure(leafId, dir);
   store.setMode(leafId, "chat");
 }
 
@@ -323,7 +324,11 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
   const pickAgent = (who: CliAgent) => {
     useAgentViewStore.getState().setAgent(leafId, who);
     saveAgent(getCwd(leafId), who);
-    if (mode !== "terminal") show(mode, who);
+    if (mode === "chat" && isChatCapable(who)) {
+      openLeafChat(leafId, getCwd, who);
+    } else if (mode !== "terminal") {
+      setMode(leafId, "terminal");
+    }
   };
   const noChat = isChatCapable(agent)
     ? undefined
@@ -380,7 +385,8 @@ function useDisabledAgentGuard(
     const next = resolveAgent(leafId, dir);
     useAgentViewStore.getState().setAgent(leafId, next);
     saveAgent(dir, next);
-    if (mode === "cli" && dir) openLeafCli(leafId, getCwd, next);
+    if (mode === "cli")
+      useAgentViewStore.getState().setMode(leafId, "terminal");
   }, [leafId, visible, picked]);
 }
 
@@ -420,6 +426,34 @@ function LeafCliTerminals({
   );
 }
 
+function resumeChatControl(
+  leafId: number,
+  getCwd: (leafId: number) => string | null,
+  agent: ChatAgent,
+) {
+  return (
+    <div className="flex shrink-0 flex-col items-center gap-2 px-4 py-6">
+      <p className="text-xs text-muted-foreground">
+        尚未连接 {AGENT_NAMES[agent]},点击后恢复会话
+      </p>
+      <Button
+        onClick={() => {
+          const dir = getCwd(leafId);
+          if (!dir) {
+            toast.error("这个终端还不知道在哪个目录,先在里面 cd 一下");
+            return;
+          }
+          useAgentViewStore.getState().setAgent(leafId, agent);
+          saveAgent(dir, agent);
+          CHAT_APIS[agent].ensure(leafId, dir);
+        }}
+      >
+        恢复 {AGENT_NAMES[agent]} 会话
+      </Button>
+    </div>
+  );
+}
+
 /**
  * 盖在终端窗格上面的聊天视图。聊天是一个独立的会话(Claude Agent SDK 或
  * codex app-server),在这个窗格的目录里跑;终端一直在下面,切回去就是原样。
@@ -441,56 +475,42 @@ export function LeafAgentChat({
   useDisabledAgentGuard(leafId, getCwd);
 
   const modeSet = useAgentViewStore((s) => leafId in s.modes);
+  const disconnected =
+    !session || session.status === "closed" || session.status === "error";
 
-  // 窗格刚打开、还没切过:默认进聊天(接着这个目录上次的会话,历史会铺上)。
-  // 终端的目录要等 shell 起来报过来,这个组件那时不一定会重新渲染,所以隔一会儿
-  // 看一眼,拿到目录就切过去收手;一直拿不到就留在终端。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 只在窗格刚出现、还没选过视图时跑
   useEffect(() => {
-    if (modeSet) return;
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries += 1;
-      if (useAgentViewStore.getState().modes[leafId] !== undefined) {
-        clearInterval(timer);
-        return;
-      }
-      const dir = getCwd(leafId);
-      if (!dir && tries < 40) return;
-      clearInterval(timer);
-      if (!dir) return;
-      // 这个目录上次用的是只有命令行的 AI:直接开它的命令行
-      const who = resolveAgent(leafId, dir);
-      if (isChatCapable(who)) openLeafChat(leafId, getCwd, who);
-      else openLeafCli(leafId, getCwd, who);
-    }, 250);
-    return () => clearInterval(timer);
-  }, [modeSet]);
+    if (!modeSet) useAgentViewStore.getState().setMode(leafId, "chat");
+  }, [leafId, modeSet]);
 
   return (
     <>
       {mode === "chat" && (
-        <Suspense fallback={null}>
-          <AgentChatView
-            cwd={getCwd(leafId)}
-            items={session?.items ?? []}
-            agentName={AGENT_NAMES[agent]}
-            working={session?.working ?? false}
-            compacting={session?.compacting ?? false}
-            compaction={session?.compaction ?? null}
-            statusText={statusText(
-              AGENT_NAMES[agent],
-              session?.status,
-              session?.error ?? null,
-            )}
-            permissions={session?.permissions ?? []}
-            onPermission={(id, allow, always, input, message) =>
-              api.respond(leafId, id, allow, always, input, message)
-            }
-            onQuote={(text) => addQuote(leafId, text)}
-            onReply={(text) => api.send(leafId, text, [])}
-          />
-        </Suspense>
+        <div className="absolute inset-0 z-10 flex flex-col bg-background">
+          <div className="relative min-h-0 flex-1">
+            <Suspense fallback={null}>
+              <AgentChatView
+                cwd={getCwd(leafId)}
+                items={session?.items ?? []}
+                agentName={AGENT_NAMES[agent]}
+                working={session?.working ?? false}
+                compacting={session?.compacting ?? false}
+                compaction={session?.compaction ?? null}
+                statusText={statusText(
+                  AGENT_NAMES[agent],
+                  session?.status,
+                  session?.error ?? null,
+                )}
+                permissions={session?.permissions ?? []}
+                onPermission={(id, allow, always, input, message) =>
+                  api.respond(leafId, id, allow, always, input, message)
+                }
+                onQuote={(text) => addQuote(leafId, text)}
+                onReply={(text) => api.send(leafId, text, [])}
+              />
+            </Suspense>
+          </div>
+          {disconnected && resumeChatControl(leafId, getCwd, agent)}
+        </div>
       )}
       <LeafCliTerminals
         leafId={leafId}
@@ -519,6 +539,7 @@ function useLeafBranch(
 ) {
   const [branch, setBranch] = useState<{
     name: string;
+    project: string;
     worktree: string | null;
     changed: number;
   } | null>(null);
@@ -537,9 +558,7 @@ function useLeafBranch(
             return;
           }
           const name = r.isDetached ? `${r.branch}(游离)` : r.branch;
-          // worktree 放在主工程的 .worktree/<名字> 下
-          const worktree =
-            /\/\.worktree\/([^/]+)$/.exec(r.repoRoot)?.[1] ?? null;
+          const { project, worktree } = repoLabel(r.repoRoot);
           // 读不到改动数就当 0,不该连分支一起不显示
           const changed = await native
             .gitStatus(r.repoRoot)
@@ -548,10 +567,11 @@ function useLeafBranch(
           if (!alive) return;
           setBranch((cur) =>
             cur?.name === name &&
+            cur.project === project &&
             cur.worktree === worktree &&
             cur.changed === changed
               ? cur
-              : { name, worktree, changed },
+              : { name, project, worktree, changed },
           );
         })
         .catch(() => {});
@@ -580,16 +600,21 @@ export function LeafAgentComposer({
   const agent = useLeafChatAgent(leafId, getCwd(leafId));
   const api = CHAT_APIS[agent];
   const session = useChatSession(agent, leafId);
-  const branch = useLeafBranch(leafId, getCwd, mode === "chat");
+  const connected =
+    session?.status === "ready" || session?.status === "starting";
+  const branch = useLeafBranch(leafId, getCwd, mode === "chat" && connected);
   // 按钮上要显示模型名:会话还没报当前模型时,先把模型列表拉回来,
   // 拿默认那项的名字顶上(不然只能写个"Claude")
   const needModels =
-    mode === "chat" && !!session && session.models.length === 0;
+    mode === "chat" && connected && session.models.length === 0;
   // biome-ignore lint/correctness/useExhaustiveDependencies: api 跟着 agent 变,agent 已在依赖里
   useEffect(() => {
     if (needModels) api.requestModels(leafId);
   }, [needModels, leafId, agent, session?.status]);
   if (mode !== "chat") return null;
+  if (!connected || !session) {
+    return compact ? resumeChatControl(leafId, getCwd, agent) : null;
+  }
 
   const cwd = () => getCwd(leafId);
   return (
@@ -600,16 +625,6 @@ export function LeafAgentComposer({
         quote={quote}
         injection={injection}
         onSend={(text, attachments) => {
-          const dir = cwd();
-          // 会话结束了再发:接着同一个会话聊,不是新开
-          if (
-            dir &&
-            (!session ||
-              session.status === "closed" ||
-              session.status === "error")
-          ) {
-            api.ensure(leafId, dir);
-          }
           api.send(leafId, text, attachments);
         }}
         onStop={() => api.interrupt(leafId)}

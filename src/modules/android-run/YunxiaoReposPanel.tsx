@@ -774,9 +774,7 @@ export function YunxiaoReposPanel() {
         token={token}
         onClose={() => setCreateParent(null)}
         onCreated={() => {
-          if (!createParent) return;
-          setExpanded((cur) => new Set(cur).add(createParent.relPath));
-          loadLevel(createParent);
+          setVersion((v) => v + 1);
         }}
       />
     </div>

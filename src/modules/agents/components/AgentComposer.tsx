@@ -119,9 +119,11 @@ type Props = {
   compact?: boolean;
   /** 当前上下文大小和占比(底栏"用量"前面显示)。 */
   context?: ContextUsage | null;
-  /** 输入框上方显示的当前分支;在 worktree 里再带上 worktree 名。 */
+  /** 输入框上方显示的工程名和当前分支;在 worktree 里再带上 worktree 名。 */
   branch?: {
     name: string;
+    /** 工程文件夹名(worktree 里是主工程的)。 */
+    project: string;
     worktree: string | null;
     changed: number;
   } | null;
@@ -717,6 +719,14 @@ export function AgentComposer({
               strokeWidth={1.75}
               className="shrink-0"
             />
+            {branch.project && (
+              <>
+                <span className="shrink-0 text-foreground/80">
+                  {branch.project}
+                </span>
+                <span className="shrink-0 text-muted-foreground/50">·</span>
+              </>
+            )}
             {branch.worktree && (
               <>
                 <span className="shrink-0 text-foreground/80">
@@ -849,95 +859,110 @@ export function AgentComposer({
         <label htmlFor={inputId} className="sr-only">
           给 {agentName} 发消息
         </label>
-        <textarea
-          id={inputId}
-          ref={inputRef}
-          rows={1}
-          value={text}
-          onChange={(e) => {
-            const clean = cleanComposerInput(
-              e.target.value,
-              e.target.selectionStart,
-              e.target.selectionEnd,
-            );
-            if (clean.text !== e.target.value) {
-              e.target.value = clean.text;
-              e.target.setSelectionRange(clean.start, clean.end);
-            }
-            setText(clean.text);
-            setCaret(clean.start);
-            setCmdIndex(0);
-          }}
-          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-          onPaste={(e) => {
-            // 剪贴板里有图(截图)就存成临时文件当附件;同时有文字的(从网页
-            // 复制的图文)文字照常粘进去
-            const images = Array.from(e.clipboardData.items)
-              .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
-              .map((i) => i.getAsFile())
-              .filter((f): f is File => f !== null);
-            if (images.length === 0) return;
-            if (!e.clipboardData.types.includes("text/plain")) {
-              e.preventDefault();
-            }
-            void attachPastedImages(images);
-          }}
-          {...imeProps}
-          onKeyDown={(e) => {
-            // 输入法选词、把拼音直接上屏时的回车是给输入法的,不是发送
-            if (isImeKey(e)) return;
-            if (cmdOpen && matches.length > 0) {
-              const n = matches.length;
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                setCmdIndex(
-                  (activeCmd + (e.key === "ArrowDown" ? 1 : n - 1)) % n,
-                );
-                return;
-              }
-              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-                e.preventDefault();
-                pickCommand(matches[activeCmd]);
-                return;
-              }
-            }
-            if (cmdOpen && e.key === "Escape") {
-              e.preventDefault();
-              setDismissed(text);
-              return;
-            }
-            if (
-              !e.metaKey &&
-              !e.ctrlKey &&
-              !e.altKey &&
-              arrowAtInputBoundary(
-                e.key,
-                e.currentTarget.value.length,
-                e.currentTarget.selectionStart,
-                e.currentTarget.selectionEnd,
-              )
-            ) {
-              e.preventDefault();
-              return;
-            }
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder="随心输入"
-          spellCheck={false}
-          title="回车发送,Shift+回车换行"
-          role="combobox"
-          aria-expanded={cmdOpen}
-          aria-autocomplete="list"
+        {/* 提示字避开光标且不接收点击;节点常驻,清空输入时只切换可见性。 */}
+        <div
           className={cn(
-            "resize-none bg-transparent text-[14px] leading-[21px] outline-none placeholder:text-[#666666]",
-            compact
-              ? "order-2 min-h-[28px] min-w-0 flex-1 py-1"
-              : "min-h-[42px]",
+            "relative flex",
+            compact ? "order-2 min-w-0 flex-1" : "flex-col",
           )}
-        />
+        >
+          <textarea
+            id={inputId}
+            ref={inputRef}
+            rows={1}
+            value={text}
+            onChange={(e) => {
+              const clean = cleanComposerInput(
+                e.target.value,
+                e.target.selectionStart,
+                e.target.selectionEnd,
+              );
+              if (clean.text !== e.target.value) {
+                e.target.value = clean.text;
+                e.target.setSelectionRange(clean.start, clean.end);
+              }
+              setText(clean.text);
+              setCaret(clean.start);
+              setCmdIndex(0);
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+            onPaste={(e) => {
+              // 剪贴板里有图(截图)就存成临时文件当附件;同时有文字的(从网页
+              // 复制的图文)文字照常粘进去
+              const images = Array.from(e.clipboardData.items)
+                .filter((i) => i.kind === "file" && i.type.startsWith("image/"))
+                .map((i) => i.getAsFile())
+                .filter((f): f is File => f !== null);
+              if (images.length === 0) return;
+              if (!e.clipboardData.types.includes("text/plain")) {
+                e.preventDefault();
+              }
+              void attachPastedImages(images);
+            }}
+            {...imeProps}
+            onKeyDown={(e) => {
+              // 输入法选词、把拼音直接上屏时的回车是给输入法的,不是发送
+              if (isImeKey(e)) return;
+              if (cmdOpen && matches.length > 0) {
+                const n = matches.length;
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setCmdIndex(
+                    (activeCmd + (e.key === "ArrowDown" ? 1 : n - 1)) % n,
+                  );
+                  return;
+                }
+                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                  e.preventDefault();
+                  pickCommand(matches[activeCmd]);
+                  return;
+                }
+              }
+              if (cmdOpen && e.key === "Escape") {
+                e.preventDefault();
+                setDismissed(text);
+                return;
+              }
+              if (
+                !e.metaKey &&
+                !e.ctrlKey &&
+                !e.altKey &&
+                arrowAtInputBoundary(
+                  e.key,
+                  e.currentTarget.value.length,
+                  e.currentTarget.selectionStart,
+                  e.currentTarget.selectionEnd,
+                )
+              ) {
+                e.preventDefault();
+                return;
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            spellCheck={false}
+            title="回车发送,Shift+回车换行"
+            role="combobox"
+            aria-expanded={cmdOpen}
+            aria-autocomplete="list"
+            className={cn(
+              "resize-none bg-transparent text-[14px] leading-[21px] outline-none",
+              compact ? "min-h-[28px] min-w-0 flex-1 py-1" : "min-h-[42px]",
+            )}
+          />
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute left-[3px] select-none text-[14px] leading-[21px] text-[#666666]",
+              compact ? "top-1" : "top-0",
+              text && "invisible",
+            )}
+          >
+            随心输入
+          </span>
+        </div>
         {/* 右边的菜单(模型、更多、用量)以这一行为准贴右边弹出,和发送键对齐
             (照 Codex);权限菜单仍跟着自己的按钮 */}
         <div

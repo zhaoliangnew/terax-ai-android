@@ -234,6 +234,7 @@ export async function createRepository(
   token: string,
   fullPath: string,
   visibility: CodeupVisibility = "private",
+  info?: { name: string; description: string },
 ): Promise<void> {
   const segs = fullPath.split("/").filter(Boolean);
   const name = segs[segs.length - 1] ?? fullPath;
@@ -241,7 +242,12 @@ export async function createRepository(
     "POST",
     `/oapi/v1/codeup/organizations/${orgId}/repositories?createParentPath=true`,
     token,
-    { name, path: fullPath, visibility },
+    {
+      name: info?.name ?? name,
+      path: fullPath,
+      visibility,
+      ...(info ? { description: info.description } : {}),
+    },
   );
 }
 

@@ -1,5 +1,3 @@
-import { Notebook01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { JournalDialog } from "./JournalDialog";
 import { RAIL_TRIGGER } from "./lib/menuStyles";
@@ -18,7 +16,7 @@ export function JournalButton() {
           className={RAIL_TRIGGER}
           aria-label="记一下"
         >
-          <HugeiconsIcon icon={Notebook01Icon} size={18} strokeWidth={1.6} />
+          <span aria-hidden="true">随记</span>
         </button>
       }
     />

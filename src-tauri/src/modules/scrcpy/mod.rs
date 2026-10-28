@@ -55,7 +55,10 @@ struct Session {
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum VideoEvent {
     /// New encoding session — width/height of the frames that follow.
-    Size { width: u16, height: u16 },
+    Size {
+        width: u16,
+        height: u16,
+    },
     /// Codec config (SPS/PPS) or a media packet. `payload` carried as the
     /// Channel's binary body; this JSON rides alongside via a small header.
     Meta {
@@ -291,8 +294,7 @@ pub async fn scrcpy_start(
             .output();
         format!("connect video socket: {e}")
     })?;
-    let control =
-        connect_plain(local_port).map_err(|e| format!("connect control socket: {e}"))?;
+    let control = connect_plain(local_port).map_err(|e| format!("connect control socket: {e}"))?;
     control.set_nodelay(true).ok();
 
     // Tunnel no longer needed once both sockets are up.
@@ -521,7 +523,7 @@ pub fn scrcpy_touch(
     let mut msg = [0u8; 32];
     msg[0] = 0x02; // INJECT_TOUCH_EVENT
     msg[1] = action; // 0 down, 1 up, 2 move
-    // pointer_id = -2 (generic finger)
+                     // pointer_id = -2 (generic finger)
     msg[2..10].copy_from_slice(&0xFFFF_FFFF_FFFF_FFFEu64.to_be_bytes());
     msg[10..14].copy_from_slice(&x.to_be_bytes());
     msg[14..18].copy_from_slice(&y.to_be_bytes());
@@ -543,7 +545,11 @@ pub fn scrcpy_touch(
 }
 
 #[tauri::command]
-pub fn scrcpy_key(state: tauri::State<'_, ScrcpyState>, id: u32, keycode: i32) -> Result<(), String> {
+pub fn scrcpy_key(
+    state: tauri::State<'_, ScrcpyState>,
+    id: u32,
+    keycode: i32,
+) -> Result<(), String> {
     let sessions = state.sessions.read().unwrap();
     let session = sessions.get(&id).ok_or("session not found")?;
     for action in [0u8, 1u8] {

@@ -77,10 +77,13 @@ fn qoder_binary() -> Option<PathBuf> {
         return Some(p);
     }
     let home = dirs::home_dir()?;
-    [".local/bin/qoderclicn", ".qoder-cn/bin/qoderclicn/qoderclicn"]
-        .iter()
-        .map(|rel| home.join(rel))
-        .find(|p| p.is_file())
+    [
+        ".local/bin/qoderclicn",
+        ".qoder-cn/bin/qoderclicn/qoderclicn",
+    ]
+    .iter()
+    .map(|rel| home.join(rel))
+    .find(|p| p.is_file())
 }
 
 /// The chat view's permission modes (Claude's names) as the CLI flag wants them.
@@ -161,7 +164,9 @@ fn translate(
     match v.get("type").and_then(Value::as_str) {
         Some("control_request") => {
             let (Some(id), Some(req)) = (
-                v.get("request_id").and_then(Value::as_str).map(String::from),
+                v.get("request_id")
+                    .and_then(Value::as_str)
+                    .map(String::from),
                 v.get("request"),
             ) else {
                 return vec![];
@@ -271,7 +276,9 @@ pub async fn qoder_chat_start(
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|e| format!("qoder chat: spawn failed: {e}"))?;
-        let stdin = Arc::new(Mutex::new(child.stdin.take().ok_or("qoder chat: no stdin")?));
+        let stdin = Arc::new(Mutex::new(
+            child.stdin.take().ok_or("qoder chat: no stdin")?,
+        ));
         let stdout = child.stdout.take().ok_or("qoder chat: no stdout")?;
         let stderr = child.stderr.take().ok_or("qoder chat: no stderr")?;
 
@@ -387,7 +394,11 @@ pub fn qoder_chat_send(
             let files: Vec<String> = op
                 .get("attachments")
                 .and_then(Value::as_array)
-                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
                 .unwrap_or_default();
             let text = str_of("text");
             if text.trim().is_empty() && files.is_empty() {
@@ -437,7 +448,9 @@ pub fn qoder_chat_send(
         "models" => {
             let list = s.models.lock().unwrap().clone();
             if let Some(list) = list {
-                let _ = s.events.send(json!({"type": "models", "models": list}).to_string());
+                let _ = s
+                    .events
+                    .send(json!({"type": "models", "models": list}).to_string());
             }
             Ok(())
         }
@@ -465,7 +478,10 @@ mod tests {
 
     #[test]
     fn maps_permission_modes_to_cli_flags() {
-        assert_eq!(cli_permission_mode("bypassPermissions"), "bypass_permissions");
+        assert_eq!(
+            cli_permission_mode("bypassPermissions"),
+            "bypass_permissions"
+        );
         assert_eq!(cli_permission_mode("acceptEdits"), "accept_edits");
         assert_eq!(cli_permission_mode("default"), "default");
         assert_eq!(cli_permission_mode("plan"), "default");

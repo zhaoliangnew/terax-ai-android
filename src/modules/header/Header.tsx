@@ -27,6 +27,7 @@ type Props = {
   workspaceElementRef: RefObject<HTMLDivElement | null>;
   rightPanelElementRef: RefObject<HTMLDivElement | null>;
   rightPanelExpanded: boolean;
+  floatingRightPanel?: boolean;
   onToggleRightPanelExpanded: () => void;
   spaceSwitcher: ReactNode;
   androidToolbar?: ReactNode;
@@ -44,6 +45,7 @@ export function Header({
   workspaceElementRef,
   rightPanelElementRef,
   rightPanelExpanded,
+  floatingRightPanel = false,
   onToggleRightPanelExpanded,
   spaceSwitcher,
   androidToolbar,
@@ -66,7 +68,9 @@ export function Header({
       const rightWidth = Math.min(
         Math.max(
           USE_CUSTOM_WINDOW_CONTROLS ? 256 : 104,
-          (panel?.getBoundingClientRect().width ?? 0) - (IS_MAC ? 8 : 0),
+          floatingRightPanel
+            ? 104
+            : (panel?.getBoundingClientRect().width ?? 0) - (IS_MAC ? 8 : 0),
         ),
         headerRect.width - minLeft,
       );
@@ -88,7 +92,7 @@ export function Header({
     if (workspace) ro.observe(workspace);
     update();
     return () => ro.disconnect();
-  }, [rightPanelElementRef, workspaceElementRef]);
+  }, [rightPanelElementRef, workspaceElementRef, floatingRightPanel]);
 
   return (
     <div
@@ -155,7 +159,11 @@ export function Header({
       >
         <div
           ref={tabBarRef}
-          className="h-full min-w-0 flex-1 overflow-hidden"
+          className={
+            floatingRightPanel
+              ? "hidden"
+              : "h-full min-w-0 flex-1 overflow-hidden"
+          }
         />
         <SearchInline
           ref={searchRef}

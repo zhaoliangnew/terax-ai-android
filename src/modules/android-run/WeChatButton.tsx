@@ -1,7 +1,5 @@
 import { IS_MAC } from "@/lib/platform";
 import { native } from "@/modules/ai/lib/native";
-import { BubbleChatIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { toast } from "sonner";
 import { findApp, openApp } from "./lib/apps";
 import { RAIL_TRIGGER } from "./lib/menuStyles";
@@ -37,7 +35,7 @@ export function WeChatButton() {
       className={RAIL_TRIGGER}
       aria-label="微信"
     >
-      <HugeiconsIcon icon={BubbleChatIcon} size={18} strokeWidth={1.6} />
+      <span aria-hidden="true">微信</span>
     </button>
   );
 }

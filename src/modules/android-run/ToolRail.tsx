@@ -4,8 +4,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Settings01Icon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import type { ReactNode } from "react";
 import { ApifoxMenu } from "./ApifoxMenu";
 import { CustomLinksMenu } from "./CustomLinksMenu";
@@ -17,11 +15,7 @@ import { WeChatButton } from "./WeChatButton";
 import { YunxiaoProjectsButton } from "./YunxiaoProjectsButton";
 import { YunxiaoReposButton } from "./YunxiaoReposButton";
 
-/**
- * 窗口最左边的工具竖条(照 Codex 的样子):以前摆在底栏的那排工具入口,
- * 只放图标,点开还是原来的下拉/浮层,改成往右弹。钉钉和微信挨着,都是聊天。
- */
-/** 竖条上只有图标,悬停立刻在右边显示中文名,不然认不出哪个是哪个。 */
+/** 短文字标识保留窄栏宽度,悬停显示完整工具名称。 */
 function RailTip({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Tooltip delayDuration={0}>
@@ -81,9 +75,9 @@ export function ToolRail({ onOpenSettings }: { onOpenSettings: () => void }) {
           size="icon-sm"
           aria-label="设置"
           onClick={onOpenSettings}
-          className="shrink-0 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="size-9 shrink-0 rounded-md text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <HugeiconsIcon icon={Settings01Icon} size={18} strokeWidth={1.75} />
+          <span aria-hidden="true">设置</span>
         </Button>
       </RailTip>
     </nav>

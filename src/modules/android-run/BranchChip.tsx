@@ -2119,6 +2119,7 @@ export function BranchChip({
                     }}
                     className={cn(
                       "flex cursor-pointer items-center gap-2 border-b border-border/40 px-1 py-1.5 transition-colors hover:bg-foreground/[0.06]",
+                      isPanel && "flex-wrap",
                       workingOpen && "sticky top-0 z-10 bg-popover",
                     )}
                   >
@@ -2127,7 +2128,12 @@ export function BranchChip({
                       现在
                     </span>
                     {/* 和聊天输入框上方那个"N 个文件未提交"同一个橘色 */}
-                    <span className="min-w-0 flex-1 break-words text-[12px] leading-snug font-medium text-amber-500/80">
+                    <span
+                      className={cn(
+                        "min-w-0 break-words text-[12px] leading-snug font-medium text-amber-500/80",
+                        isPanel ? "order-2 basis-full" : "flex-1",
+                      )}
+                    >
                       <span className="tabular-nums">
                         {workingFiles?.length}
                       </span>{" "}
@@ -2173,6 +2179,7 @@ export function BranchChip({
                           }}
                           className={cn(
                             "flex cursor-pointer items-center gap-2 border-b border-border/40 px-1 py-1.5 transition-colors last:border-b-0 hover:bg-foreground/[0.06]",
+                            isPanel && "flex-wrap",
                             // 选中的那条钉在列表顶上:列表一滚,下面
                             // 那片 diff 到底是哪个提交的就看不见了
                             !workingOpen &&
@@ -2191,7 +2198,8 @@ export function BranchChip({
                                 抢注意力 */}
                           <span
                             className={cn(
-                              "min-w-0 flex-1 break-words text-[12px] leading-snug",
+                              "min-w-0 break-words text-[12px] leading-snug",
+                              isPanel ? "order-2 basis-full" : "flex-1",
                               !workingOpen &&
                                 openCommit?.sha === c.sha &&
                                 "text-emerald-500/75",
@@ -2213,7 +2221,12 @@ export function BranchChip({
                           <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground">
                             {c.shortSha}
                           </span>
-                          <span className="shrink-0 text-[10.5px] text-muted-foreground">
+                          <span
+                            className={cn(
+                              "text-[10.5px] text-muted-foreground",
+                              isPanel ? "max-w-32 truncate" : "shrink-0",
+                            )}
+                          >
                             {c.author}
                           </span>
                         </div>

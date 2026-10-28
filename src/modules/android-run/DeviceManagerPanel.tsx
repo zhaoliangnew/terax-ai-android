@@ -1,15 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
-import {
-  Cancel01Icon,
-  Refresh01Icon,
-} from "@hugeicons/core-free-icons";
+import { Cancel01Icon, Refresh01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { EmulatorSection } from "./EmulatorSection";
+import { useEmulatorStore } from "./emulatorStore";
 import { connectDevice, disconnectDevice } from "./lib/adb";
+import { emulatorSearchText, isEmulatorSerial } from "./lib/emulator";
 import { ipSuffix } from "./lib/highlightSerial";
 import { useActiveProductConfig, useAndroidRunStore } from "./store";
 
@@ -100,6 +100,12 @@ export function DeviceManagerPanel() {
   const [connectInput, setConnectInput] = useState("192.168.");
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [compact, setCompact] = useState(
+    () => localStorage.getItem("terax.android.compactDevices") !== "0",
+  );
+  useEffect(() => {
+    localStorage.setItem("terax.android.compactDevices", compact ? "1" : "0");
+  }, [compact]);
 
   useEffect(() => {
     if (open) void refreshDevices();
@@ -130,20 +136,24 @@ export function DeviceManagerPanel() {
 
   // 只按 IP 数值排(.9 排在 .71 前面),不做"在线优先"分组 —— 分组会让
   // 卡片随着设备上下线来回挪,固定的 IP 顺序才是肌肉记忆能记住的。
-  const list = Object.values(knownDevices).sort((a, b) => {
-    const ipA = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(a.serial);
-    const ipB = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(b.serial);
-    if (ipA && ipB) {
-      for (let i = 1; i <= 4; i++) {
-        const diff = Number(ipA[i]) - Number(ipB[i]);
-        if (diff !== 0) return diff;
+  // 模拟器在上面的"模拟器"一栏管,这里只列真机;模拟器每次启动 SN 还会变,
+  // 留在这里只会堆出一排点不动的离线卡片。
+  const list = Object.values(knownDevices)
+    .filter((d) => !isEmulatorSerial(d.serial))
+    .sort((a, b) => {
+      const ipA = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(a.serial);
+      const ipB = /^(\d+)\.(\d+)\.(\d+)\.(\d+)/.exec(b.serial);
+      if (ipA && ipB) {
+        for (let i = 1; i <= 4; i++) {
+          const diff = Number(ipA[i]) - Number(ipB[i]);
+          if (diff !== 0) return diff;
+        }
+        return 0;
       }
-      return 0;
-    }
-    if (ipA) return -1;
-    if (ipB) return 1;
-    return a.serial.localeCompare(b.serial);
-  });
+      if (ipA) return -1;
+      if (ipB) return 1;
+      return a.serial.localeCompare(b.serial);
+    });
   // 筛选:搜索框(备注/型号/IP/SN 任意一段)或点关键词标签(出入库、餐台…)。
   // 关键词自己加减;没加过时先用备注里常见的开头(出现两次以上的)垫着
   const [query, setQuery] = useState("");
@@ -175,6 +185,22 @@ export function DeviceManagerPanel() {
       .toLowerCase()
       .includes(q);
   });
+
+  // 模拟器跟真机走同一套筛选:关键词、搜索框、只看在线(只留运行中的)
+  const emuOverview = useEmulatorStore((s) => s.overview);
+  const avds = emuOverview?.avds ?? [];
+  const emuRunning = (name: string) =>
+    emuOverview?.running.find((r) => r.avd === name && r.booted) ?? null;
+  const emuMatches = (a: (typeof avds)[number], word: string) =>
+    emulatorSearchText(a, emuRunning(a.name)?.serial).includes(
+      word.toLowerCase(),
+    );
+  const shownAvds = avds.filter((a) => {
+    if (hideOffline && !emuRunning(a.name)) return false;
+    if (tag && !emuMatches(a, tag)) return false;
+    return !q || emuMatches(a, q);
+  });
+  const filtering = !!(tag || q || hideOffline);
 
   const onPick = async (sn: string, serial: string) => {
     const live = liveDevices.find((d) => d.sn === sn && d.state === "device");
@@ -243,19 +269,6 @@ export function DeviceManagerPanel() {
     }
   };
 
-  // 窗口高度只长不缩:筛选/只看在线时卡片变少,窗口不跟着变矮(不跳);
-  // 关掉再打开才重新按内容量
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const [minH, setMinH] = useState(0);
-  useLayoutEffect(() => {
-    if (!open) {
-      setMinH(0);
-      return;
-    }
-    const h = dialogRef.current?.offsetHeight ?? 0;
-    if (h > minH) setMinH(h);
-  });
-
   if (!open) return null;
 
   return createPortal(
@@ -266,13 +279,7 @@ export function DeviceManagerPanel() {
         className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
         onClick={() => setOpen(false)}
       />
-      {/* 窗口正中的大弹框:比右栏里那块宽得多(卡片能排三列左右),又不至于
-          铺满整个窗口。卡片按宽度自动排列 */}
-      <div
-        ref={dialogRef}
-        style={{ minHeight: minH || undefined }}
-        className="fixed top-1/2 left-1/2 z-50 flex max-h-[min(680px,80vh)] w-[min(1000px,86vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-white/10"
-      >
+      <div className="fixed top-1/2 left-1/2 z-50 flex h-[min(900px,88vh)] w-[min(1440px,94vw)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-white/10">
         <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2.5">
           {/* 标题后面直接连新设备:输 IP 回车就连 */}
           {/* biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper only, real controls are inside */}
@@ -309,7 +316,21 @@ export function DeviceManagerPanel() {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              variant={compact ? "secondary" : "outline"}
+              size="sm"
+              aria-pressed={compact}
+              title={
+                compact
+                  ? "切换到详细模式,显示型号、系统和 SN"
+                  : "切换到简洁模式,主要显示备注和 IP 后两段"
+              }
+              className="h-7 px-2 text-[12px]"
+              onClick={() => setCompact((value) => !value)}
+            >
+              {compact ? "简洁模式" : "详细模式"}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -349,8 +370,9 @@ export function DeviceManagerPanel() {
                 {t ?? "全部"}
                 <span className="ml-1 text-muted-foreground/70">
                   {t === null
-                    ? list.length
-                    : list.filter((d) => matches(d, t)).length}
+                    ? list.length + avds.length
+                    : list.filter((d) => matches(d, t)).length +
+                      avds.filter((a) => emuMatches(a, t)).length}
                 </span>
                 {/* 删除只在选中的那个上出现,放在标签里面:悬停扫过不会误点 */}
                 {t !== null && tag === t && (
@@ -381,8 +403,8 @@ export function DeviceManagerPanel() {
             </span>
           ))}
           {addingKeyword ? (
-            // biome-ignore lint/a11y/noAutofocus: opened by an explicit click
             <input
+              // biome-ignore lint/a11y/noAutofocus: opened by an explicit click
               autoFocus
               value={keywordInput}
               onChange={(e) => setKeywordInput(e.target.value)}
@@ -442,8 +464,16 @@ export function DeviceManagerPanel() {
           </span>
         </div>
         <div className="min-h-0 flex-1 overflow-auto px-4 py-3">
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(19rem,1fr))] gap-2.5">
-            {shown.length === 0 && (
+          <EmulatorSection avds={shownAvds} filtering={filtering} />
+          <div
+            className={cn(
+              "grid gap-2.5",
+              compact
+                ? "grid-cols-[repeat(auto-fill,minmax(min(100%,14rem),1fr))]"
+                : "grid-cols-[repeat(auto-fill,minmax(min(100%,19rem),1fr))]",
+            )}
+          >
+            {shown.length === 0 && !(filtering && shownAvds.length) && (
               <div className="col-span-full px-3 py-6 text-center text-sm text-muted-foreground">
                 {list.length === 0
                   ? "还没有连接过的设备"
@@ -478,8 +508,14 @@ export function DeviceManagerPanel() {
                     </div>
                   )}
                   <div
+                    title={
+                      compact
+                        ? `${deviceNotes[d.sn] || d.model}\n${d.serial}\n${d.vendor ?? ""} ${d.model} · Android ${d.androidVersion}\nSN ${d.sn}`
+                        : undefined
+                    }
                     className={cn(
-                      "group relative flex min-w-0 flex-col gap-1.5 rounded-xl border p-3.5 pb-7 hover:bg-accent/30",
+                      "group relative flex min-w-0 flex-col gap-1.5 rounded-xl border hover:bg-accent/30",
+                      compact ? "p-2.5 pb-6" : "p-3.5 pb-7",
                       isSelected
                         ? "border-emerald-500 ring-1 ring-emerald-500/50 hover:border-emerald-500"
                         : "border-border hover:border-ring/60",
@@ -540,7 +576,14 @@ export function DeviceManagerPanel() {
                     >
                       {/* 标题是备注(自己起的名字最好认),没备注才用型号;
                         点标题旁的铅笔改备注 */}
-                      <span className="flex w-full min-w-0 items-center gap-2 pr-10">
+                      <span
+                        className={cn(
+                          "flex w-full min-w-0 gap-2",
+                          compact
+                            ? "flex-wrap items-start"
+                            : "items-center pr-10",
+                        )}
+                      >
                         {/* IP 后两位:同一网段几十台设备,靠它和备注认设备;
                           底色兼当在线状态(绿=在线) */}
                         {ipSuffix(d.serial) ? (
@@ -565,8 +608,8 @@ export function DeviceManagerPanel() {
                           />
                         )}
                         {editingNote === d.sn ? (
-                          // biome-ignore lint/a11y/noAutofocus: opened by an explicit click to edit
                           <input
+                            // biome-ignore lint/a11y/noAutofocus: opened by an explicit click to edit
                             autoFocus
                             value={noteInput}
                             onChange={(e) => setNoteInput(e.target.value)}
@@ -585,13 +628,19 @@ export function DeviceManagerPanel() {
                               setEditingNote(null);
                             }}
                             placeholder="给这台设备起个名字"
-                            className="h-7 min-w-0 flex-1 rounded border border-input bg-transparent px-2 text-[14px] font-medium outline-none focus:border-ring"
+                            className={cn(
+                              "h-7 min-w-0 rounded border border-input bg-transparent px-2 text-[14px] font-medium outline-none focus:border-ring",
+                              compact ? "order-2 w-full flex-none" : "flex-1",
+                            )}
                           />
                         ) : (
                           <>
                             <span
                               className={cn(
-                                "min-w-0 truncate text-[15px] font-semibold",
+                                "min-w-0 font-semibold",
+                                compact
+                                  ? "order-2 basis-full whitespace-normal text-[13px] leading-5 [overflow-wrap:anywhere]"
+                                  : "truncate text-[15px]",
                                 isOnline
                                   ? "text-foreground"
                                   : "text-foreground/75",
@@ -610,8 +659,10 @@ export function DeviceManagerPanel() {
                               }}
                               className={cn(
                                 "shrink-0 rounded px-1 text-[12px] text-muted-foreground hover:bg-foreground/10 hover:text-foreground",
-                                deviceNotes[d.sn] &&
-                                  "opacity-0 group-hover:opacity-100",
+                                compact
+                                  ? "absolute bottom-1 left-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+                                  : deviceNotes[d.sn] &&
+                                      "opacity-0 group-hover:opacity-100",
                               )}
                             >
                               {deviceNotes[d.sn] ? "✎" : "+ 备注"}
@@ -622,7 +673,12 @@ export function DeviceManagerPanel() {
                       {/* 第二行:型号(有备注时;没备注它就是标题)· 系统版本。IP 后两位
                         已经在标题前面了,常见的 192.168.x.x:5555 不再重复,
                         别的网段/端口才补上 */}
-                      <span className="w-full min-w-0 truncate text-[13px] text-muted-foreground">
+                      <span
+                        className={cn(
+                          "w-full min-w-0 truncate text-[13px] text-muted-foreground",
+                          compact && "hidden",
+                        )}
+                      >
                         {extraAddress(d.serial) && (
                           <span className="text-foreground/85">
                             {extraAddress(d.serial)} ·{" "}
@@ -633,7 +689,12 @@ export function DeviceManagerPanel() {
                         Android {d.androidVersion}
                         {connectingSn === d.sn && " · 连接中…"}
                       </span>
-                      <span className="flex w-full min-w-0 items-center gap-3 text-[12px] text-muted-foreground/80">
+                      <span
+                        className={cn(
+                          "flex w-full min-w-0 items-center gap-3 text-[12px] text-muted-foreground/80",
+                          compact && "hidden",
+                        )}
+                      >
                         <button
                           type="button"
                           title={`点击复制 · ${d.sn}`}
@@ -666,6 +727,11 @@ export function DeviceManagerPanel() {
                           </button>
                         )}
                       </span>
+                      {compact && connectingSn === d.sn && (
+                        <span className="text-[11px] text-muted-foreground">
+                          连接中…
+                        </span>
+                      )}
                       {failedSn === d.sn && (
                         <span className="text-[12px] text-yellow-500">
                           连不上这个 IP,设备地址可能变了 ——
@@ -679,7 +745,6 @@ export function DeviceManagerPanel() {
             })}
           </div>
         </div>
-        {/* 窗口按内容高度来,不留一大块空白;adb 路径很少改,收成底下一行 */}
         <div className="flex shrink-0 items-center gap-2.5 border-t border-border px-4 py-2">
           <span className="shrink-0 text-[11.5px] text-muted-foreground">
             adb 路径

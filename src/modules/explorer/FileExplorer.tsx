@@ -79,6 +79,7 @@ import {
   setPinnedDir,
   togglePinnedDir,
 } from "./lib/pinnedDirs";
+import { measureTreeText, treeContentWidth } from "./lib/treeWidth";
 import { useExplorerDnd } from "./lib/useExplorerDnd";
 import { useExplorerFileDrop } from "./lib/useExplorerFileDrop";
 import { useFileTree } from "./lib/useFileTree";
@@ -595,11 +596,23 @@ export const FileExplorer = memo(
       projectGitByPath,
     ]);
 
+    // 过滤时算"开着"的:开着终端的工程,加上自己没开、但挂着开着终端的
+    // worktree 的工程 —— 不留它,底下那个 worktree 子行就没地方挂了
+    const openedForFilter = useMemo(() => {
+      if (!onlyOpened || !canFilterOpened) return null;
+      const out = new Set(openedProjectPaths ?? []);
+      for (const [proj, info] of Object.entries(projectGitByPath ?? {})) {
+        if (info?.worktrees?.some((wt) => openedProjectPaths?.has(wt.path)))
+          out.add(proj);
+      }
+      return out;
+    }, [onlyOpened, canFilterOpened, openedProjectPaths, projectGitByPath]);
+
     const openedKeep = useMemo(() => {
-      if (!onlyOpened || !canFilterOpened || !rootPath) return null;
+      if (!openedForFilter || !rootPath) return null;
       const root = rootPath.replace(/\/+$/, "");
       const keep = new Set<string>();
-      for (const p of openedProjectPaths ?? []) {
+      for (const p of openedForFilter) {
         if (p !== root && !p.startsWith(`${root}/`)) continue;
         keep.add(p);
         let d = parentDir(p);
@@ -609,7 +622,7 @@ export const FileExplorer = memo(
         }
       }
       return keep;
-    }, [onlyOpened, canFilterOpened, openedProjectPaths, rootPath]);
+    }, [openedForFilter, rootPath]);
 
     const keepPaths = openedKeep;
 
@@ -631,12 +644,12 @@ export const FileExplorer = memo(
         return;
       }
       for (const p of openedKeep) {
-        if (openedProjectPaths?.has(p) || autoExpandedRef.current.has(p))
+        if (openedForFilter?.has(p) || autoExpandedRef.current.has(p))
           continue;
         autoExpandedRef.current.add(p);
         if (!tree.expanded.has(p)) tree.toggle(p);
       }
-    }, [openedKeep, openedProjectPaths, tree.expanded, tree.toggle]);
+    }, [openedKeep, openedForFilter, tree.expanded, tree.toggle]);
 
     const { rows, entryIndexByPath } = useMemo(() => {
       if (!rootPath)
@@ -649,7 +662,15 @@ export const FileExplorer = memo(
         tree,
         lookupGitStatus,
         keepPaths,
-        projectGitByPath ? (dir) => projectGitByPath[dir]?.worktrees : null,
+        projectGitByPath
+          ? // 过滤时只留开着终端的 worktree,没开的子行全藏起来
+            (dir) => {
+              const wts = projectGitByPath[dir]?.worktrees;
+              return keepPaths
+                ? wts?.filter((wt) => openedProjectPaths?.has(wt.path))
+                : wts;
+            }
+          : null,
         pinnedPaths,
         tree.expanded,
         keepPaths ? (openedProjectPaths ?? null) : null,
@@ -832,6 +853,20 @@ export const FileExplorer = memo(
         setSelectedPath(null);
       }
     }, [entryIndexByPath, selectedPath]);
+
+    // 名字比侧栏长时整棵树横向滚动,不截断
+    const contentWidth = useMemo(
+      () =>
+        treeContentWidth(
+          rows.map((r) => ({
+            depth: r.depth,
+            name:
+              r.kind === "entry" || r.kind === "rename" ? r.name : undefined,
+          })),
+          measureTreeText,
+        ),
+      [rows],
+    );
 
     const virtualizer = useVirtualizer({
       count: rows.length,
@@ -1122,6 +1157,10 @@ export const FileExplorer = memo(
                 row.isDir
                   ? (projectGitByPath?.[row.path]?.branch ?? null)
                   : null
+              }
+              worktreesListed={
+                row.isDir &&
+                (projectGitByPath?.[row.path]?.worktrees?.length ?? 0) > 0
               }
             />
           );
@@ -1477,7 +1516,7 @@ export const FileExplorer = memo(
                   ref={scrollRef}
                   data-explorer-drop=""
                   className={cn(
-                    "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]",
+                    "min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-auto [scrollbar-gutter:stable]",
                     rootIsDropTarget &&
                       "rounded-sm ring-1 ring-inset ring-primary/50",
                   )}
@@ -1625,7 +1664,7 @@ export const FileExplorer = memo(
                       style={{
                         height: virtualizer.getTotalSize(),
                         position: "relative",
-                        width: "100%",
+                        width: `max(100%, ${contentWidth}px)`,
                       }}
                     >
                       {virtualizer.getVirtualItems().map((virtualRow) => {

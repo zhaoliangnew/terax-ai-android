@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getWorkitem } from "./codeupApi";
+import { createRepository, getWorkitem } from "./codeupApi";
 
 const nativeMock = vi.hoisted(() => ({ runCommand: vi.fn() }));
 vi.mock("@/modules/ai/lib/native", () => ({ native: nativeMock }));
@@ -39,7 +39,9 @@ const RAW = {
 };
 
 describe("getWorkitem", () => {
-  beforeEach(() => nativeMock.runCommand.mockReset());
+  beforeEach(() => {
+    nativeMock.runCommand.mockReset();
+  });
 
   it("fetches one workitem by serial number and keeps the body fields", async () => {
     reply(RAW);
@@ -104,6 +106,35 @@ describe("getWorkitem", () => {
     reply({ errorMessage: "工作项不存在" }, 404);
     await expect(getWorkitem("org1", "tok", "YOEZ-1")).rejects.toThrow(
       "云效接口报错(404):工作项不存在",
+    );
+  });
+});
+
+describe("创建产品代码库", () => {
+  beforeEach(() => {
+    nativeMock.runCommand.mockReset();
+  });
+
+  it("提交产品名称和描述,同时保留代码库路径", async () => {
+    reply({});
+    await createRepository(
+      "org1",
+      "tok",
+      "device2.0/nanjinghangkong/app_bind",
+      "private",
+      { name: "绑定屏", description: "南京航空绑定屏产品" },
+    );
+    const command = String(nativeMock.runCommand.mock.calls[0][0]);
+    expect(command).toContain('"name":"绑定屏"');
+    expect(command).toContain('"description":"南京航空绑定屏产品"');
+    expect(command).toContain('"path":"device2.0/nanjinghangkong/app_bind"');
+  });
+
+  it("原有调用继续使用路径末段作为代码库名称", async () => {
+    reply({});
+    await createRepository("org1", "tok", "device2.0/nanjinghangkong/app_bind");
+    expect(String(nativeMock.runCommand.mock.calls[0][0])).toContain(
+      '"name":"app_bind"',
     );
   });
 });

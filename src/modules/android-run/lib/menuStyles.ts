@@ -4,9 +4,9 @@
  * 别让人凑近了瞄准。
  */
 
-/** 左侧工具竖条上的按钮:只放图标,名字在悬停提示里。36px 见方,好点。 */
+/** 左侧工具竖条用双字标识,悬停提示展示完整名称。 */
 export const RAIL_TRIGGER =
-  "flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground";
+  "flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-lg text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground";
 
 /** 工具栏上带文字的触发按钮。 */
 export const MENU_TRIGGER =

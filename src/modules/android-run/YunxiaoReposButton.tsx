@@ -3,8 +3,6 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
-import { FolderGitTwoIcon } from "@hugeicons/core-free-icons";
-import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import { RAIL_TRIGGER } from "./lib/menuStyles";
 import { YunxiaoReposPanel } from "./YunxiaoReposPanel";
@@ -25,7 +23,7 @@ export function YunxiaoReposButton() {
           className={RAIL_TRIGGER}
           aria-label="云效代码库"
         >
-          <HugeiconsIcon icon={FolderGitTwoIcon} size={18} strokeWidth={1.6} />
+          <span aria-hidden="true">代码</span>
         </button>
       </PopoverAnchor>
       <PopoverContent

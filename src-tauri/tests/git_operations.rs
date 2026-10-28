@@ -117,13 +117,13 @@ fn stage_then_commit_produces_log_entry() {
     assert!(entry.staged);
     assert!(!entry.untracked);
 
-    let commit = operations::commit(&fx.registry, &fx.repo_str(), "add a", &fx.workspace)
-        .expect("commit");
+    let commit =
+        operations::commit(&fx.registry, &fx.repo_str(), "add a", &fx.workspace).expect("commit");
     assert_eq!(commit.summary, "add a");
     assert_eq!(commit.commit_sha.len(), 40);
 
-    let entries = operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace)
-        .expect("log");
+    let entries =
+        operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace).expect("log");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].sha, commit.commit_sha);
     assert_eq!(entries[0].subject, "add a");
@@ -203,8 +203,8 @@ fn diff_shows_worktree_change() {
     fx.run_git(&["commit", "-q", "-m", "init"]);
     fx.write_file("a.txt", "alpha\nbeta\n");
 
-    let diff = operations::diff(&fx.registry, &fx.repo_str(), None, false, &fx.workspace)
-        .expect("diff");
+    let diff =
+        operations::diff(&fx.registry, &fx.repo_str(), None, false, &fx.workspace).expect("diff");
     assert!(diff.diff_text.contains("+beta"));
 }
 
@@ -304,9 +304,8 @@ fn panel_snapshot_outside_repo_is_empty() {
     let registry = WorkspaceRegistry::default();
     registry.authorize(&canonical).unwrap();
 
-    let snap =
-        operations::panel_snapshot(&registry, &to_canon(&canonical), &WorkspaceEnv::Local)
-            .expect("panel_snapshot");
+    let snap = operations::panel_snapshot(&registry, &to_canon(&canonical), &WorkspaceEnv::Local)
+        .expect("panel_snapshot");
     assert!(snap.repo.is_none());
     assert!(snap.status.is_none());
 }
@@ -337,12 +336,7 @@ fn show_commit_diff_rejects_invalid_sha() {
         return;
     }
     let fx = GitRepoFixture::new();
-    match operations::show_commit_diff(
-        &fx.registry,
-        &fx.repo_str(),
-        "not-a-sha",
-        &fx.workspace,
-    ) {
+    match operations::show_commit_diff(&fx.registry, &fx.repo_str(), "not-a-sha", &fx.workspace) {
         Err(GitError::CommandFailed { .. }) => {}
         Err(other) => panic!("expected CommandFailed, got {other}"),
         Ok(_) => panic!("expected error for invalid sha"),
@@ -446,9 +440,15 @@ fn commit_file_diff_returns_original_and_modified_text() {
         operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace).unwrap();
     let head = &entries[0].sha;
 
-    let diff =
-        operations::commit_file_diff(&fx.registry, &fx.repo_str(), head, "a.txt", None, &fx.workspace)
-            .unwrap();
+    let diff = operations::commit_file_diff(
+        &fx.registry,
+        &fx.repo_str(),
+        head,
+        "a.txt",
+        None,
+        &fx.workspace,
+    )
+    .unwrap();
     assert_eq!(diff.original_content, "v1\n");
     assert_eq!(diff.modified_content, "v2\n");
     assert!(!diff.is_binary);
@@ -460,8 +460,8 @@ fn remote_url_returns_none_for_missing_remote() {
         return;
     }
     let fx = GitRepoFixture::new();
-    let url = operations::remote_url(&fx.registry, &fx.repo_str(), "origin", &fx.workspace)
-        .unwrap();
+    let url =
+        operations::remote_url(&fx.registry, &fx.repo_str(), "origin", &fx.workspace).unwrap();
     assert!(url.is_none());
 }
 
@@ -471,15 +471,10 @@ fn remote_url_returns_configured_url() {
         return;
     }
     let fx = GitRepoFixture::new();
-    fx.run_git(&[
-        "remote",
-        "add",
-        "origin",
-        "https://example.com/x.git",
-    ]);
+    fx.run_git(&["remote", "add", "origin", "https://example.com/x.git"]);
 
-    let url = operations::remote_url(&fx.registry, &fx.repo_str(), "origin", &fx.workspace)
-        .unwrap();
+    let url =
+        operations::remote_url(&fx.registry, &fx.repo_str(), "origin", &fx.workspace).unwrap();
     assert_eq!(url.as_deref(), Some("https://example.com/x.git"));
 }
 
@@ -521,14 +516,18 @@ fn checkout_branch_rejects_unsafe_names() {
         return;
     }
     let fx = GitRepoFixture::new();
-    
-    let err_empty = operations::checkout_branch(&fx.registry, &fx.repo_str(), "", &fx.workspace).unwrap_err();
+
+    let err_empty =
+        operations::checkout_branch(&fx.registry, &fx.repo_str(), "", &fx.workspace).unwrap_err();
     assert!(matches!(err_empty, GitError::InvalidPath(p) if p.is_empty()));
 
-    let err_dash = operations::checkout_branch(&fx.registry, &fx.repo_str(), "-f", &fx.workspace).unwrap_err();
+    let err_dash =
+        operations::checkout_branch(&fx.registry, &fx.repo_str(), "-f", &fx.workspace).unwrap_err();
     assert!(matches!(err_dash, GitError::InvalidPath(p) if p == "-f"));
 
-    let err_dash_long = operations::checkout_branch(&fx.registry, &fx.repo_str(), "--detach", &fx.workspace).unwrap_err();
+    let err_dash_long =
+        operations::checkout_branch(&fx.registry, &fx.repo_str(), "--detach", &fx.workspace)
+            .unwrap_err();
     assert!(matches!(err_dash_long, GitError::InvalidPath(p) if p == "--detach"));
 }
 
@@ -545,7 +544,13 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
 
     let wt = TempDir::new().unwrap();
     let wt_path = wt.path().join("linked");
-    fx.run_git(&["worktree", "add", "-q", wt_path.to_str().unwrap(), "feature"]);
+    fx.run_git(&[
+        "worktree",
+        "add",
+        "-q",
+        wt_path.to_str().unwrap(),
+        "feature",
+    ]);
 
     let result = operations::list_branches(&fx.registry, &fx.repo_str(), &fx.workspace)
         .expect("list_branches");
@@ -560,7 +565,11 @@ fn list_branches_keeps_current_branch_local_and_surfaces_worktrees() {
     assert!(main.is_head);
     assert!(main.worktree_path.is_none());
 
-    let feature: Vec<_> = result.branches.iter().filter(|b| b.name == "feature").collect();
+    let feature: Vec<_> = result
+        .branches
+        .iter()
+        .filter(|b| b.name == "feature")
+        .collect();
     assert_eq!(feature.len(), 1);
     assert_eq!(feature[0].kind, "worktree");
     assert!(!feature[0].is_head);
@@ -593,8 +602,8 @@ fn list_tags_returns_annotated_and_lightweight_pointing_at_commits() {
     assert!(!light.is_annotated);
 
     // 两个标签指向的都是提交对象,而且是不同的提交
-    let log = operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace)
-        .expect("log");
+    let log =
+        operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace).expect("log");
     let shas: Vec<&str> = log.iter().map(|c| c.sha.as_str()).collect();
     assert!(shas.contains(&annotated.sha.as_str()));
     assert!(shas.contains(&light.sha.as_str()));
@@ -616,8 +625,8 @@ fn log_reports_tags_pointing_at_each_commit() {
     fx.run_git(&["add", "."]);
     fx.run_git(&["commit", "-q", "-m", "untagged"]);
 
-    let log = operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace)
-        .expect("log");
+    let log =
+        operations::log(&fx.registry, &fx.repo_str(), 10, None, None, &fx.workspace).expect("log");
     let untagged = log.iter().find(|c| c.subject == "untagged").expect("head");
     assert!(untagged.tags.is_empty());
 
@@ -626,5 +635,8 @@ fn log_reports_tags_pointing_at_each_commit() {
     tags.sort();
     assert_eq!(tags, vec!["shipped".to_string(), "v1.0.0".to_string()]);
     // 分支名不能混进标签里
-    assert!(!tagged.tags.iter().any(|t| t == "main" || t.contains("HEAD")));
+    assert!(!tagged
+        .tags
+        .iter()
+        .any(|t| t == "main" || t.contains("HEAD")));
 }
