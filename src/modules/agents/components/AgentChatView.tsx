@@ -7,22 +7,20 @@ import { Shimmer } from "@/components/ai-elements/shimmer";
 import { isExternalUrl, openExternalUrl } from "@/lib/external-link";
 import { IS_WINDOWS } from "@/lib/platform";
 import { cn } from "@/lib/utils";
-import { native } from "@/modules/ai/lib/native";
 import type { CompactionProgress } from "@/modules/agents/lib/compaction";
 import { asksConfirm } from "@/modules/agents/lib/confirmationPrompt";
-import { getLspNavigator } from "@/modules/lsp/lib/navigator";
 import {
+  type SourceReference,
   sourceMatches,
   sourceReference,
-  type SourceReference,
 } from "@/modules/agents/lib/sourceReference";
-import { currentWorkspaceEnv } from "@/modules/workspace";
-import { invoke } from "@tauri-apps/api/core";
-import { toast } from "sonner";
+import { native } from "@/modules/ai/lib/native";
 import { shellQuote } from "@/modules/android-run/lib/openExternally";
 import { localHtmlPath } from "@/modules/browser/lib/url";
 import { openInBrowser } from "@/modules/browser/webTabsStore";
 import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
+import { getLspNavigator } from "@/modules/lsp/lib/navigator";
+import { currentWorkspaceEnv } from "@/modules/workspace";
 import {
   ArrowDown02Icon,
   ArrowRight01Icon,
@@ -31,6 +29,7 @@ import {
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { invoke } from "@tauri-apps/api/core";
 import {
   createContext,
   type ReactNode,
@@ -41,6 +40,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
+import { useChatFontScale } from "../lib/chatFontScale";
 import {
   type ChatItem,
   chatTurns,
@@ -79,6 +80,8 @@ type Props = {
   onReply?: (text: string) => void;
   /** 会话没连上时给的"恢复会话":一行小字链接,挂在提示语下面。 */
   onResume?: () => void;
+  /** 没连上时挂在"恢复会话"下面的东西(是哪个工程的那条卡片)。 */
+  resumeExtra?: ReactNode;
 };
 
 function ResumeLink({ onClick }: { onClick: () => void }) {
@@ -88,7 +91,7 @@ function ResumeLink({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       className="mt-2 cursor-pointer text-[12px] text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
     >
-      恢复会话
+      恢复会话(或双击任意处)
     </button>
   );
 }
@@ -556,7 +559,7 @@ function TaskDock({
   if (tasks.length === 0) return null;
   return (
     <div className="shrink-0 border-t border-border/60 bg-background">
-      <div className="mx-auto flex max-h-36 max-w-3xl flex-col overflow-y-auto px-4 py-1.5">
+      <div className="mx-auto flex max-h-36 max-w-none flex-col overflow-y-auto px-12 py-1.5">
         {tasks.map((t) => (
           <DockRow key={t.id} item={t} onJump={onJump} />
         ))}
@@ -1024,7 +1027,9 @@ export function AgentChatView({
   onQuote,
   onReply,
   onResume,
+  resumeExtra,
 }: Props) {
+  const fontScale = useChatFontScale((s) => s.scale);
   const scrollRef = useRef<HTMLDivElement>(null);
   const turns = useMemo(() => chatTurns(items), [items]);
   // 照 Codex:一轮做完后,中间过程(边做边说的话、工具调用)收进"用时"那
@@ -1226,6 +1231,12 @@ export function AgentChatView({
           {/* biome-ignore lint/a11y/noStaticElementInteractions: 鼠标只用来读选区、收起工具条,消息本身不可交互 */}
           <div
             ref={scrollRef}
+            // 没连上时双击聊天区任意空白处就恢复会话(双击字是选词,不算)
+            onDoubleClick={() => {
+              if (!onResume) return;
+              if (window.getSelection()?.toString().trim()) return;
+              onResume();
+            }}
             onWheel={(e) => {
               if (e.deltaY < 0) stickRef.current = false;
             }}
@@ -1284,18 +1295,45 @@ export function AgentChatView({
             {/* 全局默认不让选字(桌面应用的习惯),聊天内容要能选中复制 */}
             <div
               ref={contentRef}
-              className="select-text mx-auto flex max-w-3xl cursor-text flex-col px-6 pt-8 pb-12"
+              className="select-text mx-auto flex max-w-none cursor-text flex-col px-12 pt-8 pb-12"
+              // 顶部 A−/A+ 调的聊天字号:整块按比例缩放(各处字号写死在类名里)
+              style={{ zoom: fontScale }}
             >
-              {items.length === 0 && !working && !statusText && (
-                <div className="pt-24 text-center text-[13px] text-muted-foreground">
-                  给 {agentName} 发条消息开始吧
-                  {onResume && (
-                    <div>
-                      <ResumeLink onClick={onResume} />
+              {items.length === 0 &&
+                !working &&
+                !statusText &&
+                (onResume && resumeExtra ? (
+                  // 没连上:中间一张大卡片写清是哪个工程,下面一个明显的恢复按钮
+                  <div className="flex flex-col items-center gap-5 pt-[22vh] text-center">
+                    {resumeExtra}
+                    <div className="flex flex-col items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={onResume}
+                        className="cursor-pointer rounded-xl border border-border bg-foreground/[0.06] px-5 py-2 text-[14px] text-foreground transition-colors hover:bg-foreground/[0.12]"
+                      >
+                        恢复 {agentName} 会话
+                      </button>
+                      <span className="text-[12px] text-muted-foreground/70">
+                        或双击任意处
+                      </span>
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                ) : (
+                  <div
+                    className={cn(
+                      "text-center text-[13px] text-muted-foreground",
+                      onResume ? "pt-[30vh]" : "pt-24",
+                    )}
+                  >
+                    给 {agentName} 发条消息开始吧
+                    {onResume && (
+                      <div>
+                        <ResumeLink onClick={onResume} />
+                      </div>
+                    )}
+                  </div>
+                ))}
               {items.map((item, i) => {
                 const owner = foldedInto.get(item.id);
                 if (owner && !openTurns.has(owner)) return null;

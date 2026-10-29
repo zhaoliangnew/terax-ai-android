@@ -5,16 +5,16 @@ import {
 } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
 import { native } from "@/modules/ai/lib/native";
-import { useEffect } from "react";
+import { copyToClipboard } from "@/modules/explorer/lib/contextActions";
 import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
+import { useEffect } from "react";
+import { toast } from "sonner";
 import { AndroidRunToolbar } from "./AndroidRunToolbar";
 import { DeviceManagerPanel } from "./DeviceManagerPanel";
 import { DeviceMirror } from "./DeviceMirror";
-import { isEmulatorSerial } from "./lib/emulator";
 import LogcatPanel from "./LogcatDock";
-import { killAllLogcatSessions, useLogcatStore } from "./logcatStore";
-import { ScaleSimulator } from "./ScaleSimulator";
+import { isEmulatorSerial } from "./lib/emulator";
 import { highlightSerial } from "./lib/highlightSerial";
 import { useMirrorAnnotate } from "./lib/mirrorAnnotate";
 import {
@@ -22,6 +22,8 @@ import {
   resolveMirrorQuality,
   useMirrorQuality,
 } from "./lib/mirrorQuality";
+import { killAllLogcatSessions, useLogcatStore } from "./logcatStore";
+import { ScaleSimulator } from "./ScaleSimulator";
 import {
   useActiveProductConfig,
   useAndroidRunStore,
@@ -86,6 +88,33 @@ export default function DevicePanel() {
                 {device.vendor ? `${device.vendor} ` : ""}
                 {device.model} · {highlightSerial(device.serial)}
               </span>
+            )}
+            {/* SN、key 在这儿也放一份,点一下就复制,不用再打开设备列表 */}
+            {device?.sn && (
+              <button
+                type="button"
+                title={`点击复制 SN · ${device.sn}`}
+                onClick={() => {
+                  void copyToClipboard(device.sn);
+                  toast.success("已复制 SN", { description: device.sn });
+                }}
+                className="shrink-0 rounded px-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+              >
+                SN {device.sn}
+              </button>
+            )}
+            {device?.key && (
+              <button
+                type="button"
+                title={`点击复制 key · ${device.key}`}
+                onClick={() => {
+                  void copyToClipboard(device.key);
+                  toast.success("已复制 key", { description: device.key });
+                }}
+                className="shrink-0 rounded px-1 text-[12.5px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+              >
+                key {device.key}
+              </button>
             )}
             {online && mirroring && selectedSerial && (
               <button

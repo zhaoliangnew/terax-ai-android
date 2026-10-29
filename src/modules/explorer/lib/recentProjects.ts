@@ -3,6 +3,8 @@
  * "最近"里开着的终端排先后(开着的一多,真正在来回切的就那几个排最上)。
  */
 const KEY = "terax.explorer.recentProjects";
+/** path -> 最后一次切过去的时间(毫秒),给"最近"菜单显示"5 分钟前"。 */
+const TIMES_KEY = "terax.explorer.recentProjectTimes";
 
 /** 只用来给开着的终端排先后,多记一些也不会多显示。 */
 export const RECENT_MAX = 50;
@@ -29,12 +31,67 @@ function save(list: string[]) {
   }
 }
 
+export function loadRecentTimes(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(TIMES_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+    return map && typeof map === "object" && !Array.isArray(map) ? map : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTime(key: string, list: string[]) {
+  const times = loadRecentTimes();
+  times[key] = Date.now();
+  // 只留还在列表里的,不让它越攒越多
+  const kept: Record<string, number> = {};
+  for (const p of list) if (times[p]) kept[p] = times[p];
+  try {
+    localStorage.setItem(TIMES_KEY, JSON.stringify(kept));
+  } catch {
+    // 存不下就只影响时间显示
+  }
+}
+
+/** "最近"只列这么久以内切过去的。 */
+export const RECENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** 一键清空:切换顺序和时间都清掉(不关终端),之后切过去的才重新出现。 */
+export function clearRecentProjects() {
+  try {
+    localStorage.removeItem(KEY);
+    localStorage.removeItem(TIMES_KEY);
+  } catch {
+    // 删不掉就算了
+  }
+}
+
+/** 单个从"最近"里去掉(只删记录,不关终端),返回新列表。 */
+export function forgetRecentProject(list: string[], path: string): string[] {
+  const key = normalize(path);
+  const next = list.filter((p) => p !== key);
+  save(next);
+  const times = loadRecentTimes();
+  delete times[key];
+  try {
+    localStorage.setItem(TIMES_KEY, JSON.stringify(times));
+  } catch {
+    // 存不下就算了
+  }
+  return next;
+}
+
 /** 挪到最前面(没有就加),返回新列表;已经在最前面时原样返回。 */
 export function touchRecentProject(list: string[], path: string): string[] {
   const key = normalize(path);
-  if (list[0] === key) return list;
+  if (list[0] === key) {
+    saveTime(key, list);
+    return list;
+  }
   const next = [key, ...list.filter((p) => p !== key)].slice(0, RECENT_MAX);
   save(next);
+  saveTime(key, next);
   return next;
 }
 

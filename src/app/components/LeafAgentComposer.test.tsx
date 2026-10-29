@@ -31,6 +31,7 @@ vi.mock("react", async (original) => ({
     typeof value === "function" ? value() : value,
     vi.fn(),
   ],
+  useRef: (value: unknown) => ({ current: value }),
 }));
 vi.mock("@/modules/agents/store/agentViewStore", () => ({
   useAgentViewStore: Object.assign(
@@ -73,6 +74,9 @@ vi.mock("@/modules/terminal/lib/useTerminalSession", () => ({
   writeToSession: vi.fn(),
 }));
 vi.mock("@/tauri-apps/api/core", () => ({ invoke }));
+vi.mock("@/modules/explorer/lib/recentSwitch", () => ({
+  focusChatInputSoon: vi.fn(),
+}));
 
 import {
   LeafAgentChat,

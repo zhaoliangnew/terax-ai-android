@@ -72,6 +72,7 @@ import {
   type FileExplorerHandle,
   type ProjectFilesState,
 } from "@/modules/explorer";
+import { useProjectPanes } from "@/modules/explorer/lib/recentSwitch";
 import type { GitHistorySearchHandle } from "@/modules/git-history";
 import {
   Header,
@@ -572,7 +573,11 @@ export default function App() {
   useEffect(() => {
     if (!androidProjectRoot) return;
     if (androidProjectRoot === lastRevealedRef.current) return;
+    const first = lastRevealedRef.current === null;
     lastRevealedRef.current = androidProjectRoot;
+    // 启动时恢复上次的 tab 也会走到这里:那一次不展开,不然每次一启动,
+    // 树就被撑开到上回那个工程所在的目录
+    if (first) return;
     // worktree 目录不能直接 reveal:它藏在工程目录里面,展开祖先会把
     // 工程内部(.git/.worktree/…)整个翻出来。树里它有自己的合成子行,
     // 定位到所属的主工程行就够了。
@@ -956,6 +961,7 @@ export default function App() {
       const roots = new Set<string>();
       const ptyIdsByRoot: Record<string, number[]> = {};
       const tabIdsByRoot: Record<string, number[]> = {};
+      const leafIdsByRoot: Record<string, number[]> = {};
       for (const t of terminalTabs) {
         const cwd = findLeafCwd(t.paneTree, t.activeLeafId) ?? t.cwd ?? null;
         if (!cwd) continue;
@@ -978,11 +984,16 @@ export default function App() {
         }
         (ptyIdsByRoot[root] ??= []).push(...ptyIds);
         (tabIdsByRoot[root] ??= []).push(t.id);
+        (leafIdsByRoot[root] ??= []).push(...leafIds(t.paneTree));
       }
       if (!cancelled) {
         setOpenedProjectPaths(roots);
         setProjectPtyIds(ptyIdsByRoot);
         setProjectTabIds(tabIdsByRoot);
+        useProjectPanes.setState({
+          ptyIds: ptyIdsByRoot,
+          leafIds: leafIdsByRoot,
+        });
       }
     })();
     return () => {

@@ -479,6 +479,93 @@ html *::-webkit-scrollbar {
   animation: terax-panel-in var(--dur-slow) var(--ease-premium);
 }
 
+/* 输入框打字效果:新打的字在显示层里动一下(真正的输入框文字是透明的) */
+/* 打字机:新字像被字锤砸下去 —— 从上方半个字高落下,压过头一点再弹回;
+   不加颜色,和平时的字一个颜色。用 position:relative 的 top 动(行内元素也能动,不占位、
+   不改换行),打快了也不会和光标错开 */
+@keyframes terax-type-strike {
+  0% {
+    top: -0.55em;
+    opacity: 0;
+  }
+  55% {
+    top: 0.08em;
+    opacity: 1;
+  }
+  100% {
+    top: 0;
+  }
+}
+.terax-type-typewriter {
+  position: relative;
+  animation: terax-type-strike 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+/* 模糊:新字从糊到清 */
+@keyframes terax-type-blur {
+  from {
+    filter: blur(5px);
+    opacity: 0.2;
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+.terax-type-blur {
+  animation: terax-type-blur 320ms ease-out;
+}
+/* 霓虹:新字一圈强光晕再慢慢暗下去 */
+@keyframes terax-type-neon {
+  from {
+    color: #f0abfc;
+    text-shadow:
+      0 0 4px #e879f9,
+      0 0 12px #c026d3,
+      0 0 22px #a21caf;
+  }
+  to {
+    color: inherit;
+    text-shadow: none;
+  }
+}
+.terax-type-neon {
+  animation: terax-type-neon 700ms ease-out;
+}
+/* 彩虹:每个新字闪一种颜色(色相由显示层按位置给)再变回来 */
+@keyframes terax-type-rainbow {
+  from {
+    color: hsl(var(--terax-hue, 200) 90% 65%);
+    text-shadow: 0 0 6px hsl(var(--terax-hue, 200) 90% 55%);
+  }
+  to {
+    color: inherit;
+    text-shadow: none;
+  }
+}
+.terax-type-rainbow {
+  animation: terax-type-rainbow 600ms ease-out;
+}
+@keyframes terax-type-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.terax-type-fade {
+  animation: terax-type-fade 400ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .terax-type-typewriter,
+  .terax-type-blur,
+  .terax-type-neon,
+  .terax-type-rainbow,
+  .terax-type-fade {
+    animation: none;
+  }
+}
+
 @keyframes terax-tab-in {
   from {
     opacity: 0;

@@ -81,13 +81,19 @@ import {
   setPinnedDir,
   togglePinnedDir,
 } from "./lib/pinnedDirs";
+import { useTiledFolders } from "./lib/productOrder";
 import {
+  clearRecentProjects,
+  forgetRecentProject,
   groupRecentProjects,
   loadRecentProjects,
+  loadRecentTimes,
+  RECENT_WINDOW_MS,
   recentProjectInfo,
   touchRecentProject,
 } from "./lib/recentProjects";
 import {
+  focusChatInputSoon,
   type RecentSwitchGroup,
   useRecentSwitchStore,
 } from "./lib/recentSwitch";
@@ -103,11 +109,10 @@ import {
   removeWorkDir,
   WORK_DIRS_CHANGED_EVENT,
 } from "./lib/workDirs";
+import { type FlyoutAnchor, ProjectFlyout } from "./ProjectFlyout";
 import {
   EntryRow,
   PendingRow,
-  RecentFolderRow,
-  RecentRow,
   type RowActions,
   StatusRow,
   WorktreeRow,
@@ -410,19 +415,6 @@ export const FileExplorer = memo(
     );
     const [selectedPath, setSelectedPath] = useState<string | null>(null);
     const [pinnedGroupOpen, setPinnedGroupOpen] = useState(true);
-    const [recentGroupOpen, setRecentGroupOpen] = useState(true);
-    // "最近"里收起来的目录(只在这次会话里记)
-    const [recentCollapsed, setRecentCollapsed] = useState<Set<string>>(
-      () => new Set(),
-    );
-    const toggleRecentFolder = useCallback((path: string) => {
-      setRecentCollapsed((prev) => {
-        const next = new Set(prev);
-        if (!next.delete(path)) next.add(path);
-        return next;
-      });
-    }, []);
-    const recentGroupId = useId();
     // 最近切过的工程,按时间排在最上面(只有左栏导航树记)
     const [recentPaths, setRecentPaths] = useState<string[]>(() =>
       onSetAsRoot ? loadRecentProjects() : [],
@@ -433,14 +425,19 @@ export const FileExplorer = memo(
     }, [onSetAsRoot, activeProjectPath]);
     // "最近"只列开着终端的(和树过滤一个口径),按最近切过去的时间排;
     // 没切过的(比如重启恢复的)排在后面
+    // 只列一周内切过去的(重启恢复、还没切过的不算);当前这个总在
     const recentOpened = useMemo(() => {
       if (!onSetAsRoot) return [] as string[];
       const rank = (p: string) => {
         const i = recentPaths.indexOf(p);
         return i < 0 ? Number.MAX_SAFE_INTEGER : i;
       };
-      return [...(openedProjectPaths ?? [])].sort((a, b) => rank(a) - rank(b));
-    }, [onSetAsRoot, openedProjectPaths, recentPaths]);
+      const times = loadRecentTimes();
+      const since = Date.now() - RECENT_WINDOW_MS;
+      return [...(openedProjectPaths ?? [])]
+        .filter((p) => p === activeProjectPath || (times[p] ?? 0) >= since)
+        .sort((a, b) => rank(a) - rank(b));
+    }, [onSetAsRoot, openedProjectPaths, recentPaths, activeProjectPath]);
     const [projectsGroupOpen, setProjectsGroupOpen] = useState(true);
     const pinnedGroupId = useId();
     const projectsGroupId = useId();
@@ -580,35 +577,46 @@ export const FileExplorer = memo(
     );
 
     // "最近"的三层分组(目录 → 产品 → worktree),左栏和输入框底栏的悬停菜单共用
-    const recentGroups = useMemo<RecentSwitchGroup[]>(
-      () =>
-        groupRecentProjects(recentOpened).map(({ folder, products }) => ({
-          folder,
-          rows: products.flatMap((group) =>
-            [group.root, ...group.worktrees].map((p) => {
-              const info = recentProjectInfo(p);
-              // 开着终端的直接有分支;worktree 自己没开时到主工程的
-              // worktree 列表里查
-              const branch =
-                projectGitByPath?.[p]?.branch ??
-                (info.mainRoot
-                  ? projectGitByPath?.[info.mainRoot]?.worktrees?.find(
-                      (wt) => wt.path.replace(/[\\/]+$/, "") === p,
-                    )?.branch
-                  : null) ??
-                null;
-              return {
-                path: p,
-                name: info.name,
-                branch,
-                isWorktree: info.isWorktree,
-                depth: p === group.root ? 1 : 2,
-              } as const;
-            }),
-          ),
-        })),
-      [recentOpened, projectGitByPath],
-    );
+    const buildRecentGroups = (list: string[]): RecentSwitchGroup[] => {
+      // recentOpened 跟着 recentPaths 变,每次切换都会重读一遍时间
+      const times = loadRecentTimes();
+      return groupRecentProjects(list).map(({ folder, products }) => ({
+        folder,
+        rows: products.flatMap((group) =>
+          [group.root, ...group.worktrees].map((p) => {
+            const info = recentProjectInfo(p);
+            // 开着终端的直接有分支;worktree 自己没开时到主工程的
+            // worktree 列表里查
+            const branch =
+              projectGitByPath?.[p]?.branch ??
+              (info.mainRoot
+                ? projectGitByPath?.[info.mainRoot]?.worktrees?.find(
+                    (wt) => wt.path.replace(/[\\/]+$/, "") === p,
+                  )?.branch
+                : null) ??
+              null;
+            return {
+              path: p,
+              name: info.name,
+              branch,
+              isWorktree: info.isWorktree,
+              depth: p === group.root ? 1 : 2,
+              usedAt: times[p] ?? null,
+              opened: !!openedProjectPaths?.has(p),
+            } as const;
+          }),
+        ),
+      }));
+    };
+    // 底栏"最近"菜单倒着排、最下面离按钮最近:那一格放"上一个"(最常要切回去的),
+    // 当前这个往上挪一格到倒数第二
+    // biome-ignore lint/correctness/useExhaustiveDependencies: 同上
+    const menuRecentGroups = useMemo(() => {
+      const list = [...recentOpened];
+      if (list.length > 1 && list[0] === activeProjectPath)
+        [list[0], list[1]] = [list[1], list[0]];
+      return buildRecentGroups(list);
+    }, [recentOpened, projectGitByPath, openedProjectPaths, activeProjectPath]);
 
     // 置顶区的行:复用 buildRows + renderRow,图标/工程样式/分支/状态灯
     // 全部和树里一致。展开状态也和树共用(tree.expanded),两边同步。
@@ -1236,25 +1244,101 @@ export const FileExplorer = memo(
     useEffect(() => {
       if (!onSetAsRoot) return;
       useRecentSwitchStore.setState({
-        groups: recentGroups,
+        groups: menuRecentGroups,
+        order: recentOpened,
         active: activeProjectPath ?? null,
         open: (p) => openFromRecentRef.current(p),
+        clear: () => {
+          clearRecentProjects();
+          setRecentPaths([]);
+        },
+        remove: (p) => setRecentPaths((list) => forgetRecentProject(list, p)),
       });
-    }, [onSetAsRoot, recentGroups, activeProjectPath]);
+    }, [onSetAsRoot, menuRecentGroups, recentOpened, activeProjectPath]);
     useEffect(() => {
       if (!onSetAsRoot) return;
       return () =>
         useRecentSwitchStore.setState({
           groups: [],
+          order: [],
           active: null,
           open: () => {},
+          clear: () => {},
+          remove: () => {},
         });
     }, [onSetAsRoot]);
+
+    // 目录的悬停弹层:鼠标停在目录行上,右边弹出它的产品(第二列)和
+    // 分支(第三列),不用展开树一层层找。进出弹层和目录行都延时一下再
+    // 开/收,鼠标斜着挪过去的路上不会闪
+    const [flyout, setFlyout] = useState<FlyoutAnchor | null>(null);
+    const tiledFolders = useTiledFolders((s) => s.folders);
+    const toggleTiled = useTiledFolders((s) => s.toggle);
+    const flyoutTimer = useRef<number | null>(null);
+    const clearFlyoutTimer = () => {
+      if (flyoutTimer.current !== null)
+        window.clearTimeout(flyoutTimer.current);
+      flyoutTimer.current = null;
+    };
+    const hideFlyoutSoon = () => {
+      clearFlyoutTimer();
+      flyoutTimer.current = window.setTimeout(() => setFlyout(null), 220);
+    };
+    const showFlyoutFor = (folder: string, rowEl: HTMLElement) => {
+      clearFlyoutTimer();
+      flyoutTimer.current = window.setTimeout(() => {
+        const side = containerRef.current?.getBoundingClientRect();
+        const row = rowEl.getBoundingClientRect();
+        // 紧跟在目录名文字后面弹出:贴左栏右边缘的话,左栏一宽、名字一短,
+        // 中间空出一大截,看着不像是这个目录的。量不到就退回左栏右边缘
+        const sideRight = side?.right ?? row.right;
+        const nameRect = rowEl
+          .querySelector("[data-tree-name]")
+          ?.getBoundingClientRect();
+        const textRight =
+          nameRect && nameRect.width > 0 ? nameRect.right : sideRight;
+        setFlyout({
+          folder,
+          left: Math.min(textRight + 12, sideRight - 4),
+          top: row.top - 6,
+        });
+      }, 160);
+    };
+    useEffect(() => clearFlyoutTimer, []);
+    const isFlyoutFolder = (row: Row) =>
+      !!onSetAsRoot &&
+      !!classifyProjectDir &&
+      row.kind === "entry" &&
+      row.isDir &&
+      !projectDirs.has(row.path) &&
+      !row.path.includes("/.worktree");
+    const flyoutFolderPath = (row: Row) =>
+      row.kind === "entry" ? row.path : "";
 
     const renderRow = (
       row: Row,
       actions: RowActions = rowActions,
       fromPinned = false,
+    ) => {
+      const el = renderRowInner(row, actions, fromPinned);
+      if (!isFlyoutFolder(row)) return el;
+      return (
+        // biome-ignore lint/a11y/noStaticElementInteractions: 悬停只是预览,点击仍由行本身处理
+        <div
+          onMouseEnter={(e) =>
+            showFlyoutFor(flyoutFolderPath(row), e.currentTarget)
+          }
+          onMouseLeave={hideFlyoutSoon}
+        >
+          {el}
+        </div>
+      );
+    };
+
+    const renderRowInner = (
+      row: Row,
+      actions: RowActions,
+      fromPinned: boolean,
     ) => {
       const openProject = fromPinned ? openProjectFromPinned : onOpenProject;
       switch (row.kind) {
@@ -1417,6 +1501,24 @@ export const FileExplorer = memo(
         tabIndex={0}
         onKeyDown={handleKeyDown}
       >
+        {classifyProjectDir && (
+          <ProjectFlyout
+            anchor={flyout}
+            classify={classifyProjectDir}
+            active={activeProjectPath ?? null}
+            opened={openedProjectPaths}
+            onOpen={(path) => {
+              clearFlyoutTimer();
+              setFlyout(null);
+              openProjectFromPinned(path);
+              // 切过去接着打字,不用再点一下输入框
+              focusChatInputSoon();
+            }}
+            onHoverChange={(inside) =>
+              inside ? clearFlyoutTimer() : hideFlyoutSoon()
+            }
+          />
+        )}
         {/* overflow-hidden 是保险丝:万一算宽度算漏了,按钮宁可被裁掉,
             也不能溢出到隔壁栏上面 —— 那样看得见却点不着。 */}
         <div
@@ -1489,62 +1591,6 @@ export const FileExplorer = memo(
             }
           />
         </div>
-
-        {/* 最近:来回切的就那几个,按最近切换的时间平铺,不分目录层级 */}
-        {onSetAsRoot && recentOpened.length > 0 && (
-          <div className="shrink-0 pb-2">
-            <button
-              type="button"
-              aria-expanded={recentGroupOpen}
-              aria-controls={recentGroupId}
-              onClick={() => setRecentGroupOpen((open) => !open)}
-              onKeyDown={(e) => e.stopPropagation()}
-              className="flex h-8 w-full shrink-0 cursor-pointer items-center gap-1.5 px-3 text-left text-[13px] font-normal text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
-            >
-              最近
-              <HugeiconsIcon
-                icon={ArrowRight01Icon}
-                size={12}
-                strokeWidth={1.75}
-                className={cn(
-                  "transition-transform",
-                  recentGroupOpen && "rotate-90",
-                )}
-              />
-            </button>
-            <div id={recentGroupId} hidden={!recentGroupOpen}>
-              {/* 和树一样三层:目录 → 产品 → worktree,每层按最近使用排 */}
-              {recentGroups.map((folderGroup) => (
-                <div key={folderGroup.folder}>
-                  <RecentFolderRow
-                    path={folderGroup.folder}
-                    expanded={!recentCollapsed.has(folderGroup.folder)}
-                    onToggle={toggleRecentFolder}
-                  />
-                  {!recentCollapsed.has(folderGroup.folder) &&
-                    folderGroup.rows.map((r) => (
-                      <RecentRow
-                        key={r.path}
-                        path={r.path}
-                        name={r.name}
-                        // 上面已经有目录行了,不用再写是哪家的
-                        hint=""
-                        branch={r.branch}
-                        isWorktree={r.isWorktree}
-                        depth={r.depth}
-                        projectKind={projectDirs.get(r.path) ?? null}
-                        isActive={r.path === activeProjectPath}
-                        isOpened={!!openedProjectPaths?.has(r.path)}
-                        projectPtyIds={projectPtyIds}
-                        onOpen={openProjectFromPinned}
-                        onClose={onCloseProjectTerminals}
-                      />
-                    ))}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* 置顶区:钉住的目录统一列在树顶上,树里的位置不动。点一下 ——
             是工程就直接开/定位终端,不是工程就在下面的树里展开并滚过去。
@@ -2086,6 +2132,18 @@ export const FileExplorer = memo(
                       设为根目录
                     </ContextMenuItem>
                   )}
+                  {menuTarget.isDir &&
+                    onSetAsRoot &&
+                    !projectDirs.has(menuTarget.path) && (
+                      <ContextMenuItem
+                        className={COMPACT_ITEM}
+                        onSelect={() => toggleTiled(menuTarget.path)}
+                      >
+                        {tiledFolders.includes(menuTarget.path)
+                          ? "✓ 悬停时平铺子目录"
+                          : "悬停时平铺子目录"}
+                      </ContextMenuItem>
+                    )}
                   {menuTarget.isDir && onOpenInSourceControl && (
                     <ContextMenuItem
                       className={COMPACT_ITEM}

@@ -1,3 +1,5 @@
+import { create } from "zustand";
+import { useAgentViewStore } from "./agentViewStore";
 import {
   type ChatSession,
   ensureChat,
@@ -187,4 +189,98 @@ export function useChatSession(
   const codex = useCodexChatStore((s) => s.sessions[leafId]);
   const qoder = useQoderChatStore((s) => s.sessions[leafId]);
   return agent === "codex" ? codex : agent === "qoder" ? qoder : claude;
+}
+
+/**
+ * 聊天会话"这一轮做完了"的标记:AI 从在跑变成停下那一刻记上;一直留着,
+ * 直到在那个窗格里发下一条(AI 又开始跑)、或者手动点"已看"
+ * (clearChatFinished)才去掉 —— 只是切过去瞄一眼就走,提醒不能丢。聊天会话自己只有
+ * working 一个开关,不记一下就分不出"做完了"和"一直闲着"。
+ */
+export const useChatFinished = create<{ leaves: Record<number, true> }>(() => ({
+  leaves: {},
+}));
+
+export function clearChatFinished(leafIds: readonly number[]) {
+  const cur = useChatFinished.getState().leaves;
+  if (!leafIds.some((id) => cur[id])) return;
+  const leaves = { ...cur };
+  for (const id of leafIds) delete leaves[id];
+  useChatFinished.setState({ leaves });
+}
+
+type WorkingSessions = Record<number, { working: boolean }>;
+function watchFinished(store: {
+  subscribe: (
+    fn: (
+      s: { sessions: WorkingSessions },
+      prev: { sessions: WorkingSessions },
+    ) => void,
+  ) => unknown;
+}) {
+  store.subscribe((s, prev) => {
+    if (s.sessions === prev.sessions) return;
+    let leaves = useChatFinished.getState().leaves;
+    let changed = false;
+    for (const key of Object.keys(s.sessions)) {
+      const id = Number(key);
+      const was = prev.sessions[id]?.working ?? false;
+      const now = s.sessions[id]?.working ?? false;
+      if (was && !now && !leaves[id]) {
+        leaves = { ...leaves, [id]: true };
+        changed = true;
+      } else if (now && leaves[id]) {
+        leaves = { ...leaves };
+        delete leaves[id];
+        changed = true;
+      }
+    }
+    if (changed) useChatFinished.setState({ leaves });
+  });
+}
+watchFinished(useClaudeChatStore);
+watchFinished(useCodexChatStore);
+watchFinished(useQoderChatStore);
+
+/**
+ * 一组窗格里聊天会话的状态(三家 AI 都看):有等确认的算"attention",有在跑的
+ * 算"working",这一轮做完还没看过的算"finished",都没有是 null。输入框下面的最近项目用它给各项目亮灯。
+ */
+export type LeavesChatState =
+  | "attention"
+  | "error"
+  | "working"
+  | "finished"
+  | "disconnected";
+
+/** 排前面的更需要人处理,一个工程开着几个窗格时报最要紧的那个。 */
+const STATE_RANK: LeavesChatState[] = [
+  "attention",
+  "error",
+  "working",
+  "finished",
+  "disconnected",
+];
+
+export function useLeavesChatState(
+  leafIds: readonly number[] | undefined,
+): LeavesChatState | null {
+  const modes = useAgentViewStore((s) => s.modes);
+  const claude = useClaudeChatStore((s) => s.sessions);
+  const codex = useCodexChatStore((s) => s.sessions);
+  const qoder = useQoderChatStore((s) => s.sessions);
+  const finished = useChatFinished((s) => s.leaves);
+  const found = new Set<LeavesChatState>();
+  for (const id of leafIds ?? []) {
+    // 一个窗格三家里有会话的那家(同一时间只会开着一家)
+    const s = claude[id] ?? codex[id] ?? qoder[id];
+    const inChat = (modes[id] ?? "terminal") === "chat";
+    if (s?.permissions.length) found.add("attention");
+    else if (s?.status === "error") found.add("error");
+    else if (s?.working) found.add("working");
+    else if (finished[id]) found.add("finished");
+    // 停在聊天视图上却没连上(没有会话 / 已经断开)
+    else if (inChat && (!s || s.status === "closed")) found.add("disconnected");
+  }
+  return STATE_RANK.find((st) => found.has(st)) ?? null;
 }

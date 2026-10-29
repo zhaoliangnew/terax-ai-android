@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build:cli": "node scripts/build-cli.mjs --release",
+    "dmg": "node scripts/build-dmg.mjs",
     "build:cli:dev": "node scripts/build-cli.mjs",
     "build:bridge": "rolldown bridge/claude/bridge.mjs --platform node --format esm --file bridge/claude/dist/bridge.mjs",
     "dev": "vite",

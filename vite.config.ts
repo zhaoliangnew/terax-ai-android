@@ -15,6 +15,8 @@ const analyze = process.env.ANALYZE === "true";
 // 是哪一次构建 —— 比 package.json 里那个从来没人改过的 0.0.1 有用。
 // 取本地时间,不是 UTC:看的人和打包的人在同一个时区。
 function buildStamp(): string {
+  // scripts/build-dmg.mjs 先定好时间传进来,dmg 文件名和界面右下角的版本号对得上
+  if (process.env.TERAX_BUILD_STAMP) return process.env.TERAX_BUILD_STAMP;
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   return `V${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(

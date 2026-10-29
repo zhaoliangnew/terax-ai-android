@@ -1,4 +1,13 @@
+import { SWITCH_ANIMATIONS, useSwitchAnimation } from "@/lib/switchAnimation";
 import { cn } from "@/lib/utils";
+import { RepoHero } from "@/modules/agents/components/RepoBar";
+import {
+  FONT_SCALE_MAX,
+  FONT_SCALE_MIN,
+  TYPING_EFFECTS,
+  useChatFontScale,
+  useTypingEffect,
+} from "@/modules/agents/lib/chatFontScale";
 import { saveAgent, savedAgent } from "@/modules/agents/lib/chatPrefs";
 import {
   cliLeafId,
@@ -26,6 +35,7 @@ import {
   OPEN_REPO_TAB,
   pendingRepoCommit,
 } from "@/modules/browser/webTabsStore";
+import { focusChatInputSoon } from "@/modules/explorer/lib/recentSwitch";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import {
   CHAT_AGENTS,
@@ -49,7 +59,8 @@ import {
 import { MinusSignIcon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { invoke } from "@tauri-apps/api/core";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 
 const AgentChatView = lazy(() =>
@@ -196,6 +207,7 @@ function connectLeafChat(
   if (session && session.status !== "closed" && session.status !== "error")
     return;
   CHAT_APIS[agent].ensure(leafId, dir);
+  focusChatInputSoon();
 }
 
 /** 两个一组的小切换(Claude | Codex、聊天 | 终端):点一下就切。 */
@@ -371,6 +383,165 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
         value={mode}
         onPick={(v) => show(v, agent)}
       />
+      {mode === "chat" && <ChatFontSize />}
+      {mode === "chat" && <TypingEffectSwitch />}
+    </div>
+  );
+}
+
+/**
+ * 输入框打字效果,紧跟在字号后面:点开下拉选一种(无效果 / 打字机 / 淡入 /
+ * 模糊 / 霓虹 / 彩虹),旁边一个"音效"开关(每打一个字咔哒一下)。
+ */
+function TypingEffectSwitch() {
+  const effect = useTypingEffect((s) => s.effect);
+  const set = useTypingEffect((s) => s.set);
+  const sound = useTypingEffect((s) => s.sound);
+  const setSound = useTypingEffect((s) => s.setSound);
+  const switchAnim = useSwitchAnimation((s) => s.anim);
+  const setSwitchAnim = useSwitchAnimation((s) => s.set);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // 菜单挂到 body 上、固定在按钮正下方:顶栏是裁边的,画在里面会被裁没
+  const [at, setAt] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const r = ref.current?.getBoundingClientRect();
+    if (r) setAt({ left: r.left, top: r.bottom + 4 });
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [open]);
+  const label = TYPING_EFFECTS.find((e) => e.value === effect)?.label ?? "";
+  return (
+    <div
+      ref={ref}
+      className="relative flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-background/90 p-0.5 text-[11.5px]"
+    >
+      <button
+        type="button"
+        title="打字效果"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-6 cursor-pointer items-center gap-1 rounded-md px-2 text-foreground/80 hover:bg-foreground/10"
+      >
+        <span className="text-muted-foreground">效果</span>
+        {label}
+        <span className="text-muted-foreground">▾</span>
+      </button>
+      <button
+        type="button"
+        title={sound ? "关掉打字音效" : "打开打字音效(每打一个字咔哒一下)"}
+        onClick={() => setSound(!sound)}
+        className={cn(
+          "h-6 cursor-pointer rounded-md px-2 transition-colors",
+          sound
+            ? "bg-foreground/15 text-foreground"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        音效
+      </button>
+      {open &&
+        at &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[60] flex min-w-32 flex-col rounded-lg border border-border bg-background p-1 text-[11.5px] shadow-lg"
+            style={{ left: at.left, top: at.top }}
+          >
+            <div className="px-2.5 pt-1 pb-0.5 text-[10.5px] text-muted-foreground/70">
+              打字效果
+            </div>
+            {TYPING_EFFECTS.map((e) => (
+              <button
+                key={e.value}
+                type="button"
+                onClick={() => {
+                  set(e.value);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "h-7 cursor-pointer rounded-md px-2.5 text-left transition-colors hover:bg-foreground/10",
+                  e.value === effect
+                    ? "text-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                {e.value === effect ? "✓ " : "　"}
+                {e.label}
+              </button>
+            ))}
+            <div className="mt-1 border-t border-border/60 px-2.5 pt-1.5 pb-0.5 text-[10.5px] text-muted-foreground/70">
+              切换项目时
+            </div>
+            {SWITCH_ANIMATIONS.map((a) => (
+              <button
+                key={a.value}
+                type="button"
+                onClick={() => {
+                  setSwitchAnim(a.value);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "h-7 cursor-pointer rounded-md px-2.5 text-left transition-colors hover:bg-foreground/10",
+                  a.value === switchAnim
+                    ? "text-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                {a.value === switchAnim ? "✓ " : "　"}
+                {a.label}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+/** 聊天区字号:A− / 百分比(点了回 100%)/ A+,只影响中间的对话内容。 */
+function ChatFontSize() {
+  const scale = useChatFontScale((s) => s.scale);
+  const set = useChatFontScale((s) => s.set);
+  const btn =
+    "flex h-6 cursor-pointer items-center rounded-md px-1.5 text-muted-foreground transition-colors enabled:hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35";
+  return (
+    <div
+      title="聊天内容字号"
+      className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border bg-background/90 p-0.5 text-[11.5px]"
+    >
+      <button
+        type="button"
+        title="缩小聊天字号"
+        disabled={scale <= FONT_SCALE_MIN}
+        onClick={() => set(scale - 0.1)}
+        className={btn}
+      >
+        A−
+      </button>
+      <button
+        type="button"
+        title="恢复 100%"
+        onClick={() => set(1)}
+        className="h-6 w-11 cursor-pointer rounded-md tabular-nums text-foreground/80 hover:bg-foreground/10"
+      >
+        {Math.round(scale * 100)}%
+      </button>
+      <button
+        type="button"
+        title="放大聊天字号"
+        disabled={scale >= FONT_SCALE_MAX}
+        onClick={() => set(scale + 0.1)}
+        className={cn(btn, "text-[13px]")}
+      >
+        A+
+      </button>
     </div>
   );
 }
@@ -457,6 +628,8 @@ function resumeChat(
   useAgentViewStore.getState().setAgent(leafId, agent);
   saveAgent(dir, agent);
   CHAT_APIS[agent].ensure(leafId, dir);
+  // 输入框连上才出来,出来后光标直接落进去,接着打字
+  focusChatInputSoon();
 }
 
 /**
@@ -482,6 +655,8 @@ export function LeafAgentChat({
   const modeSet = useAgentViewStore((s) => leafId in s.modes);
   const disconnected =
     !session || session.status === "closed" || session.status === "error";
+  // 没连上时输入框不出来:"目录 › 工程 › 分支"挂在聊天区中间的"恢复会话"下面
+  const branch = useLeafBranch(leafId, getCwd, mode === "chat" && disconnected);
 
   useEffect(() => {
     if (!modeSet) useAgentViewStore.getState().setMode(leafId, "chat");
@@ -516,6 +691,7 @@ export function LeafAgentChat({
                     ? () => resumeChat(leafId, getCwd, agent)
                     : undefined
                 }
+                resumeExtra={branch && <RepoHero branch={branch} />}
               />
             </Suspense>
           </div>
@@ -564,7 +740,16 @@ function useLeafBranch(
         .then(async (r) => {
           if (!alive) return;
           if (!r) {
-            setBranch(null);
+            // 不是 git 仓库也给一条:目录、名字照样显示(分支空着),不然输入框
+            // 上下的当前项目、最近项目整块没了
+            const { folder, project } = repoLabel(dir);
+            setBranch((cur) =>
+              cur?.name === "" &&
+              cur.folder === folder &&
+              cur.project === project
+                ? cur
+                : { name: "", folder, project, worktree: null, changed: 0 },
+            );
             return;
           }
           const name = r.isDetached ? `${r.branch}(游离)` : r.branch;
@@ -624,6 +809,7 @@ export function LeafAgentComposer({
   }, [needModels, leafId, agent, session?.status]);
   if (mode !== "chat") return null;
   // 没连上时"恢复会话"挂在聊天区提示语下面,输入框这里不占位置
+  // 没连上时输入框不出来,工程那条挂在聊天区中间(见 LeafAgentChat)
   if (!connected || !session) return null;
 
   const cwd = () => getCwd(leafId);

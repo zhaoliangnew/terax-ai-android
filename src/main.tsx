@@ -25,9 +25,22 @@ await invoke("pty_close_all").catch(() => {});
 // Seed before first paint so default tab mounts at target cwd (no flicker).
 await initLaunchDir();
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <App />,
-);
+// 界面整个崩掉时别只剩一片空白:把错误直接写在窗口上,截图就能定位
+function showFatal(err: unknown) {
+  const box = document.createElement("pre");
+  box.style.cssText =
+    "position:fixed;inset:40px 24px auto;z-index:99999;max-height:80vh;overflow:auto;" +
+    "padding:16px;border-radius:8px;background:#2a1215;color:#fca5a5;" +
+    "font:12px/1.5 ui-monospace,monospace;white-space:pre-wrap;user-select:text";
+  const e = err instanceof Error ? err : new Error(String(err));
+  box.textContent = `界面出错了(截图发给开发):\n\n${e.message}\n\n${e.stack ?? ""}`;
+  document.body.appendChild(box);
+}
+window.addEventListener("error", (e) => showFatal(e.error ?? e.message));
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
+  onUncaughtError: (error) => showFatal(error),
+}).render(<App />);
 
 // Window starts hidden (per tauri.conf.json) so users never see a transparent
 // shadow-only frame before React paints. Use setTimeout — rAF is throttled

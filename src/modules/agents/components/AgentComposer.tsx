@@ -8,7 +8,6 @@ import {
 import { FOCUS_CHAT_INPUT_EVENT } from "@/modules/explorer/lib/recentSwitch";
 import {
   AlertCircleIcon,
-  AndroidIcon,
   ArrowDown01Icon,
   ArrowUp02Icon,
   BookOpen01Icon,
@@ -18,9 +17,7 @@ import {
   CloudUploadIcon,
   CodeIcon,
   FileSearchIcon,
-  Folder01Icon,
   FolderSearchIcon,
-  GitBranchIcon,
   GitCommitIcon,
   Hold02Icon,
   Idea01Icon,
@@ -52,6 +49,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { useChatFontScale } from "../lib/chatFontScale";
 import { isImagePath } from "../lib/chatItems";
 import { findModel, modelIdName, shortModelName } from "../lib/modelMatch";
 import {
@@ -72,11 +70,18 @@ import { ClaudeModelPanel } from "./ClaudeModelPanel";
 import { CodexModelPanel, effortLabel } from "./CodexModelPanel";
 import { ImageThumb } from "./ImageLightbox";
 import {
+  CurrentProjectRow,
+  RecentButton,
+  RecentProjectRows,
+  useRecentPrefs,
+} from "./ProjectNav";
+import {
   QuickPromptFillDialog,
   quickPromptBlanks,
 } from "./QuickPromptFillDialog";
 import { QuickPromptsDialog } from "./QuickPromptsDialog";
-import { RecentSwitchMenu } from "./RecentSwitchMenu";
+import type { RepoBranch } from "./RepoBar";
+import { TypingMirror, useTypingFx } from "./TypingMirror";
 import { UsagePanel } from "./UsagePanel";
 
 type Props = {
@@ -124,14 +129,7 @@ type Props = {
   /** 当前上下文大小和占比(底栏"用量"前面显示)。 */
   context?: ContextUsage | null;
   /** 输入框上方显示的工程名和当前分支;在 worktree 里再带上 worktree 名。 */
-  branch?: {
-    name: string;
-    /** 工程文件夹名(worktree 里是主工程的)。 */
-    folder: string;
-    project: string;
-    worktree: string | null;
-    changed: number;
-  } | null;
+  branch?: RepoBranch | null;
   /** 点分支:切到右栏仓库 tab;点未提交文件数时 commit=true,直接弹提交框。 */
   onOpenRepo?: (commit?: boolean) => void;
   onOpenUsage: () => void;
@@ -285,6 +283,9 @@ function ContextMeter({ context }: { context?: ContextUsage | null }) {
 /** 输入框底栏上的文字小按钮(用量、压缩、新会话)。 */
 const toolText =
   "flex h-7 shrink-0 cursor-pointer items-center gap-1 whitespace-nowrap rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground";
+
+/** 工程卡片后面那几个一点就发的常用话。 */
+const BAR_PROMPTS = ["继续", "通知测试"];
 
 /** 输入框窄了只留图标的按钮文字(悬停的 title 里还有)。 */
 const wideLabel = "hidden @xl/composer:inline";
@@ -487,12 +488,43 @@ export function AgentComposer({
   const modelName = modelLabel(model, models, agentName);
   const [text, setText] = useState("");
   const { imeProps, isImeKey } = useImeGuard();
+  // 打字效果(顶部字号旁边选):组字中不动画,所以自己记一下在不在组字
+  const [composing, setComposing] = useState(false);
+  const [inputScroll, setInputScroll] = useState(0);
+  const typingFx = useTypingFx(text, composing);
+  const fxOn = typingFx.effect !== "off" && !compact;
   const [menu, setMenu] = useState<"mode" | "model" | "usage" | "quick" | null>(
     null,
   );
   const closeMenu = useCallback(() => setMenu(null), []);
   const toggleMenu = (m: "mode" | "model" | "usage" | "quick") =>
     setMenu((cur) => (cur === m ? null : m));
+  // 快捷指令:鼠标放上去就展开(用量、模型还是点开),移开稍等一下再收(从按钮挪进菜单
+  // 的路上不至于闪没);点一下也是展开,不再是开关,免得刚悬停开又被点关
+  const hoverTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    },
+    [],
+  );
+  const hoverMenu = (m: "quick", onOpen?: () => void) => ({
+    onMouseEnter: () => {
+      if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = null;
+      setMenu((cur) => {
+        if (cur !== m) onOpen?.();
+        return m;
+      });
+    },
+    onMouseLeave: () => {
+      if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = window.setTimeout(
+        () => setMenu((cur) => (cur === m ? null : cur)),
+        250,
+      );
+    },
+  });
   const [attachments, setAttachments] = useState<string[]>([]);
   const pickFiles = async () => {
     try {
@@ -592,6 +624,8 @@ export function AgentComposer({
   }, [injection]);
 
   const quickPrompts = useQuickPrompts((s) => s.prompts);
+  const fontScale = useChatFontScale((s) => s.scale);
+  const recentMode = useRecentPrefs((s) => s.mode);
   const [quickEditOpen, setQuickEditOpen] = useState(false);
   // 正在填空的快捷指令(带【】的那几条)
   const [filling, setFilling] = useState<QuickPrompt | null>(null);
@@ -663,16 +697,20 @@ export function AgentComposer({
   return (
     // 整条不透明:输入框本身是半透明的灰,底下不能透出任何东西
     <div
+      // "最近"弹层靠这个找到输入框,和它一样宽、对齐
+      data-composer-root=""
       className={cn(
         "relative z-20 shrink-0",
-        compact ? "" : "bg-background px-6 pt-1 pb-4",
+        compact ? "" : "bg-background px-12 pt-1 pb-4",
       )}
+      // 聊天字号(顶部 A−/A+)也管下面这块:当前项目、输入框、最近项目一起缩放
+      style={compact ? undefined : { zoom: fontScale }}
     >
       {cmdOpen && (
         <div
           className={cn(
-            "absolute inset-x-0 bottom-full z-30 mx-auto max-w-3xl",
-            compact ? "px-1 pb-1" : "px-6",
+            "absolute inset-x-0 bottom-full z-30 mx-auto max-w-none",
+            compact ? "px-1 pb-1" : "px-12",
           )}
         >
           <div
@@ -728,83 +766,34 @@ export function AgentComposer({
           </div>
         </div>
       )}
+      {/* 上一个 / 下一个项目:两行写全要切去哪,就在当前项目那条正上方 */}
+      {/* 输入框正上方只放当前项目;最近的几个在输入框下面 */}
       {branch && !compact && (
-        <div className="mx-auto flex max-w-3xl items-center gap-2 px-2 pb-1.5 text-[12px] text-muted-foreground">
-          {/* 和左栏一样的层级:目录 › 产品 › 分支。字放大、产品白字加粗,分支
-              做成小胶囊:worktree 绿底带分支图标(和左栏开着的 worktree 一个颜色),
-              主工程的分支灰底,一眼分得开。worktree 只写分支名,目录名悬停看 */}
-          <button
-            type="button"
-            title={`打开仓库${branch.worktree ? `\nworktree 目录:${branch.worktree}` : ""}`}
-            onClick={() => onOpenRepo?.()}
-            // 整条做成一张卡片:浅底、细边、圆角,和聊天正文分开
-            className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border/70 bg-foreground/[0.04] px-2.5 py-1 text-[12.5px] transition-colors hover:border-border hover:bg-foreground/[0.08]"
-          >
-            {branch.folder && (
-              <>
-                <HugeiconsIcon
-                  icon={Folder01Icon}
-                  size={13}
-                  strokeWidth={1.75}
-                  className="shrink-0 text-foreground/60"
-                />
-                <span className="min-w-0 truncate text-foreground/70">
-                  {branch.folder}
-                </span>
-                <span className="shrink-0 text-muted-foreground/60">›</span>
-              </>
-            )}
-            {branch.project && (
-              <span className="flex shrink-0 items-center gap-1 font-semibold text-foreground">
-                <HugeiconsIcon
-                  icon={AndroidIcon}
-                  size={13}
-                  strokeWidth={1.75}
-                  className="shrink-0 text-emerald-500"
-                />
-                {branch.project}
-              </span>
-            )}
-            <span className="shrink-0 text-muted-foreground/60">›</span>
-            <span
-              title={branch.name}
-              className={cn(
-                "flex min-w-0 items-center gap-1 rounded-md px-1.5 py-px",
-                branch.worktree
-                  ? "bg-emerald-500/15 text-emerald-400"
-                  : "bg-foreground/10 text-foreground/80",
-              )}
-            >
-              {branch.worktree && (
-                <HugeiconsIcon
-                  icon={GitBranchIcon}
-                  size={12}
-                  strokeWidth={2}
-                  className="shrink-0"
-                />
-              )}
-              <span className="min-w-0 truncate">{branch.name}</span>
-            </span>
-          </button>
-          <span className="mr-4 ml-auto flex shrink-0 items-center gap-3 text-[11px]">
-            {/* 工作区干净就不占位置,一眼看出有没有要提交的。输入框圆角半径
-                24px,文字右缘贴着角会像夹在里面:整组往左让到圆角以内 */}
-            {branch.changed > 0 && (
-              <button
-                type="button"
-                title="提交这些改动"
-                onClick={() => onOpenRepo?.(true)}
-                className="tabular-nums text-amber-500/80 hover:underline"
-              >
-                {branch.changed} 个文件未提交
-              </button>
-            )}
-          </span>
-        </div>
+        <CurrentProjectRow
+          current={branch}
+          onOpenRepo={onOpenRepo}
+          extra={
+            <>
+              {/* 常用的几句话,点一下直接发出去,不用打字 */}
+              {BAR_PROMPTS.map((text) => (
+                <button
+                  key={text}
+                  type="button"
+                  title={`直接发送"${text}"`}
+                  onClick={() => onSend(text, [])}
+                  className="flex h-7 shrink-0 cursor-pointer items-center rounded-lg border border-border/70 px-2.5 text-[12px] text-foreground/80 transition-colors hover:border-border hover:bg-foreground/[0.08] hover:text-foreground"
+                >
+                  {text}
+                </button>
+              ))}
+            </>
+          }
+        />
       )}
       <div
+        data-composer-box=""
         className={cn(
-          "@container/composer mx-auto flex max-w-3xl",
+          "@container/composer mx-auto flex max-w-none",
           compact
             ? "flex-row flex-wrap items-center gap-1 px-2 py-1.5"
             : "flex-col gap-2 rounded-[24px] bg-foreground/[0.12] px-4 pt-3.5 pb-2.5",
@@ -947,6 +936,15 @@ export function AgentComposer({
               void attachPastedImages(images);
             }}
             {...imeProps}
+            onCompositionStart={() => {
+              imeProps.onCompositionStart();
+              setComposing(true);
+            }}
+            onCompositionEnd={() => {
+              imeProps.onCompositionEnd();
+              setComposing(false);
+            }}
+            onScroll={(e) => setInputScroll(e.currentTarget.scrollTop)}
             onKeyDown={(e) => {
               // 输入法选词、把拼音直接上屏时的回车是给输入法的,不是发送
               if (isImeKey(e)) return;
@@ -997,8 +995,20 @@ export function AgentComposer({
             className={cn(
               "resize-none bg-transparent text-[14px] leading-[21px] outline-none",
               compact ? "min-h-[28px] min-w-0 flex-1 py-1" : "min-h-[42px]",
+              // 开了打字效果:字由下面的显示层画,输入框自己的字透明(组字时
+              // 还是用输入框的字,输入法的下划线要看得到)
+              fxOn && !composing && "text-transparent caret-sky-400",
             )}
           />
+          {fxOn && !composing && (
+            <TypingMirror
+              text={text}
+              effect={typingFx.effect}
+              fresh={typingFx.fresh}
+              scrollTop={inputScroll}
+              className="text-[14px] leading-[21px]"
+            />
+          )}
           <span
             aria-hidden
             className={cn(
@@ -1106,18 +1116,19 @@ export function AgentComposer({
             </InlineMenu>
           </div>
           <span className={cn("flex-1", compact && "hidden")} />
-          {/* 最近:鼠标放上去就弹出开着终端的工程,点一下切过去 */}
+          {/* 最近:固定在快捷指令前面,鼠标停上去弹出最近的项目和设置(样式、
+              数量、清空) */}
           <div className={cn(compact && "hidden")}>
-            <RecentSwitchMenu labelClass={wideLabel} />
+            <RecentButton labelClass={wideLabel} current={branch ?? null} />
           </div>
           {/* 快捷指令:点开选一条,整理好的话直接发出去(Review、修复、同步…,
               能自己加) */}
           {/* 菜单以整行为准往上弹,在输入框中间居中(不跟着按钮偏到一边) */}
-          <div className={cn(compact && "hidden")}>
+          <div className={cn(compact && "hidden")} {...hoverMenu("quick")}>
             <button
               type="button"
               title="快捷指令:Review、修复、同步,也能加自己的"
-              onClick={() => toggleMenu("quick")}
+              onClick={() => setMenu("quick")}
               className={toolText}
             >
               <HugeiconsIcon icon={ZapIcon} size={13} strokeWidth={1.75} />
@@ -1406,6 +1417,9 @@ export function AgentComposer({
           </button>
         </div>
       </div>
+      {branch && !compact && recentMode === "below" && (
+        <RecentProjectRows current={branch} />
+      )}
       <QuickPromptFillDialog
         prompt={filling}
         onCancel={() => setFilling(null)}

@@ -13,12 +13,7 @@ import {
   projexUrl,
 } from "@/modules/android-run";
 import { WorktreeCountBadge } from "@/modules/android-run/BranchChip";
-import {
-  AndroidIcon,
-  CloudIcon,
-  GitBranchIcon,
-  Pin02Icon,
-} from "@hugeicons/core-free-icons";
+import { AndroidIcon, CloudIcon, Pin02Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { memo } from "react";
 import { FolderGlyph } from "./FolderGlyph";
@@ -27,6 +22,7 @@ import { explorerGitTextClass } from "./lib/gitStatusColor";
 import type { GitStatusCode } from "./lib/gitStatusUtils";
 import { fileIconUrl } from "./lib/iconResolver";
 import { TREE_INDENT } from "./lib/treeWidth";
+import { ProductLabel } from "./ProductLabel";
 
 const INDENT = TREE_INDENT;
 
@@ -170,10 +166,9 @@ function EntryRowImpl(props: EntryRowProps) {
   };
 
   const handleDoubleClick = () => {
-    if (isDir) {
-      if (!asProject) onSetAsRoot?.(path);
-      return;
-    }
+    // 文件夹不再双击进目录:点两下展开/收起时太容易误触,一下就跳走了。
+    // 要把它设为根目录走右键菜单
+    if (isDir) return;
     actions.beginRename(path);
   };
 
@@ -183,11 +178,6 @@ function EntryRowImpl(props: EntryRowProps) {
       data-fs-path={path}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
-      title={
-        isDir && !asProject && onSetAsRoot
-          ? "双击将此目录设为工作区根目录"
-          : undefined
-      }
       className={cn(
         "group flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left text-[13px] transition-colors hover:bg-accent/70",
         isActiveProject
@@ -198,6 +188,11 @@ function EntryRowImpl(props: EntryRowProps) {
               ? "text-muted-foreground/70"
               : "text-foreground/85",
         isDropTarget && "bg-primary/10 ring-1 ring-inset ring-primary/60",
+        // 产品是找东西时的锚点:整行一条浅底,和下面一串灰字 worktree 拉开
+        asProject &&
+          !isActiveProject &&
+          !isSelected &&
+          "bg-foreground/[0.05] hover:bg-foreground/[0.1]",
       )}
       style={{ paddingLeft }}
     >
@@ -277,6 +272,7 @@ function EntryRowImpl(props: EntryRowProps) {
           // 窄侧栏里整行比树还宽,树被撑得左右乱跳。分支是 flex-1(基准 0),
           // 位置不够时先让它缩没,再轮到名字截断。
           asProject && branch ? "max-w-[60%]" : "flex-1",
+          asProject && "text-[13.5px] font-semibold",
           asProject && !isActiveProject
             ? isOpenedProject
               ? OPENED_TEXT
@@ -289,9 +285,16 @@ function EntryRowImpl(props: EntryRowProps) {
           groupFolder &&
             !isActiveProject &&
             cn("font-semibold", !gitStatusCode && "text-foreground"),
+          // 目录、产品:鼠标停上去名字变蓝(和弹层里一个样子)
+          (groupFolder || asProject) &&
+            !isActiveProject &&
+            "transition-colors group-hover:text-sky-400",
         )}
       >
-        {name}
+        {/* 内层 inline span 只包文字:悬停弹层量它的右边,贴着名字弹出 */}
+        <span data-tree-name="">
+          {asProject ? <ProductLabel name={name} /> : name}
+        </span>
       </span>
       {/* 未保存的编辑 git 看不见,给个点(和 tab 上那个 ● 一个意思) */}
       {dirty && (
@@ -350,6 +353,22 @@ function EntryRowImpl(props: EntryRowProps) {
 
 export const EntryRow = memo(EntryRowImpl);
 
+/** worktree 行首的小标签;开着终端的绿底。 */
+function TreeTag({ on }: { on: boolean }) {
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded px-1.5 text-[10px] font-normal leading-4",
+        on
+          ? "bg-emerald-500/20 text-emerald-300"
+          : "bg-foreground/10 text-muted-foreground/80",
+      )}
+    >
+      tree
+    </span>
+  );
+}
+
 /**
  * 工程下挂的 worktree 子行:同一个仓库临时切出来修 bug 的平行工作区。
  * 点击当独立工程打开 —— 它有自己的终端 tab、设备选择和投屏,和主工程
@@ -399,16 +418,8 @@ function WorktreeRowImpl({
           {AGENT_STATE_EMOJI[agentState]}
         </span>
       ) : (
-        // 每一层都有自己的图标:文件夹、安卓、分支;空着图标位子行像悬空的
-        <HugeiconsIcon
-          icon={GitBranchIcon}
-          size={14}
-          strokeWidth={1.75}
-          className={cn(
-            "size-4 shrink-0 p-px",
-            !isActive && "text-muted-foreground/55",
-          )}
-        />
+        // worktree 前面一个 tree 标签(和悬停弹层、"最近"菜单一个样子)
+        <TreeTag on={isActive || isOpened} />
       )}
       {/* 只写分支名:新建的 worktree 目录名就是分支名,前面已有分支图标;
           老的目录名对不上也不再并排写两遍,悬停的 title 里有目录 */}
@@ -426,167 +437,6 @@ function WorktreeRowImpl({
 }
 
 export const WorktreeRow = memo(WorktreeRowImpl);
-
-/**
- * "最近"分组的一行:和树里一样的层级,只列开着终端的,按最近切换的时间排。
- * 点一下切到它的终端,行尾 × 关掉这个终端(关了就从最近里消失)。
- */
-function RecentRowImpl({
-  path,
-  name,
-  hint,
-  branch,
-  isWorktree,
-  depth,
-  projectKind,
-  isActive,
-  isOpened,
-  projectPtyIds,
-  onOpen,
-  onClose,
-}: {
-  path: string;
-  name: string;
-  hint: string;
-  /** 当前分支(只有开着终端的才查得到);和名字一样就不重复写。 */
-  branch: string | null;
-  isWorktree: boolean;
-  /** 和树里一样的缩进层级:产品 1,挂在产品下的 worktree 2。 */
-  depth: number;
-  projectKind: ProjectKind | null;
-  isActive: boolean;
-  isOpened: boolean;
-  projectPtyIds?: Record<string, number[]>;
-  onOpen?: (path: string) => void;
-  /** 关掉这个终端;没开终端的组头(只有 worktree 开着的产品)不给 ×。 */
-  onClose?: (path: string) => void;
-}) {
-  const agentState = useProjectAgentState(path, projectPtyIds ?? {});
-  return (
-    <button
-      type="button"
-      title={`${path}${branch ? `\n分支 ${branch}` : ""}\n${isOpened ? "点击切到它的终端" : "点击打开终端"}`}
-      onClick={() => onOpen?.(path)}
-      className={cn(
-        "group flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left transition-colors hover:bg-accent/70",
-        isWorktree ? "text-[12.5px]" : "text-[13px]",
-        isActive && ACTIVE_ROW,
-      )}
-      style={{ paddingLeft: 6 + depth * INDENT }}
-    >
-      {agentState ? (
-        <span
-          title={AGENT_STATE_LABEL[agentState]}
-          className={cn(
-            "inline-block size-4 shrink-0 text-center text-[13px] leading-4",
-            agentState === "attention" && "animate-pulse",
-          )}
-        >
-          {AGENT_STATE_EMOJI[agentState]}
-        </span>
-      ) : isWorktree ? (
-        <HugeiconsIcon
-          icon={GitBranchIcon}
-          size={14}
-          strokeWidth={1.75}
-          className={cn(
-            "size-4 shrink-0 p-px",
-            !isActive && "text-muted-foreground/70",
-          )}
-        />
-      ) : projectKind === "android" ? (
-        <HugeiconsIcon
-          icon={AndroidIcon}
-          size={16}
-          strokeWidth={1.75}
-          className={cn(
-            "size-4 shrink-0",
-            isActive || isOpened
-              ? "text-emerald-500"
-              : "text-muted-foreground/45",
-          )}
-        />
-      ) : projectKind ? (
-        <span
-          title={PROJECT_KIND_LABEL[projectKind]}
-          className="shrink-0 rounded bg-muted-foreground/10 px-1 text-[9px] font-semibold leading-4 text-muted-foreground/70"
-        >
-          {PROJECT_KIND_BADGE[projectKind]}
-        </span>
-      ) : (
-        <FolderGlyph
-          className={isActive || isOpened ? "text-emerald-500" : undefined}
-        />
-      )}
-      <span
-        className={cn(
-          "min-w-0 truncate",
-          // 和树里一个规矩:开着终端的绿字;关了的工程白字、worktree 灰字
-          !isActive &&
-            (isOpened
-              ? OPENED_TEXT
-              : isWorktree
-                ? "text-muted-foreground/65"
-                : "text-foreground"),
-        )}
-      >
-        {isWorktree ? branch || name : name}
-      </span>
-      {/* 工程跟一截当前分支灰字;worktree 名字就是分支,不再重复 */}
-      {!isWorktree && branch && branch !== name && (
-        <span className="min-w-0 shrink truncate text-[11px] font-normal text-muted-foreground/70">
-          {branch}
-        </span>
-      )}
-      <span className="min-w-0 flex-1 truncate text-[11px] font-normal text-muted-foreground/40">
-        {hint}
-      </span>
-      {/* 行本身是 button,里面不能再套 button:用 span 接住点击 */}
-      {isOpened && onClose && (
-        // biome-ignore lint/a11y/useKeyWithClickEvents: 关终端右键菜单里也有,键盘用户不受影响
-        // biome-ignore lint/a11y/noStaticElementInteractions: 见上,button 里套不了 button
-        <span
-          title="关闭终端"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose(path);
-          }}
-          className="hidden shrink-0 rounded px-1 text-[12px] leading-4 text-muted-foreground hover:bg-foreground/10 hover:text-foreground group-hover:inline"
-        >
-          ×
-        </span>
-      )}
-    </button>
-  );
-}
-
-export const RecentRow = memo(RecentRowImpl);
-
-/** "最近"里的最外层目录行:和树里的分组文件夹一个样子,点一下折叠/展开。 */
-export function RecentFolderRow({
-  path,
-  expanded,
-  onToggle,
-}: {
-  path: string;
-  expanded: boolean;
-  onToggle: (path: string) => void;
-}) {
-  const name = path.split(/[\\/]/).pop() || path;
-  return (
-    <button
-      type="button"
-      title={path}
-      aria-expanded={expanded}
-      onClick={() => onToggle(path)}
-      className="flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 overflow-hidden rounded-sm px-1.5 text-left text-[13px] font-semibold text-foreground transition-colors hover:bg-accent/70"
-      style={{ paddingLeft: 6 }}
-    >
-      <FolderGlyph open={expanded} className="text-foreground/75" />
-      <span className="min-w-0 truncate">{name}</span>
-    </button>
-  );
-}
 
 export type PendingRowProps = {
   depth: number;

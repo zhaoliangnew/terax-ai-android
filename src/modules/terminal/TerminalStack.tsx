@@ -1,3 +1,4 @@
+import { switchLayerStyle, useSwitchAnimation } from "@/lib/switchAnimation";
 import type { Tab } from "@/modules/tabs";
 import type { SearchAddon } from "@xterm/addon-search";
 import { type ReactNode, useEffect, useMemo, useRef } from "react";
@@ -88,6 +89,7 @@ export function TerminalStack({
     }
   }, [terminals]);
 
+  const switchAnim = useSwitchAnimation((s) => s.anim);
   return (
     <div className="relative h-full w-full">
       {terminals.map((t) => {
@@ -97,10 +99,8 @@ export function TerminalStack({
             key={t.id}
             data-terminal-tab={t.id}
             className="absolute inset-0"
-            style={{
-              visibility: tabVisible ? "visible" : "hidden",
-              pointerEvents: tabVisible ? "auto" : "none",
-            }}
+            // 切项目时的过渡(顶部"效果"里选:无 / 淡入淡出 / 滑动 / 缩放)
+            style={switchLayerStyle(switchAnim, tabVisible)}
             aria-hidden={!tabVisible}
           >
             <PaneTreeView
