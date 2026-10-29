@@ -12,17 +12,23 @@ export function withoutRightPanel(layout: Record<string, number>) {
   return { ...layout, workspace: layout.workspace + layout.device, device: 0 };
 }
 
+/**
+ * 窗口(按系统缩放折算后的)宽度不超过这个就把右栏收成右边缘的竖条。
+ * 2048、1920 宽的外接屏三栏还摆得下,1600 及以下才挤。
+ */
+const FLYOUT_QUERY = "(max-width: 1600px)";
+
 export function useRightFlyout(
   groupRef: RefObject<GroupImperativeHandle | null>,
 ) {
   const [floating, setFloating] = useState(
-    () => window.matchMedia("(max-width: 2048px)").matches,
+    () => window.matchMedia(FLYOUT_QUERY).matches,
   );
   const [open, setOpen] = useState(false);
   const desktopLayout = useRef<Record<string, number> | null>(null);
 
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 2048px)");
+    const query = window.matchMedia(FLYOUT_QUERY);
     const update = () => setFloating(query.matches);
     query.addEventListener("change", update);
     update();

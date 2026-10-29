@@ -56,7 +56,7 @@ beforeEach(() => {
   hooks.slots = [];
   hooks.cursor = 0;
   mediaChange = undefined;
-  width = 1952;
+  width = 1440;
   layout = { sidebar: 20, workspace: 50, device: 30 };
   setLayout = vi.fn((next) => {
     layout = next;
@@ -88,7 +88,7 @@ afterEach(() => {
 });
 
 describe("小屏右栏自动收起", () => {
-  it.each([1280, 1440, 1728, 1920, 1952, 2048])(
+  it.each([1280, 1440, 1512, 1600])(
     "%i 宽窗口首次打开就隐藏右栏并归还聊天宽度",
     (initialWidth) => {
       width = initialWidth;
@@ -99,16 +99,19 @@ describe("小屏右栏自动收起", () => {
     },
   );
 
-  it.each([2049, 2560, 3440])("%i 宽窗口保留原来的三栏布局", (initialWidth) => {
-    width = initialWidth;
-    expect(FlyoutHarness().floating).toBe(false);
-    expect(setLayout).not.toHaveBeenCalled();
-  });
+  it.each([1601, 1920, 2048, 2560, 3440])(
+    "%i 宽窗口保留原来的三栏布局",
+    (initialWidth) => {
+      width = initialWidth;
+      expect(FlyoutHarness().floating).toBe(false);
+      expect(setLayout).not.toHaveBeenCalled();
+    },
+  );
 
   it("宽屏缩到截图大小时收起右栏,重新放大后恢复原布局", () => {
     width = 2560;
     FlyoutHarness();
-    expect(resize(1952).floating).toBe(true);
+    expect(resize(1440).floating).toBe(true);
     expect(layout).toEqual({ sidebar: 20, workspace: 80, device: 0 });
     expect(resize(2560).floating).toBe(false);
     expect(layout).toEqual({ sidebar: 20, workspace: 50, device: 30 });
@@ -118,7 +121,7 @@ describe("小屏右栏自动收起", () => {
     width = 2560;
     layout = { sidebar: 20, workspace: 0, device: 80 };
     FlyoutHarness();
-    resize(1952);
+    resize(1440);
     expect(layout).toEqual({ sidebar: 20, workspace: 80, device: 0 });
     resize(2560);
     expect(layout).toEqual({ sidebar: 20, workspace: 0, device: 80 });
