@@ -115,37 +115,37 @@ describe("ensureTaskWorktree", () => {
   it("没有任务分支:基于当前分支新建", async () => {
     const r = await ensureTaskWorktree("/w/app_cheng", "YOEZ-402");
     expect(r).toEqual({
-      path: "/w/app_cheng/.worktree/worktree_YOEZ-402",
+      path: "/w/app_cheng/.worktree/release_YOEZ-402",
       created: true,
     });
-    expect(fake.calls).toContain("add /w/app_cheng master worktree_YOEZ-402");
+    expect(fake.calls).toContain("add /w/app_cheng master release_YOEZ-402");
   });
 
   it("worktree 删了、分支还在:挂回去,不新建也不报错叫人删分支", async () => {
-    fake.branches = [branch({ name: "worktree_YOEZ-402" })];
+    fake.branches = [branch({ name: "release_YOEZ-402" })];
     const r = await ensureTaskWorktree("/w/app_cheng", "YOEZ-402");
-    expect(r.path).toBe("/w/app_cheng/.worktree/worktree_YOEZ-402");
-    expect(fake.calls).toContain("attach /w/app_cheng worktree_YOEZ-402");
+    expect(r.path).toBe("/w/app_cheng/.worktree/release_YOEZ-402");
+    expect(fake.calls).toContain("attach /w/app_cheng release_YOEZ-402");
     expect(fake.calls.some((c) => c.startsWith("add "))).toBe(false);
   });
 
   it("记录还在但目录没了:也走挂回(Rust 侧先 prune)", async () => {
     fake.branches = [
       branch({
-        name: "worktree_YOEZ-402",
+        name: "release_YOEZ-402",
         kind: "worktree",
-        worktreePath: "/w/app_cheng/.worktree/worktree_YOEZ-402",
+        worktreePath: "/w/app_cheng/.worktree/release_YOEZ-402",
       }),
     ];
     await ensureTaskWorktree("/w/app_cheng", "YOEZ-402");
-    expect(fake.calls).toContain("attach /w/app_cheng worktree_YOEZ-402");
+    expect(fake.calls).toContain("attach /w/app_cheng release_YOEZ-402");
   });
 
   it("已经挂着、目录也在:直接复用", async () => {
-    const p = "/w/app_cheng/.worktree/worktree_YOEZ-402";
+    const p = "/w/app_cheng/.worktree/release_YOEZ-402";
     fake.existing.add(p);
     fake.branches = [
-      branch({ name: "worktree_YOEZ-402", kind: "worktree", worktreePath: p }),
+      branch({ name: "release_YOEZ-402", kind: "worktree", worktreePath: p }),
     ];
     expect(await ensureTaskWorktree("/w/app_cheng", "YOEZ-402")).toEqual({
       path: p,
@@ -166,13 +166,13 @@ describe("ensureTaskWorktree", () => {
 
   it("工程在大仓库子目录里:从 git 根建,开发目录和 local.properties 落到子目录", async () => {
     fake.top = "/w/mono";
-    fake.existing.add("/w/mono/.worktree/worktree_YOEZ-402/android");
+    fake.existing.add("/w/mono/.worktree/release_YOEZ-402/android");
     // 子目录在新 worktree 里也会有(它在 git 里)
     const r = await ensureTaskWorktree("/w/mono/android", "YOEZ-402");
-    expect(fake.calls).toContain("add /w/mono master worktree_YOEZ-402");
-    expect(r.path).toBe("/w/mono/.worktree/worktree_YOEZ-402/android");
+    expect(fake.calls).toContain("add /w/mono master release_YOEZ-402");
+    expect(r.path).toBe("/w/mono/.worktree/release_YOEZ-402/android");
     expect(fake.calls).toContain(
-      "write /w/mono/.worktree/worktree_YOEZ-402/android/local.properties",
+      "write /w/mono/.worktree/release_YOEZ-402/android/local.properties",
     );
   });
 });
@@ -183,15 +183,15 @@ describe("probeTaskWorktree", () => {
       isRepo: true,
       state: "none",
       branch: "master",
-      devDir: "/w/app_cheng/.worktree/worktree_YOEZ-402",
+      devDir: "/w/app_cheng/.worktree/release_YOEZ-402",
     });
 
-    fake.branches = [branch({ name: "worktree_YOEZ-402" })];
+    fake.branches = [branch({ name: "release_YOEZ-402" })];
     expect((await probeTaskWorktree("/w/app_cheng", "YOEZ-402")).state).toBe(
       "branch",
     );
 
-    fake.branches = [branch({ name: "worktree_YOEZ-402", isHead: true })];
+    fake.branches = [branch({ name: "release_YOEZ-402", isHead: true })];
     expect(await probeTaskWorktree("/w/app_cheng", "YOEZ-402")).toMatchObject({
       state: "head",
       devDir: null,
@@ -199,9 +199,9 @@ describe("probeTaskWorktree", () => {
 
     fake.branches = [
       branch({
-        name: "worktree_YOEZ-402",
+        name: "release_YOEZ-402",
         kind: "worktree",
-        worktreePath: "/w/app_cheng/.worktree/worktree_YOEZ-402",
+        worktreePath: "/w/app_cheng/.worktree/release_YOEZ-402",
       }),
     ];
     expect((await probeTaskWorktree("/w/app_cheng", "YOEZ-402")).state).toBe(

@@ -181,13 +181,18 @@ function titleSlug(subject: string): string {
     .replace(/[._-]+$/g, "");
 }
 
-/** 任务 worktree 分支名的公共前缀:worktree_<编号>。认任务只认这个。 */
+/** 任务 worktree 分支名的公共前缀:release_<编号>。新建一律用它。 */
 export function taskBranchPrefix(serial: string): string {
+  return `release_${asciiSerial(serial)}`;
+}
+
+/** 改成 release_ 之前建的任务分支是 worktree_<编号>,认任务时也得认得出。 */
+function legacyTaskBranchPrefix(serial: string): string {
   return `worktree_${asciiSerial(serial)}`;
 }
 
 /**
- * 任务 worktree 的分支名,也是 .worktree/ 下的目录名:worktree_<编号>_<标题>,
+ * 任务 worktree 的分支名,也是 .worktree/ 下的目录名:release_<编号>_<标题>,
  * 一眼看得出是哪个需求。ascii=true(Windows)时只留编号:目录名跟着分支名
  * 走,中文路径在 Windows 上会让 AGP 拒绝编译。
  */
@@ -202,12 +207,13 @@ export function taskWorktreeBranch(
 }
 
 /**
- * 这个分支是不是这条任务的:worktree_<编号> 本身,或者 worktree_<编号>_ 开头
- * (标题在云效上改过,名字对不上也还是同一条任务)。
+ * 这个分支是不是这条任务的:release_<编号> 本身,或者 release_<编号>_ 开头
+ * (标题在云效上改过,名字对不上也还是同一条任务)。旧的 worktree_ 前缀也认。
  */
 export function isTaskBranch(name: string, serial: string): boolean {
-  const prefix = taskBranchPrefix(serial);
-  return name === prefix || name.startsWith(`${prefix}_`);
+  return [taskBranchPrefix(serial), legacyTaskBranchPrefix(serial)].some(
+    (prefix) => name === prefix || name.startsWith(`${prefix}_`),
+  );
 }
 
 export type TaskBranchState =

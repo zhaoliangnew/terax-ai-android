@@ -1001,6 +1001,26 @@ export default function App() {
     [projectTabIds, handleCloseTabIds],
   );
 
+  // 一天开工前清一清:当前 space 里除了正在看的那个,终端全关。还有命令在
+  // 跑的(比如 Claude Code)会先弹确认,不会悄悄杀掉
+  const closeOtherTerminals = useCallback(() => {
+    const ids = tabsRef.current
+      .filter(
+        (t) =>
+          t.kind === "terminal" &&
+          t.spaceId === activeSpaceIdRef.current &&
+          t.id !== activeId,
+      )
+      .map((t) => t.id);
+    if (ids.length === 0) {
+      sonnerToast.info("没有其他终端");
+      return;
+    }
+    if (!handleCloseTabIds(ids)) {
+      sonnerToast.info("这是最后一个终端,先打开别的工程再关");
+    }
+  }, [activeId, handleCloseTabIds]);
+
   const cdInNewTab = useCallback(
     (path: string) => {
       // 顶部 tab 栏撤了,切工程全靠树:目标目录(安卓工程还认它的工程根)
@@ -1913,6 +1933,7 @@ export default function App() {
                               onAttachToAgent={handleAttachFileToAgent}
                               onSetAsRoot={handleSetSpaceRoot}
                               onCloseProjectTerminals={closeProjectTerminals}
+                              onCloseOtherTerminals={closeOtherTerminals}
                               onLinkYunxiaoTask={setTaskDir}
                               onLinkYunxiaoProject={setProjectLinkDir}
                               onUnlinkYunxiaoProject={(p) => {

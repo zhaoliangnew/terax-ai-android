@@ -34,6 +34,8 @@ function basename(p: string): string {
  */
 export function useProjectGitInfo(
   projectRoots: ReadonlySet<string>,
+  /** 窗口回前台时重查。树上看得见的工程可能上百个,那一份关掉,只跟分支变更事件。 */
+  { refreshOnFocus = true }: { refreshOnFocus?: boolean } = {},
 ): Record<string, ProjectGitInfo> {
   const [byProject, setByProject] = useState<Record<string, ProjectGitInfo>>(
     {},
@@ -93,13 +95,13 @@ export function useProjectGitInfo(
     };
     read();
     window.addEventListener(GIT_BRANCH_CHANGED_EVENT, read);
-    window.addEventListener("focus", read);
+    if (refreshOnFocus) window.addEventListener("focus", read);
     return () => {
       alive = false;
       window.removeEventListener(GIT_BRANCH_CHANGED_EVENT, read);
       window.removeEventListener("focus", read);
     };
-  }, [rootsKey]);
+  }, [rootsKey, refreshOnFocus]);
 
   return byProject;
 }

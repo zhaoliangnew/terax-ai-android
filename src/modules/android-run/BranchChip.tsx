@@ -542,7 +542,7 @@ export function BranchChip({
     shortName: string;
     label: string;
   } | null>(null);
-  // worktree_ 后面的那截由用户在确认框里定,默认给个来源名
+  // release_ 后面的那截由用户在确认框里定,默认给个来源名
   const [wtSuffix, setWtSuffix] = useState("");
   // 待确认的新建分支(右键"基于此分支/提交新建分支")
   const [pendingNewBranch, setPendingNewBranch] = useState<{
@@ -894,7 +894,7 @@ export function BranchChip({
 
   // 确认框每次打开,后缀都回到默认值(来源分支名/短 SHA)
   useEffect(() => {
-    setWtSuffix(pendingWorktree?.shortName ?? "");
+    setWtSuffix((pendingWorktree?.shortName ?? "").replace(/^release_/, ""));
   }, [pendingWorktree]);
 
   // 新建分支确认框每次打开,清空上次输入的名字
@@ -1339,13 +1339,12 @@ export function BranchChip({
       if (!repoRoot || wtBusy) return false;
       setWtBusy(true);
       try {
-        // 基于所选起点新建 worktree_ 前缀的分支挂载,原分支保持自由
-        const path = await native.gitWorktreeAdd(
-          repoRoot,
-          baseRef,
-          `worktree_${shortName}`,
-        );
-        toast.success(`Worktree 已创建(分支 worktree_${shortName}):${path}`);
+        // 基于所选起点新建 release_ 前缀的分支挂载,原分支保持自由;
+        // .worktree/ 下的目录名就用分支名,两边一个名字。起点本身是
+        // release_xxx 时默认名会带上前缀,去掉免得变成 release_release_xxx
+        const branch = `release_${shortName.replace(/^release_/, "")}`;
+        const path = await native.gitWorktreeAdd(repoRoot, baseRef, branch);
+        toast.success(`Worktree 已创建(分支 ${branch}):${path}`);
         setListVersion((v) => v + 1);
         window.dispatchEvent(new Event(GIT_BRANCH_CHANGED_EVENT));
         return true;
@@ -2869,12 +2868,12 @@ export function BranchChip({
             <DialogTitle className="text-sm">创建 Worktree</DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
               将基于{pendingWorktree?.label} 新建分支并挂载到仓库的 .worktree/
-              目录下,分支名:
+              目录下,分支名和目录名都是:
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-1">
             <span className="shrink-0 font-mono text-[12px] text-muted-foreground">
-              worktree_
+              release_
             </span>
             <input
               autoFocus

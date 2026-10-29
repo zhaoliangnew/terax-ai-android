@@ -5,8 +5,10 @@ import {
   arrowAtInputBoundary,
   cleanComposerInput,
 } from "@/modules/agents/lib/composerInput";
+import { FOCUS_CHAT_INPUT_EVENT } from "@/modules/explorer/lib/recentSwitch";
 import {
   AlertCircleIcon,
+  AndroidIcon,
   ArrowDown01Icon,
   ArrowUp02Icon,
   BookOpen01Icon,
@@ -16,6 +18,7 @@ import {
   CloudUploadIcon,
   CodeIcon,
   FileSearchIcon,
+  Folder01Icon,
   FolderSearchIcon,
   GitBranchIcon,
   GitCommitIcon,
@@ -73,6 +76,7 @@ import {
   quickPromptBlanks,
 } from "./QuickPromptFillDialog";
 import { QuickPromptsDialog } from "./QuickPromptsDialog";
+import { RecentSwitchMenu } from "./RecentSwitchMenu";
 import { UsagePanel } from "./UsagePanel";
 
 type Props = {
@@ -123,6 +127,7 @@ type Props = {
   branch?: {
     name: string;
     /** 工程文件夹名(worktree 里是主工程的)。 */
+    folder: string;
     project: string;
     worktree: string | null;
     changed: number;
@@ -531,6 +536,24 @@ export function AgentComposer({
     el.style.height = `${Math.min(el.scrollHeight, 8 * 21 + 8)}px`;
   }, [text]);
 
+  // 从"最近"切过来:看得见的输入框里第一个接住光标(分屏时只给一个)
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent<{ done: boolean }>).detail;
+      const el = inputRef.current;
+      if (!el || detail.done || el.getClientRects().length === 0) return;
+      // 没切到的工程标签是 visibility:hidden 藏着的(还占着位置),看算好的样式
+      if (getComputedStyle(el).visibility !== "visible") return;
+      el.focus();
+      // 真落进去了才算数,落不进去让后面的输入框接着试
+      if (document.activeElement !== el) return;
+      detail.done = true;
+      el.setSelectionRange(el.value.length, el.value.length);
+    };
+    window.addEventListener(FOCUS_CHAT_INPUT_EVENT, onFocus);
+    return () => window.removeEventListener(FOCUS_CHAT_INPUT_EVENT, onFocus);
+  }, []);
+
   // 引用进来的文字变成 Markdown 引用块,光标放到末尾接着写
   const lastQuote = useRef(quote?.n ?? 0);
   useEffect(() => {
@@ -707,36 +730,60 @@ export function AgentComposer({
       )}
       {branch && !compact && (
         <div className="mx-auto flex max-w-3xl items-center gap-2 px-2 pb-1.5 text-[12px] text-muted-foreground">
+          {/* 和左栏一样的层级:目录 › 产品 › 分支。字放大、产品白字加粗,分支
+              做成小胶囊:worktree 绿底带分支图标(和左栏开着的 worktree 一个颜色),
+              主工程的分支灰底,一眼分得开。worktree 只写分支名,目录名悬停看 */}
           <button
             type="button"
-            title="打开仓库"
+            title={`打开仓库${branch.worktree ? `\nworktree 目录:${branch.worktree}` : ""}`}
             onClick={() => onOpenRepo?.()}
-            className="flex min-w-0 items-center gap-1 rounded transition-colors hover:text-foreground"
+            // 整条做成一张卡片:浅底、细边、圆角,和聊天正文分开
+            className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border border-border/70 bg-foreground/[0.04] px-2.5 py-1 text-[12.5px] transition-colors hover:border-border hover:bg-foreground/[0.08]"
           >
-            <HugeiconsIcon
-              icon={GitBranchIcon}
-              size={12}
-              strokeWidth={1.75}
-              className="shrink-0"
-            />
+            {branch.folder && (
+              <>
+                <HugeiconsIcon
+                  icon={Folder01Icon}
+                  size={13}
+                  strokeWidth={1.75}
+                  className="shrink-0 text-foreground/60"
+                />
+                <span className="min-w-0 truncate text-foreground/70">
+                  {branch.folder}
+                </span>
+                <span className="shrink-0 text-muted-foreground/60">›</span>
+              </>
+            )}
             {branch.project && (
-              <>
-                <span className="shrink-0 text-foreground/80">
-                  {branch.project}
-                </span>
-                <span className="shrink-0 text-muted-foreground/50">·</span>
-              </>
+              <span className="flex shrink-0 items-center gap-1 font-semibold text-foreground">
+                <HugeiconsIcon
+                  icon={AndroidIcon}
+                  size={13}
+                  strokeWidth={1.75}
+                  className="shrink-0 text-emerald-500"
+                />
+                {branch.project}
+              </span>
             )}
-            {branch.worktree && (
-              <>
-                <span className="shrink-0 text-foreground/80">
-                  {branch.worktree}
-                </span>
-                <span className="shrink-0 text-muted-foreground/50">·</span>
-              </>
-            )}
-            <span className="min-w-0 truncate" title={branch.name}>
-              {branch.name}
+            <span className="shrink-0 text-muted-foreground/60">›</span>
+            <span
+              title={branch.name}
+              className={cn(
+                "flex min-w-0 items-center gap-1 rounded-md px-1.5 py-px",
+                branch.worktree
+                  ? "bg-emerald-500/15 text-emerald-400"
+                  : "bg-foreground/10 text-foreground/80",
+              )}
+            >
+              {branch.worktree && (
+                <HugeiconsIcon
+                  icon={GitBranchIcon}
+                  size={12}
+                  strokeWidth={2}
+                  className="shrink-0"
+                />
+              )}
+              <span className="min-w-0 truncate">{branch.name}</span>
             </span>
           </button>
           <span className="mr-4 ml-auto flex shrink-0 items-center gap-3 text-[11px]">
@@ -1059,6 +1106,10 @@ export function AgentComposer({
             </InlineMenu>
           </div>
           <span className={cn("flex-1", compact && "hidden")} />
+          {/* 最近:鼠标放上去就弹出开着终端的工程,点一下切过去 */}
+          <div className={cn(compact && "hidden")}>
+            <RecentSwitchMenu labelClass={wideLabel} />
+          </div>
           {/* 快捷指令:点开选一条,整理好的话直接发出去(Review、修复、同步…,
               能自己加) */}
           {/* 菜单以整行为准往上弹,在输入框中间居中(不跟着按钮偏到一边) */}

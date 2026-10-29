@@ -77,7 +77,21 @@ type Props = {
   onQuote: (text: string) => void;
   /** 直接发一句话(回复末尾问"要不要发/确认吗"时的快捷按钮用)。 */
   onReply?: (text: string) => void;
+  /** 会话没连上时给的"恢复会话":一行小字链接,挂在提示语下面。 */
+  onResume?: () => void;
 };
+
+function ResumeLink({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-2 cursor-pointer text-[12px] text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
+    >
+      恢复会话
+    </button>
+  );
+}
 
 /**
  * 条目之间的间距(照 Codex):对话之间留大空,连着的工具调用挤紧一点,读起来
@@ -1009,6 +1023,7 @@ export function AgentChatView({
   onPermission,
   onQuote,
   onReply,
+  onResume,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const turns = useMemo(() => chatTurns(items), [items]);
@@ -1274,6 +1289,11 @@ export function AgentChatView({
               {items.length === 0 && !working && !statusText && (
                 <div className="pt-24 text-center text-[13px] text-muted-foreground">
                   给 {agentName} 发条消息开始吧
+                  {onResume && (
+                    <div>
+                      <ResumeLink onClick={onResume} />
+                    </div>
+                  )}
                 </div>
               )}
               {items.map((item, i) => {
@@ -1482,6 +1502,11 @@ export function AgentChatView({
               {statusText && (
                 <div className="mt-6 text-center text-[12px] text-muted-foreground">
                   {statusText}
+                  {onResume && (
+                    <div>
+                      <ResumeLink onClick={onResume} />
+                    </div>
+                  )}
                 </div>
               )}
               {/* 回复已经在往外流了就不再挂"正在思考":它在文字下面跟着一跳一跳 */}

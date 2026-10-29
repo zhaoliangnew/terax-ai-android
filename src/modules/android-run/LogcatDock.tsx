@@ -18,7 +18,7 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { readApplicationId } from "./lib/adb";
 import { highlightSerial } from "./lib/highlightSerial";
-import { killAllLogcatSessions, useLogcatStore } from "./logcatStore";
+import { useLogcatStore } from "./logcatStore";
 import { useActiveProductConfig } from "./store";
 
 const LEVELS = ["V", "D", "I", "W", "E"] as const;
@@ -203,7 +203,6 @@ export default function LogcatDock() {
   const setActiveSession = useLogcatStore((s) => s.setActiveSession);
   const clearSession = useLogcatStore((s) => s.clearSession);
   const togglePause = useLogcatStore((s) => s.togglePause);
-  const pollAll = useLogcatStore((s) => s.pollAll);
 
   // Only this product's sessions are shown; processes for other products keep
   // running in the background but their tabs are hidden.
@@ -220,37 +219,6 @@ export default function LogcatDock() {
     sessions.find((s) => s.id === activeSessionId) ??
     sessions[sessions.length - 1] ??
     null;
-
-  // Poll loop (always on; sessions of hidden products keep updating too).
-  useEffect(() => {
-    const timer = setInterval(() => void pollAll(), 400);
-    return () => clearInterval(timer);
-  }, [pollAll]);
-
-  // Kill child processes when the window goes away.
-  useEffect(() => killAllLogcatSessions, []);
-
-  // First time a product has no sessions: default to its package logcat.
-  const startingRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!projectRoot || !selectedSerial || sessions.length > 0) return;
-    if (startingRef.current.has(projectRoot)) return;
-    startingRef.current.add(projectRoot);
-    void (async () => {
-      let pkg: string | null = null;
-      if (selectedModule) {
-        pkg = await readApplicationId(projectRoot, selectedModule);
-      }
-      await startSession(projectRoot, selectedSerial, pkg);
-      startingRef.current.delete(projectRoot);
-    })();
-  }, [
-    projectRoot,
-    sessions.length,
-    selectedSerial,
-    selectedModule,
-    startSession,
-  ]);
 
   const visibleLines = useMemo(() => {
     if (!active) return [];

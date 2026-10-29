@@ -356,7 +356,7 @@ async function ensureTaskWorktreeOnce(
 
 /**
  * 任务专属 worktree:已有就复用,分支还在就挂回,都没有才基于主仓库
- * 当前分支新建 worktree_<编号>_<标题>(Windows 只留编号;认已有的只看
+ * 当前分支新建 release_<编号>_<标题>(Windows 只留编号;认已有的只看
  * 编号,标题改过也能找回来)。返回的 path 是 AI 的开发目录(工程在
  * 大仓库子目录里时是 worktree 里对应的子目录)。连点两下只会建一个。
  */

@@ -120,7 +120,7 @@ export function TaskLaunchConfirm({
   const serial = item.serialNumber;
   const [probe, setProbe] = useState<Probe | null>(null);
   // 显示的分支名:已有的按实际名字(标题改过也认得出),没有就是将要建的
-  // worktree_<编号>_<标题>(Windows 只留编号)
+  // release_<编号>_<标题>(Windows 只留编号)
   const wtBranch = serial
     ? probe?.taskBranch || taskWorktreeBranch(serial, item.subject, IS_WINDOWS)
     : null;

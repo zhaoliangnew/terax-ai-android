@@ -134,21 +134,21 @@ describe("parseBindings", () => {
 
 describe("taskWorktreeBranch", () => {
   it("keeps an ASCII serial", () => {
-    expect(taskWorktreeBranch("YOEZ-402")).toBe("worktree_YOEZ-402");
-    expect(taskWorktreeBranch(" YOEZ-402 ")).toBe("worktree_YOEZ-402");
+    expect(taskWorktreeBranch("YOEZ-402")).toBe("release_YOEZ-402");
+    expect(taskWorktreeBranch(" YOEZ-402 ")).toBe("release_YOEZ-402");
   });
 
   it("replaces anything git or Windows paths dislike", () => {
-    expect(taskWorktreeBranch("需求 12")).toBe("worktree__12");
-    expect(taskWorktreeBranch("a/b:c*d?")).toBe("worktree_a_b_c_d_");
-    expect(taskWorktreeBranch("a..b")).toBe("worktree_a_b");
-    expect(taskWorktreeBranch("x.lock")).toBe("worktree_x");
-    expect(taskWorktreeBranch("x.")).toBe("worktree_x");
+    expect(taskWorktreeBranch("需求 12")).toBe("release__12");
+    expect(taskWorktreeBranch("a/b:c*d?")).toBe("release_a_b_c_d_");
+    expect(taskWorktreeBranch("a..b")).toBe("release_a_b");
+    expect(taskWorktreeBranch("x.lock")).toBe("release_x");
+    expect(taskWorktreeBranch("x.")).toBe("release_x");
   });
 
   it("never returns a bare prefix", () => {
-    expect(taskWorktreeBranch("")).toBe("worktree_task");
-    expect(taskWorktreeBranch("...")).toBe("worktree__");
+    expect(taskWorktreeBranch("")).toBe("release_task");
+    expect(taskWorktreeBranch("...")).toBe("release__");
   });
 });
 
@@ -169,7 +169,7 @@ function entry(p: Partial<GitBranchEntry>): GitBranchEntry {
 
 describe("taskBranchState", () => {
   const serial = "YOEZ-402";
-  const b = "worktree_YOEZ-402";
+  const b = "release_YOEZ-402";
 
   it("finds the worktree for the task branch", () => {
     const list = [
@@ -177,18 +177,18 @@ describe("taskBranchState", () => {
       entry({
         name: b,
         kind: "worktree",
-        worktreePath: "/r/.worktree/worktree_YOEZ-402/",
+        worktreePath: "/r/.worktree/release_YOEZ-402/",
       }),
     ];
     expect(taskBranchState(list, serial)).toEqual({
       kind: "worktree",
-      path: "/r/.worktree/worktree_YOEZ-402",
+      path: "/r/.worktree/release_YOEZ-402",
       branch: b,
     });
   });
 
   it("recognises a titled branch even after the title changed", () => {
-    const titled = "worktree_YOEZ-402_米面柜初始化引导";
+    const titled = "release_YOEZ-402_米面柜初始化引导";
     const list = [
       entry({
         name: titled,
@@ -200,6 +200,15 @@ describe("taskBranchState", () => {
       kind: "worktree",
       path: `/r/.worktree/${titled}`,
       branch: titled,
+    });
+  });
+
+  it("still recognises branches made with the old worktree_ prefix", () => {
+    const old = "worktree_YOEZ-402_米面柜";
+    expect(taskBranchState([entry({ name: old })], serial)).toEqual({
+      kind: "branch",
+      isHead: false,
+      branch: old,
     });
   });
 
@@ -217,8 +226,9 @@ describe("taskBranchState", () => {
       entry({
         name: `${b}-2`,
         kind: "worktree",
-        worktreePath: "/r/.worktree/worktree_YOEZ-402-2",
+        worktreePath: "/r/.worktree/release_YOEZ-402-2",
       }),
+      entry({ name: "release_YOEZ-4021_别的任务" }),
       entry({ name: "worktree_YOEZ-4021_别的任务" }),
     ];
     expect(taskBranchState(list, serial)).toEqual({ kind: "none" });
@@ -229,19 +239,19 @@ describe("taskWorktreeBranch with title", () => {
   it("appends a cleaned title, at most 20 chars", () => {
     expect(
       taskWorktreeBranch("YOEZ-402", "【部队产品】米面柜-【初始化引导】"),
-    ).toBe("worktree_YOEZ-402_部队产品米面柜-初始化引导");
+    ).toBe("release_YOEZ-402_部队产品米面柜-初始化引导");
     expect(
       taskWorktreeBranch(
         "YOEZ-1",
         "整理设备流量 使用情况/及:优化*方案?第一周把常用设备整理出来",
       ),
-    ).toBe("worktree_YOEZ-1_整理设备流量_使用情况_及_优化_方案");
+    ).toBe("release_YOEZ-1_整理设备流量_使用情况_及_优化_方案");
   });
 
   it("drops the title on Windows (ascii) or when it is empty", () => {
     expect(taskWorktreeBranch("YOEZ-402", "米面柜", true)).toBe(
-      "worktree_YOEZ-402",
+      "release_YOEZ-402",
     );
-    expect(taskWorktreeBranch("YOEZ-402", "【】")).toBe("worktree_YOEZ-402");
+    expect(taskWorktreeBranch("YOEZ-402", "【】")).toBe("release_YOEZ-402");
   });
 });

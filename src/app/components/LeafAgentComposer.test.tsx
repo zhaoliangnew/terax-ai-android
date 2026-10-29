@@ -83,6 +83,7 @@ import {
 type NodeProps = {
   children?: ReactNode;
   onClick?: () => void;
+  onResume?: () => void;
   onPick?: (value: string) => void;
   options?: { value: string }[];
   onSend?: (text: string, attachments: string[]) => void;
@@ -110,7 +111,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("手动恢复聊天会话", () => {
+describe("恢复聊天会话", () => {
   it("新窗格只切到聊天,不连接 AI", () => {
     LeafAgentChat(props);
     expect(state.setMode).toHaveBeenCalledWith(7, "chat");
@@ -118,13 +119,13 @@ describe("手动恢复聊天会话", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("显示聊天和恢复按钮不会连接,点击恢复后才连接", () => {
+  it("显示聊天和恢复链接不会连接,点击恢复后才连接", () => {
     state.modes[7] = "chat";
     const tree = LeafAgentChat(props);
     expect(api.ensure).not.toHaveBeenCalled();
-    const restore = elements(tree).find((el) => el.props.onClick);
+    const restore = elements(tree).find((el) => el.props.onResume);
     expect(restore).toBeDefined();
-    restore?.props.onClick?.();
+    restore?.props.onResume?.();
     expect(api.ensure).toHaveBeenCalledExactlyOnceWith(7, "/repo");
   });
 
@@ -133,18 +134,14 @@ describe("手动恢复聊天会话", () => {
     session.value = { status, items: [] };
     const tree = LeafAgentChat(props);
     expect(api.ensure).not.toHaveBeenCalled();
-    expect(elements(tree).some((el) => el.props.onClick)).toBe(true);
+    expect(elements(tree).some((el) => el.props.onResume)).toBe(true);
   });
 
-  it("右栏占满时的紧凑聊天也提供手动恢复按钮,不自动连接", () => {
+  it("没连上时紧凑输入框不占位置,也不自动连接", () => {
     state.modes[7] = "chat";
-    const tree = LeafAgentComposer({ ...props, compact: true });
+    expect(LeafAgentComposer({ ...props, compact: true })).toBeNull();
     expect(api.ensure).not.toHaveBeenCalled();
     expect(api.requestModels).not.toHaveBeenCalled();
-    const restore = elements(tree).find((el) => el.props.onClick);
-    expect(restore).toBeDefined();
-    restore?.props.onClick?.();
-    expect(api.ensure).toHaveBeenCalledExactlyOnceWith(7, "/repo");
   });
 
   it("用户已发起连接时允许输入第一条消息,不会因等待 ready 卡住", () => {
@@ -166,7 +163,7 @@ describe("手动恢复聊天会话", () => {
     expect(api.ensure).not.toHaveBeenCalled();
   });
 
-  it("切换 AI 只更换界面,不连接新的 AI", () => {
+  it("聊天里手点换 AI,顺手连上新的 AI", () => {
     state.modes[7] = "chat";
     const tree = LeafViewSwitch(props);
     const agents = elements(tree).find((el) =>
@@ -175,7 +172,7 @@ describe("手动恢复聊天会话", () => {
     expect(agents).toBeDefined();
     agents?.props.onPick?.("codex");
     expect(state.setAgent).toHaveBeenCalledWith(7, "codex");
-    expect(api.ensure).not.toHaveBeenCalled();
+    expect(api.ensure).toHaveBeenCalledExactlyOnceWith(7, "/repo");
   });
 
   it("在命令行模式更换 AI 不会自动启动新的命令行进程", () => {
@@ -202,18 +199,18 @@ describe("手动恢复聊天会话", () => {
     state.modes[7] = "chat";
     const tree = LeafAgentChat({ ...props, getCwd: () => null });
     elements(tree)
-      .find((el) => el.props.onClick)
-      ?.props.onClick?.();
+      .find((el) => el.props.onResume)
+      ?.props.onResume?.();
     expect(api.ensure).not.toHaveBeenCalled();
   });
 
-  it("点击聊天视图只切换界面,不恢复连接", () => {
+  it("手点聊天视图时把没连上的会话接上", () => {
     const tree = LeafViewSwitch(props);
     const views = elements(tree).find((el) =>
       el.props.options?.some((o) => o.value === "chat"),
     );
     views?.props.onPick?.("chat");
     expect(state.setMode).toHaveBeenCalledWith(7, "chat");
-    expect(api.ensure).not.toHaveBeenCalled();
+    expect(api.ensure).toHaveBeenCalledExactlyOnceWith(7, "/repo");
   });
 });

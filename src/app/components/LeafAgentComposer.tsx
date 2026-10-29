@@ -1,4 +1,3 @@
-import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { saveAgent, savedAgent } from "@/modules/agents/lib/chatPrefs";
 import {
@@ -157,7 +156,7 @@ function statusText(
 ) {
   if (status === "starting") return `正在启动 ${agentName}…`;
   if (status === "error") return `启动失败:${error ?? "未知错误"}`;
-  if (status === "closed") return "会话已结束,点击恢复会话后继续聊天";
+  if (status === "closed") return "会话已结束";
   return null;
 }
 
@@ -180,6 +179,23 @@ function openLeafChat(
   store.setAgent(leafId, who);
   saveAgent(dir, who);
   store.setMode(leafId, "chat");
+}
+
+/**
+ * 手点 Claude/聊天时顺手把没连上的会话接上:不然还得把鼠标挪到窗格最底下
+ * 去点"恢复会话"。重启后不自动连,只在点的这一下连。
+ */
+function connectLeafChat(
+  leafId: number,
+  getCwd: (leafId: number) => string | null,
+  agent: ChatAgent,
+) {
+  const dir = getCwd(leafId);
+  if (!dir) return;
+  const session = chatSessionNow(agent, leafId);
+  if (session && session.status !== "closed" && session.status !== "error")
+    return;
+  CHAT_APIS[agent].ensure(leafId, dir);
 }
 
 /** 两个一组的小切换(Claude | Codex、聊天 | 终端):点一下就切。 */
@@ -314,9 +330,10 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
 
   const openTerminal = () => setMode(leafId, "terminal");
   const show = (view: AgentViewMode, who: CliAgent) => {
-    if (view === "chat" && isChatCapable(who))
+    if (view === "chat" && isChatCapable(who)) {
       openLeafChat(leafId, getCwd, who);
-    else if (view !== "terminal") openLeafCli(leafId, getCwd, who);
+      connectLeafChat(leafId, getCwd, who);
+    } else if (view !== "terminal") openLeafCli(leafId, getCwd, who);
     else openTerminal();
   };
   // 换 AI:在聊天/命令行里就直接换过去(没有聊天的 AI 落到命令行);
@@ -326,6 +343,7 @@ export function LeafViewSwitch({ leafId, getCwd }: Props) {
     saveAgent(getCwd(leafId), who);
     if (mode === "chat" && isChatCapable(who)) {
       openLeafChat(leafId, getCwd, who);
+      connectLeafChat(leafId, getCwd, who);
     } else if (mode !== "terminal") {
       setMode(leafId, "terminal");
     }
@@ -426,32 +444,19 @@ function LeafCliTerminals({
   );
 }
 
-function resumeChatControl(
+function resumeChat(
   leafId: number,
   getCwd: (leafId: number) => string | null,
   agent: ChatAgent,
 ) {
-  return (
-    <div className="flex shrink-0 flex-col items-center gap-2 px-4 py-6">
-      <p className="text-xs text-muted-foreground">
-        尚未连接 {AGENT_NAMES[agent]},点击后恢复会话
-      </p>
-      <Button
-        onClick={() => {
-          const dir = getCwd(leafId);
-          if (!dir) {
-            toast.error("这个终端还不知道在哪个目录,先在里面 cd 一下");
-            return;
-          }
-          useAgentViewStore.getState().setAgent(leafId, agent);
-          saveAgent(dir, agent);
-          CHAT_APIS[agent].ensure(leafId, dir);
-        }}
-      >
-        恢复 {AGENT_NAMES[agent]} 会话
-      </Button>
-    </div>
-  );
+  const dir = getCwd(leafId);
+  if (!dir) {
+    toast.error("这个终端还不知道在哪个目录,先在里面 cd 一下");
+    return;
+  }
+  useAgentViewStore.getState().setAgent(leafId, agent);
+  saveAgent(dir, agent);
+  CHAT_APIS[agent].ensure(leafId, dir);
 }
 
 /**
@@ -506,10 +511,14 @@ export function LeafAgentChat({
                 }
                 onQuote={(text) => addQuote(leafId, text)}
                 onReply={(text) => api.send(leafId, text, [])}
+                onResume={
+                  disconnected
+                    ? () => resumeChat(leafId, getCwd, agent)
+                    : undefined
+                }
               />
             </Suspense>
           </div>
-          {disconnected && resumeChatControl(leafId, getCwd, agent)}
         </div>
       )}
       <LeafCliTerminals
@@ -539,6 +548,7 @@ function useLeafBranch(
 ) {
   const [branch, setBranch] = useState<{
     name: string;
+    folder: string;
     project: string;
     worktree: string | null;
     changed: number;
@@ -558,7 +568,7 @@ function useLeafBranch(
             return;
           }
           const name = r.isDetached ? `${r.branch}(游离)` : r.branch;
-          const { project, worktree } = repoLabel(r.repoRoot);
+          const { folder, project, worktree } = repoLabel(r.repoRoot);
           // 读不到改动数就当 0,不该连分支一起不显示
           const changed = await native
             .gitStatus(r.repoRoot)
@@ -567,11 +577,12 @@ function useLeafBranch(
           if (!alive) return;
           setBranch((cur) =>
             cur?.name === name &&
+            cur.folder === folder &&
             cur.project === project &&
             cur.worktree === worktree &&
             cur.changed === changed
               ? cur
-              : { name, project, worktree, changed },
+              : { name, folder, project, worktree, changed },
           );
         })
         .catch(() => {});
@@ -612,9 +623,8 @@ export function LeafAgentComposer({
     if (needModels) api.requestModels(leafId);
   }, [needModels, leafId, agent, session?.status]);
   if (mode !== "chat") return null;
-  if (!connected || !session) {
-    return compact ? resumeChatControl(leafId, getCwd, agent) : null;
-  }
+  // 没连上时"恢复会话"挂在聊天区提示语下面,输入框这里不占位置
+  if (!connected || !session) return null;
 
   const cwd = () => getCwd(leafId);
   return (

@@ -5,6 +5,7 @@ import {
 } from "@/components/ui/resizable";
 import { cn } from "@/lib/utils";
 import { native } from "@/modules/ai/lib/native";
+import { useEffect } from "react";
 import { SmartPhone01Icon } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { AndroidRunToolbar } from "./AndroidRunToolbar";
@@ -12,6 +13,7 @@ import { DeviceManagerPanel } from "./DeviceManagerPanel";
 import { DeviceMirror } from "./DeviceMirror";
 import { isEmulatorSerial } from "./lib/emulator";
 import LogcatPanel from "./LogcatDock";
+import { killAllLogcatSessions, useLogcatStore } from "./logcatStore";
 import { ScaleSimulator } from "./ScaleSimulator";
 import { highlightSerial } from "./lib/highlightSerial";
 import { useMirrorAnnotate } from "./lib/mirrorAnnotate";
@@ -32,14 +34,35 @@ const QUALITY_OPTIONS: [MirrorQuality, string][] = [
   ["hd", "高清"],
 ];
 
-/** 右栏"投屏"tab:上半屏幕镜像(含设备/运行工具栏),下半 Logcat。 */
+/**
+ * 右栏"投屏"tab:屏幕镜像(含设备/运行工具栏)。下半的 Logcat 面板默认不开
+ * —— 刷屏时持续重渲染很耗性能,平时又用不上;只有当前产品有会话(点了
+ * "运行"看 gradle 输出)时才出现,关掉最后一个 tab 就收起。
+ */
 export default function DevicePanel() {
   const devices = useAndroidRunStore((s) => s.devices);
   const setMirroring = useAndroidRunStore((s) => s.setMirroring);
   const setDeviceManagerOpen = useAndroidRunStore(
     (s) => s.setDeviceManagerOpen,
   );
-  const { serial: selectedSerial, mirroring } = useActiveProductConfig();
+  const {
+    root: projectRoot,
+    serial: selectedSerial,
+    mirroring,
+  } = useActiveProductConfig();
+  const pollAll = useLogcatStore((s) => s.pollAll);
+  const showLogcat = useLogcatStore((s) =>
+    s.sessions.some((x) => x.product === projectRoot),
+  );
+
+  // 轮询放这里而不是面板里:面板收起时别的产品的"运行"还在后台出输出
+  useEffect(() => {
+    const timer = setInterval(() => void pollAll(), 400);
+    return () => clearInterval(timer);
+  }, [pollAll]);
+
+  // Kill child processes when the window goes away.
+  useEffect(() => killAllLogcatSessions, []);
   const annotatingSerial = useMirrorAnnotate((s) => s.serial);
   const quality = useMirrorQuality((s) => s.quality);
   const setQuality = useMirrorQuality((s) => s.setQuality);
@@ -56,6 +79,8 @@ export default function DevicePanel() {
       <ResizablePanel id="mirror" defaultSize="65%" minSize="20%">
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-2.5 py-1.5">
+            {/* 设备/模块/分支/安装放最左:点完"投屏"标签,鼠标不用再跑到最右边 */}
+            <AndroidRunToolbar compact />
             {device && (
               <span className="truncate text-[13px] text-muted-foreground">
                 {device.vendor ? `${device.vendor} ` : ""}
@@ -139,7 +164,6 @@ export default function DevicePanel() {
                   外部窗口
                 </button>
               )}
-              <AndroidRunToolbar compact />
             </div>
           </div>
           <div className="relative min-h-0 flex-1">
@@ -184,13 +208,17 @@ export default function DevicePanel() {
           </div>
         </div>
       </ResizablePanel>
-      <ResizableHandle
-        withHandle
-        className="h-2.5 cursor-row-resize bg-border/50 transition-colors hover:bg-border"
-      />
-      <ResizablePanel id="logcat" defaultSize="35%" minSize="15%">
-        <LogcatPanel />
-      </ResizablePanel>
+      {showLogcat && (
+        <>
+          <ResizableHandle
+            withHandle
+            className="h-2.5 cursor-row-resize bg-border/50 transition-colors hover:bg-border"
+          />
+          <ResizablePanel id="logcat" defaultSize="35%" minSize="15%">
+            <LogcatPanel />
+          </ResizablePanel>
+        </>
+      )}
     </ResizablePanelGroup>
   );
 }

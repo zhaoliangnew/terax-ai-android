@@ -4,6 +4,7 @@ import { repoLabel } from "./repoLabel";
 describe("repoLabel", () => {
   it("names the main project for a worktree", () => {
     expect(repoLabel("/w/app-super/.worktree/wt_公共参数")).toEqual({
+      folder: "w",
       project: "app-super",
       worktree: "wt_公共参数",
     });
@@ -11,6 +12,7 @@ describe("repoLabel", () => {
 
   it("uses the repo folder itself otherwise", () => {
     expect(repoLabel("/w/app-super/")).toEqual({
+      folder: "w",
       project: "app-super",
       worktree: null,
     });
